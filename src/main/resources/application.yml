@@ -32,7 +32,7 @@ server:
 
 app:
   jwt:
-    secret: ${JWT_SECRET}
+    secret: ${JWT_SECRET:2PtgOzmpdKIUAUgwwgZ1jfog2J0ABc1FMHZaVwVC2YdQGf6BcRRCTeZX36BGzZs3}
     expiration-ms: 3600000
 
 springdoc:

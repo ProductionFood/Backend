@@ -20,5 +20,5 @@ public record CrearUsuarioRequest(
     String password,
 
     @NotNull(message = "El rol es obligatorio")
-    Long idRol
+    Integer idRol
 ) {}

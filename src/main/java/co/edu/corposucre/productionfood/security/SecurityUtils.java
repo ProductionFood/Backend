@@ -8,7 +8,7 @@ public final class SecurityUtils {
     private SecurityUtils() {
     }
 
-    public static Long idUsuarioActual() {
+    public static Integer idUsuarioActual() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof UsuarioAutenticado u) {
             return u.idUsuario();

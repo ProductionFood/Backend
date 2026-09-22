@@ -38,7 +38,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         "ROLE_" + claims.get("rol", String.class)));
                 var auth = new UsernamePasswordAuthenticationToken(
                         new UsuarioAutenticado(
-                                Long.valueOf(claims.getSubject()),
+                                Integer.valueOf(claims.getSubject()),
                                 claims.get("correo", String.class),
                                 claims.get("nombre", String.class),
                                 claims.get("rol", String.class)),

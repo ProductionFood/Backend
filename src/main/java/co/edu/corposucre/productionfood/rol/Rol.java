@@ -11,7 +11,7 @@ public class Rol {
 
     @Id
     @Column(name = "id_rol")
-    private Long idRol;
+    private Integer idRol;
 
     @Column(name = "nombre", nullable = false, length = 50)
     private String nombre;
@@ -22,17 +22,17 @@ public class Rol {
     public Rol() {
     }
 
-    public Rol(Long idRol, String nombre, String descripcion) {
+    public Rol(Integer idRol, String nombre, String descripcion) {
         this.idRol = idRol;
         this.nombre = nombre;
         this.descripcion = descripcion;
     }
 
-    public Long getIdRol() {
+    public Integer getIdRol() {
         return idRol;
     }
 
-    public void setIdRol(Long idRol) {
+    public void setIdRol(Integer idRol) {
         this.idRol = idRol;
     }
 

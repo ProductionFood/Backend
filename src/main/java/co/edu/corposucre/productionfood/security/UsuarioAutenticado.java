@@ -8,7 +8,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 public record UsuarioAutenticado(
-    Long idUsuario,
+    Integer idUsuario,
     String correo,
     String nombre,
     String rol
