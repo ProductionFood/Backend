@@ -1,9 +1,10 @@
 .env
 *.env.local
 application-local.properties
-backend/target/
-frontend/node_modules/
-frontend/dist/
+target/
+class/
 .idea/
 .vscode/
 *.log
+*.class
+.atl/
