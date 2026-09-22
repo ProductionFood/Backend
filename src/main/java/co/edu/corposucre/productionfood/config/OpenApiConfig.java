@@ -14,7 +14,7 @@ public class OpenApiConfig {
         return new OpenAPI()
                 .info(new Info()
                         .title("ProductionFood API")
-                        .description("API para el sistema de gestión de producción de panadería")
+                        .description("API para el sistema de gestión de productora de alimentos")
                         .version("1.0.0"));
     }
 }

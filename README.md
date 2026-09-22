@@ -1,6 +1,6 @@
 # Backend — ProductionFood
 
-API REST para el sistema de gestión de producción de panadería.
+API REST para el sistema de gestión de productora de alimentos.
 
 ## Stack
 
