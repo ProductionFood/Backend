@@ -42,6 +42,19 @@
             },
             "description": "Login con el administrador semilla para obtener el token JWT"
           },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set(\"token\", json.token);",
+                  "console.log(\"Token guardado: \" + json.token);"
+                ]
+              }
+            }
+          ],
           "response": []
         }
       ]
