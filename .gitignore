@@ -1,0 +1,10 @@
+.env
+*.env.local
+application-local.properties
+target/
+class/
+.idea/
+.vscode/
+*.log
+*.class
+.atl/

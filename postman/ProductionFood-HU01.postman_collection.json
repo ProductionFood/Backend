@@ -1,0 +1,221 @@
+{
+  "info": {
+    "name": "ProductionFood - HU-01 Registro de Usuarios",
+    "_postman_id": "hu01-registro-usuarios",
+    "description": "Colección para probar los endpoints de HU-01: registro de usuarios y listado de roles.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Setup",
+      "description": "Obtener token de autenticación",
+      "item": [
+        {
+          "name": "Login - Obtener Token",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            },
+            "description": "Login con el administrador semilla para obtener el token JWT"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set(\"token\", json.token);",
+                  "console.log(\"Token guardado: \" + json.token);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 - Roles",
+      "description": "Endpoints de gestión de roles",
+      "item": [
+        {
+          "name": "Listar Roles (GET /api/v1/roles)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/roles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "roles"]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Listar todos los roles del sistema. Requiere rol ADMIN."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 - Usuarios",
+      "description": "Endpoints de gestión de usuarios",
+      "item": [
+        {
+          "name": "Crear Usuario (POST /api/v1/usuarios)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "usuarios"]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"María Gómez\",\n  \"correo\": \"maria@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            },
+            "description": "Registrar un nuevo usuario. Requiere rol ADMIN. Retorna 201 con Location."
+          },
+          "response": []
+        },
+        {
+          "name": "Crear Usuario - Correo Duplicado (409)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "usuarios"]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Otra María\",\n  \"correo\": \"maria@productionfood.local\",\n  \"password\": \"OtraClave1*\",\n  \"idRol\": 3\n}"
+            },
+            "description": "Intentar crear usuario con correo ya existente. Debe retornar 409 CORREO_DUPLICADO."
+          },
+          "response": []
+        },
+        {
+          "name": "Crear Usuario - Datos Inválidos (400)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "usuarios"]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"\",\n  \"correo\": \"no-es-correo\",\n  \"password\": \"123\",\n  \"idRol\": null\n}"
+            },
+            "description": "Intentar crear usuario con datos inválidos. Debe retornar 400 VALIDACION_FALLIDA con fieldErrors."
+          },
+          "response": []
+        },
+        {
+          "name": "Crear Usuario - Rol Inexistente (409)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "usuarios"]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Test Rol\",\n  \"correo\": \"test@productionfood.local\",\n  \"password\": \"Test1234*\",\n  \"idRol\": 999\n}"
+            },
+            "description": "Intentar crear usuario con rol que no existe. Debe retornar 409 ROL_INEXISTENTE."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Roles sin permisos (403)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/roles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "roles"]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Probar acceso con token de usuario que no es ADMIN. Debe retornar 403."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
