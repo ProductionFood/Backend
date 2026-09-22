@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: productionfood-backend
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:productionfood}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=America/Bogota
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:local}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+        default_schema: productionfood
+
+  jackson:
+    time-zone: America/Bogota
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-ms: 3600000
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
