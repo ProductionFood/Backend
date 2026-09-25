@@ -23,7 +23,7 @@
   ],
   "item": [
     {
-      "name": "Listar Roles sin permisos (403)",
+      "name": "Listar Roles sin sesión (401)",
       "request": {
         "method": "GET",
         "url": {
@@ -37,7 +37,7 @@
             "roles"
           ]
         },
-        "description": "Sin token de autenticación — se ejecuta ANTES del login. El endpoint exige rol ADMIN y no hay credenciales: debe retornar 403."
+        "description": "Sin token de autenticación — se ejecuta ANTES del login. SEC-01: debe responder 401 NO_AUTENTICADO con el mensaje del contrato."
       },
       "response": [],
       "event": [
@@ -46,7 +46,10 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test(\"Sin credenciales → 403\", () => pm.response.to.have.status(403));"
+              "pm.test(\"Sin sesión → 401 NO_AUTENTICADO\", () => {",
+              "    pm.response.to.have.status(401);",
+              "    pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\");",
+              "});"
             ]
           }
         }
