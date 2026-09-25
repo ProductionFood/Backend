@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -54,6 +55,19 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getBody().code()).isEqualTo("RECURSO_NO_ENCONTRADO");
         assertThat(resp.getBody().message())
                 .isEqualTo("No se encontró usuario con id 99.");
+    }
+
+    @Test
+    @DisplayName("Acceso denegado responde 403 con code SIN_PERMISO del contrato")
+    void accesoDenegadoResponde403() {
+        var resp = handler.accesoDenegado(
+                new AccessDeniedException("Rol insuficiente."), req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("SIN_PERMISO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("No tiene permisos para realizar esta acción.");
     }
 
     @Test

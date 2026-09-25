@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -49,6 +50,14 @@ public class GlobalExceptionHandler {
         log.warn("Violación de integridad en {}", req.getRequestURI(), ex);
         return build(HttpStatus.CONFLICT, "CONFLICTO_INTEGRIDAD",
                      "La operación entra en conflicto con datos existentes.",
+                     req.getRequestURI(), List.of());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    ResponseEntity<ErrorResponse> accesoDenegado(
+            AccessDeniedException ex, HttpServletRequest req) {
+        return build(HttpStatus.FORBIDDEN, "SIN_PERMISO",
+                     "No tiene permisos para realizar esta acción.",
                      req.getRequestURI(), List.of());
     }
 
