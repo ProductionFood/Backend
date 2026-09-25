@@ -1,9 +1,11 @@
-# Hechos — historias de usuario cerradas
+# Hechos — lo que el Backend entregó por HU
 
-Una HU está "hecha" cuando pasa los criterios de cierre de QA, no cuando el código está
-escrito. Este criterio sale de `../../../docs/00-base/05-ESTANDARES-QA.md` §9.
+Este directorio registra lo que el **Backend** hizo por cada historia de usuario, sin
+importar el estado de QA: qué se construyó, el contrato, evidencia de verificación y
+deudas. La verificación de QA es un checklist aparte (§9 de
+`../../../docs/00-base/05-ESTANDARES-QA.md`), referenciada en cada ficha.
 
-## Criterios de cierre (resumen)
+## Criterios de cierre QA (referencia, los ejecuta QA)
 
 - [ ] 100% de los casos de `tarea-qa.md` ejecutados.
 - [ ] 100% de los positivos pasan.
@@ -19,9 +21,10 @@ escrito. Este criterio sale de `../../../docs/00-base/05-ESTANDARES-QA.md` §9.
 
 | | |
 |---|---|
-| Fecha de cierre | YYYY-MM-DD |
+| Fecha de entrega | YYYY-MM-DD |
 | Commits / PR | <links> |
 | Colección Postman | <archivo y carpeta> |
+| Estado QA | <pendiente / ejecutado, con resultado> |
 
 ## Qué se construyó
 
@@ -35,14 +38,10 @@ Reglas de negocio implementadas (las que aplican de `especificacion.md`).
 
 Request y response de ejemplo reales (copiados de una ejecución pasada, no inventados).
 
-## Evidencia QA
+## Evidencia (verificación backend)
 
-Checklist ejecutado contra `tarea-qa.md`:
-
-- [ ] CP-01 ...
-- [ ] CP-02 ...
-
-Batería de seguridad SEC-01..SEC-05: resultado.
+Lo que el Backend corrió: `mvn test`, colección newman y chequeos de runtime, con los
+resultados exactos. Estado de QA va en la fila `Estado QA` de la cabecera, no aquí.
 
 ## Desviaciones vs especificación
 
@@ -55,9 +54,6 @@ Defectos menores aceptados al cerrar, o "ninguno".
 
 ## Índice de HUs cerradas
 
-| HU | Título | Cerrada |
+| HU | Título | Entregada |
 |---|---|---|
-| — | (ninguna todavía) | — |
-
-> **HU-01 está en curso**: defecto de 409 falso en creación de usuarios.
-> Diagnóstico y plan en `../../plans/Reestructuracion-HU-01.md`.
+| HU-01 | Registro de usuarios | 2026-09-25 · [`HU-01-registro-usuarios.md`](HU-01-registro-usuarios.md) |
