@@ -8,11 +8,14 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+
+import co.edu.corposucre.productionfood.usuario.UsuarioRepository;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
@@ -21,9 +24,11 @@ import io.jsonwebtoken.JwtException;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final UsuarioRepository usuarioRepository;
 
-    public JwtAuthenticationFilter(JwtService jwtService) {
+    public JwtAuthenticationFilter(JwtService jwtService, UsuarioRepository usuarioRepository) {
         this.jwtService = jwtService;
+        this.usuarioRepository = usuarioRepository;
     }
 
     @Override
@@ -33,6 +38,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")) {
             try {
                 Claims claims = jwtService.validarYExtraer(header.substring(7));
+                var usuario = usuarioRepository.findById(Integer.valueOf(claims.getSubject()));
+                if (usuario.isEmpty() || !Boolean.TRUE.equals(usuario.get().getEstado())) {
+                    RespuestaSeguridad.escribir(res, req, HttpStatus.FORBIDDEN,
+                            "USUARIO_INACTIVO", "Su usuario está desactivado. Contacte al administrador.");
+                    return;
+                }
                 var authorities = List.of(
                     new org.springframework.security.core.authority.SimpleGrantedAuthority(
                         "ROLE_" + claims.get("rol", String.class)));
