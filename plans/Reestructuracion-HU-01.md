@@ -4,7 +4,7 @@
 |---|---|
 | Fecha | 2026-09-24 |
 | Alcance | Diagnóstico del 409 falso, migración a Flyway, base de datos en blanco, carpeta `Docs/` |
-| Estado del plan | **Aprobado, NO implementado** — solo se crearon `Docs/` y este archivo |
+| Estado del plan | **Implementado** — fases A-D completas y verificación §5 en verde (2026-09-25) |
 | Enlace | Defecto y contexto en `Docs/Manuales_Consumo_Frontend/HU-01-registro-usuarios.md` |
 
 ## 1. Diagnóstico del 409 falso (causa raíz confirmada)
@@ -101,7 +101,7 @@ nuevo (probado con `cocheroc@productionfood.local`).
 - [x] `Docs/Manuales_Consumo_Frontend/HU-01-registro-usuarios.md` — manual con limitaciones
 - [x] `Docs/Postman/` — colección movida desde `postman/` (`git mv`)
 - [x] `plans/Reestructuracion-HU-01.md` — este archivo
-- [ ] Actualizar `../../docs/00-base/09-SETUP-ENTORNO.md` y la ruta de migraciones de la
+- [x] Actualizar `../../docs/00-base/09-SETUP-ENTORNO.md` y la ruta de migraciones de la
       regla 4 en `../../docs/README.md` (repo `docs`, se hace en fase C)
 
 ## 4. Orden de ejecución (commits atómicos)
@@ -118,14 +118,19 @@ nuevo (probado con `cocheroc@productionfood.local`).
 Los renombrados de SQL no cuentan para el recuento de líneas (movimientos sin cambio de
 contenido); el bug y su test caben en commits < 50 líneas.
 
+**Ejecutado (2026-09-25):** los 6 commits del plan, más `fix(backend): añadir
+spring-boot-flyway` (en Boot 4 la auto-config de Flyway vive en un módulo propio: sin él
+la app arranca sin migrar y sin error) y la rama apilada `test/HU-01-unitarios` con el fix
+del login de usuario inactivo y 27 tests unitarios en español.
+
 ## 5. Criterios de verificación global
 
-- [ ] `docker compose down -v` → compose nuevo → DB vacía al entrar (solo `information_schema` + `productionfood` sin tablas)
-- [ ] Arranque de la app → `flyway_schema_history` con las versiones iniciales aplicadas
-- [ ] `ddl-auto: validate` sin error de arranque (entidades ↔ esquema Flyway)
-- [ ] `POST /api/v1/usuarios` con correo fresco → **201**; repetido → 409 real
-- [ ] Colección Postman: dos corridas seguidas sin colisiones
-- [ ] Ningún script se ejecuta vía `docker-entrypoint-initdb.d`
+- [x] `docker compose down -v` → compose nuevo → DB vacía al entrar (solo `information_schema` + `productionfood` sin tablas)
+- [x] Arranque de la app → `flyway_schema_history` con las versiones iniciales aplicadas (V1, V2, V3 — `success=1`, 27 tablas)
+- [x] `ddl-auto: validate` sin error de arranque (entidades ↔ esquema Flyway)
+- [x] `POST /api/v1/usuarios` con correo fresco → **201**; repetido → 409 real
+- [x] Colección Postman: dos corridas seguidas sin colisiones
+- [x] Ningún script se ejecuta vía `docker-entrypoint-initdb.d` (único mount: `/var/lib/mysql`)
 
 ## 6. Fuera de alcance de este plan
 
