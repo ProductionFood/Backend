@@ -1,6 +1,6 @@
 package co.edu.corposucre.productionfood.usuario;
 
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,10 +49,11 @@ public class UsuarioService {
         usuario.setCorreo(correo);
         usuario.setPassword(hash);
         usuario.setRol(rol);
+        usuario.setEstado(Boolean.TRUE);
 
         try {
             usuario = usuarioRepository.save(usuario);
-        } catch (DataIntegrityViolationException e) {
+        } catch (DuplicateKeyException e) {
             throw new ConflictoNegocioException(
                     "CORREO_DUPLICADO",
                     "Ya existe un usuario registrado con el correo indicado.");
