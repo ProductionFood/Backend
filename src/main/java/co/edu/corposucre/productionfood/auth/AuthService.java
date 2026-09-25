@@ -31,7 +31,8 @@ public class AuthService {
                         "CREDENCIALES_INVALIDAS",
                         "Correo o contraseña incorrectos."));
 
-        if (!passwordEncoder.matches(req.password(), usuario.getPassword())) {
+        if (!Boolean.TRUE.equals(usuario.getEstado())
+                || !passwordEncoder.matches(req.password(), usuario.getPassword())) {
             throw new ConflictoNegocioException(
                     "CREDENCIALES_INVALIDAS",
                     "Correo o contraseña incorrectos.");

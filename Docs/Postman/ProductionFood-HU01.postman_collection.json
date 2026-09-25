@@ -14,9 +14,44 @@
       "key": "token",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "correo",
+      "value": "prueba@productionfood.local",
+      "type": "string"
     }
   ],
   "item": [
+    {
+      "name": "Listar Roles sin permisos (403)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/roles",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "roles"
+          ]
+        },
+        "description": "Sin token de autenticación — se ejecuta ANTES del login. El endpoint exige rol ADMIN y no hay credenciales: debe retornar 403."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Sin credenciales → 403\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
     {
       "name": "00 - Setup",
       "description": "Obtener token de autenticación",
@@ -27,8 +62,15 @@
             "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/v1/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "auth", "login"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
             },
             "header": [
               {
@@ -50,7 +92,10 @@
                 "exec": [
                   "var json = pm.response.json();",
                   "pm.collectionVariables.set(\"token\", json.token);",
-                  "console.log(\"Token guardado: \" + json.token);"
+                  "pm.collectionVariables.set(\"correo\", \"prueba-\" + Date.now() + \"@productionfood.local\");",
+                  "console.log(\"Token guardado: \" + json.token);",
+                  "pm.test(\"Login → 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Viene token\", () => pm.expect(pm.response.json().token).to.be.a(\"string\").and.not.empty);"
                 ]
               }
             }
@@ -69,8 +114,14 @@
             "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/api/v1/roles",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "roles"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "roles"
+              ]
             },
             "header": [
               {
@@ -80,7 +131,18 @@
             ],
             "description": "Listar todos los roles del sistema. Requiere rol ADMIN."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Roles con ADMIN → 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -94,8 +156,14 @@
             "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/v1/usuarios",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "usuarios"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
             },
             "header": [
               {
@@ -109,11 +177,23 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"María Gómez\",\n  \"correo\": \"maria@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+              "raw": "{\n  \"nombre\": \"María Gómez\",\n  \"correo\": \"{{correo}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
             },
             "description": "Registrar un nuevo usuario. Requiere rol ADMIN. Retorna 201 con Location."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Crear → 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Usuario activo\", () => pm.expect(pm.response.json().activo).to.be.true);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Crear Usuario - Correo Duplicado (409)",
@@ -121,8 +201,14 @@
             "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/v1/usuarios",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "usuarios"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
             },
             "header": [
               {
@@ -136,11 +222,23 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Otra María\",\n  \"correo\": \"maria@productionfood.local\",\n  \"password\": \"OtraClave1*\",\n  \"idRol\": 3\n}"
+              "raw": "{\n  \"nombre\": \"Otra María\",\n  \"correo\": \"{{correo}}\",\n  \"password\": \"OtraClave1*\",\n  \"idRol\": 3\n}"
             },
             "description": "Intentar crear usuario con correo ya existente. Debe retornar 409 CORREO_DUPLICADO."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Duplicado → 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code CORREO_DUPLICADO\", () => pm.expect(pm.response.json().code).to.equal(\"CORREO_DUPLICADO\"));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Crear Usuario - Datos Inválidos (400)",
@@ -148,8 +246,14 @@
             "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/v1/usuarios",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "usuarios"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
             },
             "header": [
               {
@@ -167,7 +271,19 @@
             },
             "description": "Intentar crear usuario con datos inválidos. Debe retornar 400 VALIDACION_FALLIDA con fieldErrors."
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Inválidos → 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.equal(\"VALIDACION_FALLIDA\"));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Crear Usuario - Rol Inexistente (409)",
@@ -175,8 +291,14 @@
             "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/v1/usuarios",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "usuarios"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
             },
             "header": [
               {
@@ -194,26 +316,19 @@
             },
             "description": "Intentar crear usuario con rol que no existe. Debe retornar 409 ROL_INEXISTENTE."
           },
-          "response": []
-        },
-        {
-          "name": "Listar Roles sin permisos (403)",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/roles",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "roles"]
-            },
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Rol 999 → 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code ROL_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.equal(\"ROL_INEXISTENTE\"));"
+                ]
               }
-            ],
-            "description": "Probar acceso con token de usuario que no es ADMIN. Debe retornar 403."
-          },
-          "response": []
+            }
+          ]
         }
       ]
     }

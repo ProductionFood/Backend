@@ -1,0 +1,47 @@
+services:
+  # ==========================================================================
+  # MySQL 8.4 LTS — Base de datos del proyecto (DB en blanco, la migra Flyway)
+  # ==========================================================================
+  mysql:
+    image: mysql:8.4                           # Imagen oficial de MySQL version 8.4 (LTS)
+    container_name: productionfood-mysql        # Nombre del contenedor para facilitar referenciarlo
+    restart: unless-stopped                     # Reinicia automaticamente si se cae, excepto si lo paramos manualmente
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}       # Contrasena de root desde .env (solo desarrollo)
+      MYSQL_DATABASE: ${DB_NAME}                # Crea la base de datos vacia — el esquema lo construye Flyway
+      TZ: America/Bogota                        # Zona horaria para Java/Spring (UTC-5, hora de Colombia)
+    ports:
+      - "3306:3306"                             # Expone el puerto 3306 al host para conectar con un cliente MySQL
+    volumes:
+      - mysql-data:/var/lib/mysql               # Persiste los datos de MySQL en un volumen named (sobrevive reinicios)
+    command:
+      - --character-set-server=utf8mb4          # Codificacion UTF-8 completa (tildes, ñ, emojis)
+      - --collation-server=utf8mb4_0900_ai_ci   # Ordenamiento accent-insensitive: "panaderia" encuentra "panadería"
+      - --default-time-zone=-05:00              # Zona horaria de MySQL (critico para fechas, evita desfase de 1 dia)
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD}"]  # Verifica que MySQL este respondiendo
+      interval: 5s                             # Cada 5 segundos intenta el ping
+      timeout: 3s                              # Si no responde en 3 segundos, se considera fallido
+      retries: 10                              # Despues de 10 fallos consecutivos, marca unhealthy
+
+  # ==========================================================================
+  # phpMyAdmin — Interfaz grafica para ver la base de datos
+  # Acceder en: http://localhost:8081
+  # ==========================================================================
+  phpmyadmin:
+    image: phpmyadmin:5                        # Interfaz web oficial para gestionar MySQL
+    container_name: productionfood-phpmyadmin   # Nombre del contenedor
+    restart: unless-stopped                     # Reinicia automaticamente si se cae
+    depends_on:
+      mysql:
+        condition: service_healthy              # Espera a que MySQL este healthcheck antes de iniciar
+    ports:
+      - "8081:80"                              # Puerto 8081 en el host → 80 del contenedor (Apache interno)
+    environment:
+      PMA_HOST: mysql                          # Host de MySQL al que se conecta (nombre del servicio)
+      PMA_PORT: 3306                           # Puerto de MySQL a usar
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}      # Misma contrasena que MySQL para autenticarse
+
+# Volumenes nombrados — persisten datos entre reinicios del docker compose
+volumes:
+  mysql-data:                                  # Almacena los archivos de MySQL (/var/lib/mysql)
