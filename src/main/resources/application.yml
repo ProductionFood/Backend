@@ -11,6 +11,12 @@ spring:
       maximum-pool-size: 10
       minimum-idle: 5
 
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 3
+    connect-retries: 30
+
   jpa:
     hibernate:
       ddl-auto: validate
