@@ -14,6 +14,11 @@
       "key": "token",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "correo",
+      "value": "prueba@productionfood.local",
+      "type": "string"
     }
   ],
   "item": [
@@ -50,6 +55,7 @@
                 "exec": [
                   "var json = pm.response.json();",
                   "pm.collectionVariables.set(\"token\", json.token);",
+                  "pm.collectionVariables.set(\"correo\", \"prueba-\" + Date.now() + \"@productionfood.local\");",
                   "console.log(\"Token guardado: \" + json.token);"
                 ]
               }
@@ -109,7 +115,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"María Gómez\",\n  \"correo\": \"maria@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+              "raw": "{\n  \"nombre\": \"María Gómez\",\n  \"correo\": \"{{correo}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
             },
             "description": "Registrar un nuevo usuario. Requiere rol ADMIN. Retorna 201 con Location."
           },
@@ -136,7 +142,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Otra María\",\n  \"correo\": \"maria@productionfood.local\",\n  \"password\": \"OtraClave1*\",\n  \"idRol\": 3\n}"
+              "raw": "{\n  \"nombre\": \"Otra María\",\n  \"correo\": \"{{correo}}\",\n  \"password\": \"OtraClave1*\",\n  \"idRol\": 3\n}"
             },
             "description": "Intentar crear usuario con correo ya existente. Debe retornar 409 CORREO_DUPLICADO."
           },
