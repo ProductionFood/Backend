@@ -3,7 +3,7 @@ spring:
     name: productionfood-backend
 
   datasource:
-    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:productionfood}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=America/Bogota
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:productionfood}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=America/Bogota
     username: ${DB_USER:root}
     password: ${DB_PASSWORD:local}
     driver-class-name: com.mysql.cj.jdbc.Driver
