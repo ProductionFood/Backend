@@ -21,21 +21,53 @@ API REST para el sistema de gestión de productora de alimentos.
 
 ## Configuración
 
-Crear variables de entorno:
+El backend lee la configuración desde un archivo `.env` en la raíz del proyecto
+(`springboot4-dotenv`). Las variables de entorno reales del sistema tienen
+prioridad sobre el `.env`, así que en producción basta con definirlas sin
+archivo.
 
-```bash
-export DB_HOST=localhost
-export DB_USER=root
-export DB_PASSWORD=local
-export JWT_SECRET=$(openssl rand -base64 48)
-```
+1. Copia la plantilla y ajusta los valores:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Guarda el `.env` como **UTF-8 sin BOM** y con saltos de línea **LF**. Un BOM
+   invisible al inicio hace que `dotenv` ignore la primera variable en silencio.
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `DB_HOST` | `127.0.0.1` | Host de MySQL. Usa `127.0.0.1`, no `localhost` (ver Problemas comunes). |
+| `DB_PORT` | `3306` | Puerto de MySQL. |
+| `DB_NAME` | `productionfood` | Base creada por Compose y migrada por Flyway. |
+| `DB_USER` | `root` | Usuario de MySQL. |
+| `DB_PASSWORD` | `local` | Contraseña de root; debe coincidir con la de Compose. |
+| `JWT_SECRET` | — | Secreto para firmar los JWT. |
 
 ## Ejecutar
 
 ```bash
+# 1. Levanta MySQL (y phpMyAdmin en http://localhost:8081)
+docker compose up -d
+
+# 2. Arranca el backend (Flyway construye el esquema al inicio)
 mvn clean install
 mvn spring-boot:run
 ```
+
+## Problemas comunes
+
+- **El backend arranca pero no conecta a la base de datos.** Confirma que el
+  `.env` esté en la raíz del proyecto y que `DB_PASSWORD` coincida con la
+  contraseña de MySQL del contenedor. Tras cambiar el `.env`, recrea el
+  contenedor con `docker compose down -v && docker compose up -d` (el volumen
+  conserva la contraseña anterior).
+- **`Access denied for user 'root'`.** El backend está cayendo a los defaults en
+  lugar de leer el `.env` (contraseña `local`). Revisa la codificación del
+  archivo (BOM) y que exista.
+- **En Windows no conecta aunque el `.env` sea correcto.** `localhost` puede
+  resolverse a IPv6 (`::1`) y Docker Desktop no siempre publica el puerto en
+  IPv6. Usa `DB_HOST=127.0.0.1`.
 
 ## Endpoints
 
