@@ -38,21 +38,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")) {
             try {
                 Claims claims = jwtService.validarYExtraer(header.substring(7));
-                var usuario = usuarioRepository.findById(Integer.valueOf(claims.getSubject()));
+                var usuario = usuarioRepository.findConRolById(
+                        Integer.valueOf(claims.getSubject()));
                 if (usuario.isEmpty() || !Boolean.TRUE.equals(usuario.get().getEstado())) {
                     RespuestaSeguridad.escribir(res, req, HttpStatus.FORBIDDEN,
                             "USUARIO_INACTIVO", "Su usuario está desactivado. Contacte al administrador.");
                     return;
                 }
+                var u = usuario.get();
+                var rol = u.getRol().getNombre();
                 var authorities = List.of(
                     new org.springframework.security.core.authority.SimpleGrantedAuthority(
-                        "ROLE_" + claims.get("rol", String.class)));
+                        "ROLE_" + rol));
                 var auth = new UsernamePasswordAuthenticationToken(
                         new UsuarioAutenticado(
-                                Integer.valueOf(claims.getSubject()),
-                                claims.get("correo", String.class),
-                                claims.get("nombre", String.class),
-                                claims.get("rol", String.class)),
+                                u.getIdUsuario(),
+                                u.getCorreo(),
+                                u.getNombre(),
+                                rol),
                         null, authorities);
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
                 SecurityContextHolder.getContext().setAuthentication(auth);
