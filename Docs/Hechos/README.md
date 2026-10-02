@@ -57,3 +57,4 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU | Título | Entregada |
 |---|---|---|
 | HU-01 | Registro de usuarios | 2026-09-25 · [`HU-01-registro-usuarios.md`](HU-01-registro-usuarios.md) |
+| HU-02 | Gestión de usuarios | 2026-10-01 · [`HU-02-gestion-usuarios.md`](HU-02-gestion-usuarios.md) |

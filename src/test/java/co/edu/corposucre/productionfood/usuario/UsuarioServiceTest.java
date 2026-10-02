@@ -34,6 +34,7 @@ import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.rol.RolRepository;
 import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
 import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
+import co.edu.corposucre.productionfood.usuario.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 
@@ -377,6 +378,78 @@ class UsuarioServiceTest {
         verify(usuarioRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getCorreo()).isEqualTo("maria.perez@example.com");
         assertThat(captor.getValue().getNombre()).isEqualTo("María Pérez");
+    }
+
+    @Test
+    @DisplayName("Desactivar a otro usuario guarda activo=false (CP-13)")
+    void desactivarAOtroUsuario() {
+        var ventas = new Rol(4, "VENTAS", "");
+        var objetivo = usuarioCon(9, "Ana Pérez", "ana@pf.local", true, ventas);
+        when(usuarioRepository.findConRolById(9)).thenReturn(Optional.of(objetivo));
+        when(usuarioRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var r = usuarioService.cambiarEstado(9, new CambiarEstadoRequest(false));
+
+        assertThat(r.activo()).isFalse();
+        verify(usuarioRepository).saveAndFlush(any());
+        verify(usuarioRepository, never()).bloquearAdminsActivos();
+    }
+
+    @Test
+    @DisplayName("Desactivarse a uno mismo responde 409 AUTO_DESACTIVACION (CP-15)")
+    void desactivarseAMismoRespondeAutoDesactivacion() {
+        autenticarComo(1, "ADMIN");
+        var admin = new Rol(1, "ADMIN", "");
+        when(usuarioRepository.findConRolById(1)).thenReturn(Optional.of(
+                usuarioCon(1, "Administrador", "admin@pf.local", true, admin)));
+
+        assertThatThrownBy(() -> usuarioService.cambiarEstado(1, new CambiarEstadoRequest(false)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "AUTO_DESACTIVACION");
+        verify(usuarioRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("Desactivar al único administrador activo responde 409 ULTIMO_ADMIN")
+    void desactivarAlUnicoAdminRespondeUltimoAdmin() {
+        autenticarComo(2, "ADMIN");
+        var admin = new Rol(1, "ADMIN", "");
+        var objetivo = usuarioCon(1, "Administrador", "admin@pf.local", true, admin);
+        when(usuarioRepository.findConRolById(1)).thenReturn(Optional.of(objetivo));
+        when(usuarioRepository.bloquearAdminsActivos()).thenReturn(List.of(objetivo));
+
+        assertThatThrownBy(() -> usuarioService.cambiarEstado(1, new CambiarEstadoRequest(false)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "ULTIMO_ADMIN");
+        verify(usuarioRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("Reactivar un usuario no consulta administradores")
+    void reactivarUsuarioNoConsultaAdmins() {
+        var ventas = new Rol(4, "VENTAS", "");
+        when(usuarioRepository.findConRolById(9)).thenReturn(Optional.of(
+                usuarioCon(9, "Ana Pérez", "ana@pf.local", false, ventas)));
+        when(usuarioRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var r = usuarioService.cambiarEstado(9, new CambiarEstadoRequest(true));
+
+        assertThat(r.activo()).isTrue();
+        verify(usuarioRepository, never()).bloquearAdminsActivos();
+    }
+
+    @Test
+    @DisplayName("Desactivar a un usuario ya inactivo es idempotente (200)")
+    void desactivarYaInactivoEsIdempotente() {
+        var ventas = new Rol(4, "VENTAS", "");
+        when(usuarioRepository.findConRolById(9)).thenReturn(Optional.of(
+                usuarioCon(9, "Ana Pérez", "ana@pf.local", false, ventas)));
+        when(usuarioRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var r = usuarioService.cambiarEstado(9, new CambiarEstadoRequest(false));
+
+        assertThat(r.activo()).isFalse();
+        verify(usuarioRepository).saveAndFlush(any());
     }
 
     private Usuario usuarioCon(int id, String nombre, String correo,

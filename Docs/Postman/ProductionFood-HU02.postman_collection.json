@@ -954,6 +954,421 @@
      ]
     }
    ]
+  },
+  {
+   "name": "HU-02 · Estado",
+   "item": [
+    {
+     "name": "Crear usuario de estado → 201",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Pre-requisito del folder: usuario VENTAS activo con correo único por corrida",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Usuario Estado\",\n  \"correo\": \"{{estadoCorreo}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.collectionVariables.set(\"estadoCorreo\", \"estado-\" + Date.now() + \"@productionfood.local\");"
+        ]
+       }
+      },
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Crear → 201\", () => pm.response.to.have.status(201));",
+         "var json = pm.response.json();",
+         "pm.collectionVariables.set(\"estadoId\", json.idUsuario);",
+         "pm.test(\"Nace activo\", () => pm.expect(json.activo).to.eql(true));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Login del usuario de estado → 200",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Obtiene un token propio sin tocar el token del administrador",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"{{estadoCorreo}}\",\n  \"password\": \"Clave2026*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Login → 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.collectionVariables.set(\"tokenEstado\", json.token);",
+         "pm.test(\"Viene token\", () => pm.expect(json.token).to.be.a(\"string\").and.not.empty);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Token activo con rol insuficiente → 403 SIN_PERMISO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{tokenEstado}}"
+       }
+      ],
+      "description": "Control del flujo CP-14: mientras el usuario está activo su token pasa el filtro de estado; el rol VENTAS no alcanza para el listado"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+         "pm.test(\"code SIN_PERMISO (no USUARIO_INACTIVO)\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Desactivar con admin → 200 (CP-13)",
+     "request": {
+      "method": "PATCH",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{estadoId}}/estado",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{estadoId}}",
+        "estado"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"activo\": false\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "pm.test(\"Queda inactivo\", () => pm.expect(pm.response.json().activo).to.eql(false));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "CP-14: reusar el token tras desactivar → 403 USUARIO_INACTIVO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{tokenEstado}}"
+       }
+      ],
+      "description": "El token se emitió antes de la desactivación; el filtro lee la base en cada petición y responde de inmediato, no al expirar el JWT"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+         "var json = pm.response.json();",
+         "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(json.code).to.eql(\"USUARIO_INACTIVO\"));",
+         "pm.test(\"El mensaje menciona la desactivación\", () =>",
+         "  pm.expect(json.message).to.contain(\"desactivado\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Desactivar a un usuario ya inactivo → 200 (idempotente)",
+     "request": {
+      "method": "PATCH",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{estadoId}}/estado",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{estadoId}}",
+        "estado"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"activo\": false\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "pm.test(\"Sigue inactivo\", () => pm.expect(pm.response.json().activo).to.eql(false));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "CP-15: desactivarse a sí mismo → 409 AUTO_DESACTIVACION",
+     "request": {
+      "method": "PATCH",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/1/estado",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "1",
+        "estado"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "El admin semilla (id 1) es quien tiene la sesión",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"activo\": false\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+         "pm.test(\"code AUTO_DESACTIVACION\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"AUTO_DESACTIVACION\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "CP-17: reactivar → 200",
+     "request": {
+      "method": "PATCH",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{estadoId}}/estado",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{estadoId}}",
+        "estado"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"activo\": true\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "pm.test(\"Vuelve a estar activo\", () => pm.expect(pm.response.json().activo).to.eql(true));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "CP-17: el reactivado vuelve a iniciar sesión → 200",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"{{estadoCorreo}}\",\n  \"password\": \"Clave2026*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Login → 200\", () => pm.response.to.have.status(200));",
+         "pm.test(\"Emite token de nuevo\", () =>",
+         "  pm.expect(pm.response.json().token).to.be.a(\"string\").and.not.empty);"
+        ]
+       }
+      }
+     ]
+    }
+   ]
   }
  ],
  "variable": [
@@ -978,6 +1393,21 @@
   },
   {
    "key": "editarId",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "estadoCorreo",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "estadoId",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "tokenEstado",
    "value": "",
    "type": "string"
   }

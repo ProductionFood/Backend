@@ -16,6 +16,7 @@ import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.rol.RolRepository;
 import co.edu.corposucre.productionfood.security.SecurityUtils;
 import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
+import co.edu.corposucre.productionfood.usuario.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 
@@ -140,6 +141,21 @@ public class UsuarioService {
                     "Ya existe un usuario registrado con el correo indicado.");
         }
         return aResponse(usuario);
+    }
+
+    @Transactional
+    public UsuarioResponse cambiarEstado(Integer id, CambiarEstadoRequest req) {
+        var usuario = obtenerEntidad(id);
+        if (!req.activo()) {
+            if (id.equals(SecurityUtils.idUsuarioActual())) {
+                throw new ConflictoNegocioException(
+                        "AUTO_DESACTIVACION",
+                        "No puede desactivar su propio usuario.");
+            }
+            validarQuedaAdmin(usuario);
+        }
+        usuario.setEstado(req.activo());
+        return aResponse(usuarioRepository.saveAndFlush(usuario));
     }
 
     private void validarQuedaAdmin(Usuario objetivo) {

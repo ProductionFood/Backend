@@ -120,5 +120,5 @@ Ejemplos reales (ejecución del 2026-09-25, token truncado):
 - Refresh token, logout server-side, corte por inactividad y revocación de sesiones:
   fuera del alcance de HU-01 (`04-CONTRATO-API.md` §2); requiere HU nueva con cambio
   de contrato.
-- Endpoint para dar de baja/activar usuarios (PATCH estado): aún no existe; la baja se
-  hace desde la BD hasta que se entregue HU-03.
+- Endpoint para dar de baja/activar usuarios (PATCH estado): entregado en HU-02
+  (`PATCH /api/v1/usuarios/{id}/estado`); ver `HU-02-gestion-usuarios.md`.

@@ -1,7 +1,12 @@
 # HU-01 — Registro de usuarios · Manual de consumo
 
-> **Estado: en curso.** El endpoint de creación tiene un defecto abierto (409 falso) —
-> ver [Limitaciones conocidas](#limitaciones-conocidas) y `../../plans/Reestructuracion-HU-01.md`.
+> **⚠️ OBSOLETO (2026-10-01).** Este manual quedó atrás respecto del contrato vigente:
+> aún habla de un «409 falso al crear usuario» (defecto ya resuelto), muestra `estado`
+> en vez de `activo` en la respuesta, y listaba login inválido como `401` (el contrato
+> es `409 CREDENCIALES_INVALIDAS`). La fuente autoritativa actual es
+> `../../../docs/00-base/04-CONTRATO-API.md`; para la gestión de usuarios ver
+> [HU-02 — Gestión de usuarios](HU-02-gestion-usuarios.md). Se mantiene solo como
+> histórico.
 
 ## Autenticación
 
