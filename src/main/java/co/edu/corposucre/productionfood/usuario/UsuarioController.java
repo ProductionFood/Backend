@@ -9,12 +9,14 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -67,6 +69,26 @@ public class UsuarioController {
     })
     public UsuarioResponse obtener(@PathVariable Integer id) {
         return usuarioService.obtener(id);
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Editar un usuario",
+               description = "Actualiza nombre, correo y rol. La contraseña y el estado no se modifican "
+                       + "por este endpoint (los campos extra del cuerpo se ignoran). No permite cambiar "
+                       + "el propio rol ni dejar al sistema sin un administrador activo.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Usuario actualizado"),
+        @ApiResponse(responseCode = "400", description = "Cuerpo inválido o validación fallida"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos"),
+        @ApiResponse(responseCode = "404", description = "Usuario inexistente"),
+        @ApiResponse(responseCode = "409", description = "Conflicto de negocio: CORREO_DUPLICADO, "
+                + "AUTO_DEGRADACION, ULTIMO_ADMIN o ROL_INEXISTENTE")
+    })
+    public UsuarioResponse actualizar(@PathVariable Integer id,
+                                      @Valid @RequestBody ActualizarUsuarioRequest req) {
+        return usuarioService.actualizar(id, req);
     }
 
     @PostMapping
