@@ -26,6 +26,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
+import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.rol.RolRepository;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
@@ -208,6 +209,33 @@ class UsuarioServiceTest {
         assertThat(UsuarioService.patronPrefijo("100%")).isEqualTo("100\\%%");
         assertThat(UsuarioService.patronPrefijo("a_b")).isEqualTo("a\\_b%");
         assertThat(UsuarioService.patronPrefijo("c\\d")).isEqualTo("c\\\\d%");
+    }
+
+    @Test
+    @DisplayName("Obtener un usuario existente lo convierte a UsuarioResponse")
+    void obtenerUsuarioExistente() {
+        when(usuarioRepository.findConRolById(7)).thenReturn(Optional.of(
+                usuarioCon(7, "Ana Pérez", "ana@pf.local", true,
+                        new Rol(4, "ADMIN", ""))));
+
+        var r = usuarioService.obtener(7);
+
+        assertThat(r.idUsuario()).isEqualTo(7);
+        assertThat(r.nombre()).isEqualTo("Ana Pérez");
+        assertThat(r.correo()).isEqualTo("ana@pf.local");
+        assertThat(r.activo()).isTrue();
+        assertThat(r.rol().nombre()).isEqualTo("ADMIN");
+    }
+
+    @Test
+    @DisplayName("Obtener un usuario inexistente responde 404 RECURSO_NO_ENCONTRADO")
+    void obtenerUsuarioInexistenteResponde404() {
+        when(usuarioRepository.findConRolById(999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> usuarioService.obtener(999))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
+                .hasMessage("No se encontró el usuario con id 999.");
     }
 
     private Usuario usuarioCon(int id, String nombre, String correo,

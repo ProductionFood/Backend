@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
+import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.rol.Rol;
@@ -88,6 +89,16 @@ public class UsuarioService {
                 .replace("\\", "\\\\")
                 .replace("%", "\\%")
                 .replace("_", "\\_") + "%";
+    }
+
+    @Transactional(readOnly = true)
+    public UsuarioResponse obtener(Integer id) {
+        return aResponse(obtenerEntidad(id));
+    }
+
+    private Usuario obtenerEntidad(Integer id) {
+        return usuarioRepository.findConRolById(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("el usuario", id));
     }
 
     private static UsuarioResponse aResponse(Usuario usuario) {
