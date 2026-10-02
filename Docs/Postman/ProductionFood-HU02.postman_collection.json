@@ -474,6 +474,486 @@
      ]
     }
    ]
+  },
+  {
+   "name": "HU-02 · Editar",
+   "item": [
+    {
+     "name": "Crear usuario para editar → 201",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Pre-requisito del folder: crea la víctima de edición con rol VENTAS y correo único por corrida",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Usuario Para Editar\",\n  \"correo\": \"{{editarCorreo}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.collectionVariables.set(\"editarCorreo\", \"editar-\" + Date.now() + \"@productionfood.local\");"
+        ]
+       }
+      },
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Crear → 201\", () => pm.response.to.have.status(201));",
+         "var json = pm.response.json();",
+         "pm.collectionVariables.set(\"editarId\", json.idUsuario);",
+         "pm.test(\"Queda activo con rol 4\", () => {",
+         "  pm.expect(json.activo).to.eql(true);",
+         "  pm.expect(json.rol.idRol).to.eql(4);",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PUT editar nombre y rol (mismo correo, campos extra) → 200",
+     "request": {
+      "method": "PUT",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{editarId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{editarId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "CP-09 (cambios válidos), CP-10 (mismo correo no es duplicado) y CP-12 (password y activa llegan en el cuerpo pero se ignoran: no existen en el DTO)",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Usuario Editado\",\n  \"correo\": \"{{editarCorreo}}\",\n  \"idRol\": 2,\n  \"password\": \"NuevaClave123*\",\n  \"activo\": false\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"PUT → 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.test(\"Nombre y rol cambiaron\", () => {",
+         "  pm.expect(json.nombre).to.eql(\"Usuario Editado\");",
+         "  pm.expect(json.rol.idRol).to.eql(2);",
+         "});",
+         "pm.test(\"activo sigue en true: el campo extra se ignoró (CP-12)\", () =>",
+         "  pm.expect(json.activo).to.eql(true));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "GET verificar persistencia del PUT → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{editarId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{editarId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "Relee de la base: los cambios del PUT persisten y el estado no cambió"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.test(\"Persiste nombre y rol, sigue activo\", () => {",
+         "  pm.expect(json.nombre).to.eql(\"Usuario Editado\");",
+         "  pm.expect(json.rol.idRol).to.eql(2);",
+         "  pm.expect(json.activo).to.eql(true);",
+         "});",
+         "pm.test(\"Nunca expone password\", () =>",
+         "  pm.expect(json).to.not.have.property(\"password\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PUT con correo de otro usuario → 409 (CP-11)",
+     "request": {
+      "method": "PUT",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{editarId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{editarId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "El correo del administrador semilla ya existe: unicidad excluyendo al propio id",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Usuario Editado\",\n  \"correo\": \"admin@productionfood.local\",\n  \"idRol\": 2\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+         "pm.test(\"code CORREO_DUPLICADO\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"CORREO_DUPLICADO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PUT con nombre vacío → 400 VALIDACION_FALLIDA",
+     "request": {
+      "method": "PUT",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{editarId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{editarId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "@NotBlank sobre el DTO de actualización",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"\",\n  \"correo\": \"{{editarCorreo}}\",\n  \"idRol\": 2\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+         "pm.test(\"code VALIDACION_FALLIDA\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PUT con rol inexistente → 409 ROL_INEXISTENTE",
+     "request": {
+      "method": "PUT",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{editarId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{editarId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Usuario Editado\",\n  \"correo\": \"{{editarCorreo}}\",\n  \"idRol\": 999\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+         "pm.test(\"code ROL_INEXISTENTE\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"ROL_INEXISTENTE\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PUT con id no numérico → 400 PARAMETRO_INVALIDO",
+     "request": {
+      "method": "PUT",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/abc",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "abc"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"X\",\n  \"correo\": \"x@pf.local\",\n  \"idRol\": 2\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+         "pm.test(\"code PARAMETRO_INVALIDO\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "DELETE no existe → 405 (CA-05)",
+     "request": {
+      "method": "DELETE",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{editarId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{editarId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "CA-05: el borrado físico está prohibido; el manejador responde METODO_NO_PERMITIDO"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+         "pm.test(\"code METODO_NO_PERMITIDO\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));",
+         "pm.test(\"El mensaje menciona el método\", () =>",
+         "  pm.expect(pm.response.json().message).to.contain(\"DELETE\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PUT sin sesión → 401",
+     "request": {
+      "method": "PUT",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{editarId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{editarId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"X\",\n  \"correo\": \"x@pf.local\",\n  \"idRol\": 2\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+         "pm.test(\"code NO_AUTENTICADO\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "PUT cambiando el propio rol → 409 AUTO_DEGRADACION (CP-20)",
+     "request": {
+      "method": "PUT",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/1",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "1"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "El admin semilla (id 1) es quien tiene la sesión: no puede quitarse el rol ADMIN. CP-19 (ULTIMO_ADMIN por PUT) es inalcanzable vía API: el único admin activo coincide siempre con el solicitante y AUTO_DEGRADACION responde primero; cubierto por la prueba unitaria degradarAlUnicoAdminRespondeUltimoAdmin.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Administrador Inicial\",\n  \"correo\": \"admin@productionfood.local\",\n  \"idRol\": 2\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+         "pm.test(\"code AUTO_DEGRADACION\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"AUTO_DEGRADACION\"));"
+        ]
+       }
+      }
+     ]
+    }
+   ]
   }
  ],
  "variable": [
@@ -489,6 +969,16 @@
   {
    "key": "usuarioId",
    "value": "1",
+   "type": "string"
+  },
+  {
+   "key": "editarCorreo",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "editarId",
+   "value": "",
    "type": "string"
   }
  ]

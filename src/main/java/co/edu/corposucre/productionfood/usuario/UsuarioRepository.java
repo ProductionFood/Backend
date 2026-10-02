@@ -1,10 +1,14 @@
 package co.edu.corposucre.productionfood.usuario;
 
+import java.util.List;
 import java.util.Optional;
+
+import jakarta.persistence.LockModeType;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -12,7 +16,13 @@ public interface UsuarioRepository extends JpaRepository<Usuario, Integer> {
 
     boolean existsByCorreo(String correo);
 
+    boolean existsByCorreoAndIdUsuarioNot(String correo, Integer idUsuario);
+
     Optional<Usuario> findByCorreo(String correo);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from Usuario u where u.rol.nombre = 'ADMIN' and u.estado = true")
+    List<Usuario> bloquearAdminsActivos();
 
     @Query("select u from Usuario u join fetch u.rol where u.idUsuario = :id")
     Optional<Usuario> findConRolById(@Param("id") Integer id);

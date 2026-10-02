@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Optional;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,12 +24,16 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.rol.RolRepository;
+import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
+import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 
@@ -236,6 +241,142 @@ class UsuarioServiceTest {
                 .isInstanceOf(RecursoNoEncontradoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
                 .hasMessage("No se encontró el usuario con id 999.");
+    }
+
+    @AfterEach
+    void limpiarSeguridad() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private void autenticarComo(Integer idUsuario, String rol) {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(
+                        new UsuarioAutenticado(idUsuario, "admin@pf.local", "Admin", rol),
+                        null, List.of()));
+    }
+
+    @Test
+    @DisplayName("Editar sin cambiar el correo no dispara CORREO_DUPLICADO (CP-10 / R-04)")
+    void editarSinCambiarCorreoNoEsDuplicado() {
+        var admin = new Rol(1, "ADMIN", "");
+        when(usuarioRepository.findConRolById(1)).thenReturn(Optional.of(
+                usuarioCon(1, "Administrador Inicial", "admin@pf.local", true, admin)));
+        when(rolRepository.findById(1)).thenReturn(Optional.of(admin));
+        when(usuarioRepository.existsByCorreoAndIdUsuarioNot("admin@pf.local", 1))
+                .thenReturn(false);
+        when(usuarioRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var r = usuarioService.actualizar(1, new ActualizarUsuarioRequest(
+                "Administrador Editado", "admin@pf.local", 1));
+
+        assertThat(r.nombre()).isEqualTo("Administrador Editado");
+        verify(usuarioRepository).existsByCorreoAndIdUsuarioNot("admin@pf.local", 1);
+        verify(usuarioRepository).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("Editar con correo de otro usuario responde 409 CORREO_DUPLICADO (CP-11)")
+    void editarConCorreoAjenoResponde409() {
+        var admin = new Rol(1, "ADMIN", "");
+        when(usuarioRepository.findConRolById(5)).thenReturn(Optional.of(
+                usuarioCon(5, "Ana Pérez", "ana@pf.local", true, admin)));
+        when(rolRepository.findById(1)).thenReturn(Optional.of(admin));
+        when(usuarioRepository.existsByCorreoAndIdUsuarioNot("ocupado@pf.local", 5))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> usuarioService.actualizar(5, new ActualizarUsuarioRequest(
+                "Ana Pérez", "ocupado@pf.local", 1)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CORREO_DUPLICADO");
+        verify(usuarioRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("Editar con rol inexistente responde 409 ROL_INEXISTENTE")
+    void editarConRolInexistenteResponde409() {
+        when(usuarioRepository.findConRolById(5)).thenReturn(Optional.of(
+                usuarioCon(5, "Ana Pérez", "ana@pf.local", true, new Rol(1, "ADMIN", ""))));
+        when(rolRepository.findById(999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> usuarioService.actualizar(5, new ActualizarUsuarioRequest(
+                "Ana Pérez", "ana@pf.local", 999)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "ROL_INEXISTENTE");
+    }
+
+    @Test
+    @DisplayName("Cambiar el propio rol responde 409 AUTO_DEGRADACION (CP-20)")
+    void cambiarElPropioRolRespondeAutoDegradacion() {
+        autenticarComo(1, "ADMIN");
+        var admin = new Rol(1, "ADMIN", "");
+        when(usuarioRepository.findConRolById(1)).thenReturn(Optional.of(
+                usuarioCon(1, "Administrador", "admin@pf.local", true, admin)));
+        when(rolRepository.findById(2)).thenReturn(Optional.of(new Rol(2, "PRODUCCION", "")));
+
+        assertThatThrownBy(() -> usuarioService.actualizar(1, new ActualizarUsuarioRequest(
+                "Administrador", "admin@pf.local", 2)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "AUTO_DEGRADACION");
+    }
+
+    @Test
+    @DisplayName("Degradar al único administrador activo responde 409 ULTIMO_ADMIN (CP-19)")
+    void degradarAlUnicoAdminRespondeUltimoAdmin() {
+        var admin = new Rol(1, "ADMIN", "");
+        var ventas = new Rol(4, "VENTAS", "");
+        var objetivo = usuarioCon(5, "Admin Dos", "admin2@pf.local", true, admin);
+        when(usuarioRepository.findConRolById(5)).thenReturn(Optional.of(objetivo));
+        when(rolRepository.findById(4)).thenReturn(Optional.of(ventas));
+        when(usuarioRepository.bloquearAdminsActivos()).thenReturn(List.of(objetivo));
+
+        assertThatThrownBy(() -> usuarioService.actualizar(5, new ActualizarUsuarioRequest(
+                "Admin Dos", "admin2@pf.local", 4)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "ULTIMO_ADMIN");
+        verify(usuarioRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("Degradar a un admin con otro administrador activo guarda con rol nuevo")
+    void degradarAdminConOtroActivoPermiteGuardar() {
+        var admin = new Rol(1, "ADMIN", "");
+        var ventas = new Rol(4, "VENTAS", "");
+        var objetivo = usuarioCon(5, "Admin Dos", "admin2@pf.local", true, admin);
+        var otroAdmin = usuarioCon(1, "Admin Uno", "admin1@pf.local", true, admin);
+        when(usuarioRepository.findConRolById(5)).thenReturn(Optional.of(objetivo));
+        when(rolRepository.findById(4)).thenReturn(Optional.of(ventas));
+        when(usuarioRepository.bloquearAdminsActivos()).thenReturn(List.of(objetivo, otroAdmin));
+        when(usuarioRepository.existsByCorreoAndIdUsuarioNot(any(), eq(5))).thenReturn(false);
+        when(usuarioRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var r = usuarioService.actualizar(5, new ActualizarUsuarioRequest(
+                "  Admin Dos Editado ", " Admin2@PF.Local ", 4));
+
+        assertThat(r.rol().idRol()).isEqualTo(4);
+        assertThat(r.nombre()).isEqualTo("Admin Dos Editado");
+        var captor = ArgumentCaptor.forClass(Usuario.class);
+        verify(usuarioRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getCorreo()).isEqualTo("admin2@pf.local");
+    }
+
+    @Test
+    @DisplayName("El correo y el nombre del PUT se normalizan antes de guardar")
+    void editarNormalizaCorreoYNombre() {
+        var ventas = new Rol(4, "VENTAS", "");
+        when(usuarioRepository.findConRolById(7)).thenReturn(Optional.of(
+                usuarioCon(7, "Ana Pérez", "ana@pf.local", true, ventas)));
+        when(rolRepository.findById(4)).thenReturn(Optional.of(ventas));
+        when(usuarioRepository.existsByCorreoAndIdUsuarioNot("maria.perez@example.com", 7))
+                .thenReturn(false);
+        when(usuarioRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        usuarioService.actualizar(7, new ActualizarUsuarioRequest(
+                "  María Pérez ", "  Maria.Perez@Example.COM ", 4));
+
+        var captor = ArgumentCaptor.forClass(Usuario.class);
+        verify(usuarioRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getCorreo()).isEqualTo("maria.perez@example.com");
+        assertThat(captor.getValue().getNombre()).isEqualTo("María Pérez");
     }
 
     private Usuario usuarioCon(int id, String nombre, String correo,

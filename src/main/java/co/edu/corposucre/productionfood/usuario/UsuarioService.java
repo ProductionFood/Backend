@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.usuario;
 
 import java.util.Map;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -13,6 +14,8 @@ import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.rol.RolRepository;
+import co.edu.corposucre.productionfood.security.SecurityUtils;
+import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 
@@ -99,6 +102,54 @@ public class UsuarioService {
     private Usuario obtenerEntidad(Integer id) {
         return usuarioRepository.findConRolById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("el usuario", id));
+    }
+
+    @Transactional
+    public UsuarioResponse actualizar(Integer id, ActualizarUsuarioRequest req) {
+        var usuario = obtenerEntidad(id);
+        var correo = req.correo().trim().toLowerCase();
+        var rolNuevo = rolRepository.findById(req.idRol())
+                .orElseThrow(() -> new ConflictoNegocioException(
+                        "ROL_INEXISTENTE",
+                        "El rol especificado no existe."));
+
+        boolean cambiaRol = !rolNuevo.getIdRol().equals(usuario.getRol().getIdRol());
+        if (cambiaRol && id.equals(SecurityUtils.idUsuarioActual())) {
+            throw new ConflictoNegocioException(
+                    "AUTO_DEGRADACION",
+                    "No puede cambiar su propio rol.");
+        }
+        if (cambiaRol && !"ADMIN".equals(rolNuevo.getNombre())) {
+            validarQuedaAdmin(usuario);
+        }
+
+        if (usuarioRepository.existsByCorreoAndIdUsuarioNot(correo, id)) {
+            throw new ConflictoNegocioException(
+                    "CORREO_DUPLICADO",
+                    "Ya existe un usuario registrado con el correo indicado.");
+        }
+
+        usuario.setNombre(req.nombre().trim());
+        usuario.setCorreo(correo);
+        usuario.setRol(rolNuevo);
+        try {
+            usuarioRepository.saveAndFlush(usuario);
+        } catch (DataIntegrityViolationException e) {
+            throw new ConflictoNegocioException(
+                    "CORREO_DUPLICADO",
+                    "Ya existe un usuario registrado con el correo indicado.");
+        }
+        return aResponse(usuario);
+    }
+
+    private void validarQuedaAdmin(Usuario objetivo) {
+        boolean esAdminActivo = "ADMIN".equals(objetivo.getRol().getNombre())
+                && Boolean.TRUE.equals(objetivo.getEstado());
+        if (esAdminActivo && usuarioRepository.bloquearAdminsActivos().size() <= 1) {
+            throw new ConflictoNegocioException(
+                    "ULTIMO_ADMIN",
+                    "No se puede dejar el sistema sin un administrador activo.");
+        }
     }
 
     private static UsuarioResponse aResponse(Usuario usuario) {
