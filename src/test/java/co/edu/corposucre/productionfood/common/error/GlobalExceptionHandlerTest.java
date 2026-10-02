@@ -11,11 +11,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -115,6 +118,48 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getBody().fieldErrors())
                 .containsExactly(new ErrorResponse.FieldError(
                         "correo", "El correo es obligatorio"));
+    }
+
+    @Test
+    @DisplayName("Parámetro de tipo incorrecto responde 400 PARAMETRO_INVALIDO")
+    void parametroDeTipoIncorrectoResponde400() {
+        var ex = new MethodArgumentTypeMismatchException(
+                "abc", Integer.class, "page", null, null);
+
+        var resp = handler.parametroMalFormado(ex, req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("PARAMETRO_INVALIDO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("El parámetro 'page' no es válido.");
+    }
+
+    @Test
+    @DisplayName("Parámetro obligatorio ausente responde 400 PARAMETRO_INVALIDO")
+    void parametroAusenteResponde400() {
+        var ex = new MissingServletRequestParameterException("sort", "String");
+
+        var resp = handler.parametroMalFormado(ex, req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("PARAMETRO_INVALIDO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("El parámetro 'sort' no es válido.");
+    }
+
+    @Test
+    @DisplayName("Cuerpo JSON ilegible responde 400 VALIDACION_FALLIDA")
+    void cuerpoIlegibleResponde400() {
+        var resp = handler.cuerpoIlegible(
+                new HttpMessageNotReadableException("{\"nombre\":", null), req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("VALIDACION_FALLIDA");
+        assertThat(resp.getBody().message())
+                .isEqualTo("Los datos enviados no son válidos.");
     }
 
     @Test

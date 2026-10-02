@@ -10,11 +10,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -66,6 +69,26 @@ public class GlobalExceptionHandler {
             AccessDeniedException ex, HttpServletRequest req) {
         return build(HttpStatus.FORBIDDEN, "SIN_PERMISO",
                      "No tiene permisos para realizar esta acción.",
+                     req.getRequestURI(), List.of());
+    }
+
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class,
+                       MissingServletRequestParameterException.class})
+    ResponseEntity<ErrorResponse> parametroMalFormado(
+            Exception ex, HttpServletRequest req) {
+        var nombre = ex instanceof MethodArgumentTypeMismatchException tipo
+                ? tipo.getName()
+                : ((MissingServletRequestParameterException) ex).getParameterName();
+        return build(HttpStatus.BAD_REQUEST, "PARAMETRO_INVALIDO",
+                     "El parámetro '" + nombre + "' no es válido.",
+                     req.getRequestURI(), List.of());
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ErrorResponse> cuerpoIlegible(
+            HttpMessageNotReadableException ex, HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, "VALIDACION_FALLIDA",
+                     "Los datos enviados no son válidos.",
                      req.getRequestURI(), List.of());
     }
 
