@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -114,6 +115,21 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getBody().fieldErrors())
                 .containsExactly(new ErrorResponse.FieldError(
                         "correo", "El correo es obligatorio"));
+    }
+
+    @Test
+    @DisplayName("Método no soportado responde 405 METODO_NO_PERMITIDO")
+    void metodoNoSoportadoResponde405() {
+        var resp = handler.metodoNoPermitido(
+                new HttpRequestMethodNotSupportedException(
+                        "DELETE", List.of("GET", "POST")), req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("METODO_NO_PERMITIDO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("El método 'DELETE' no está permitido para este recurso.");
+        assertThat(resp.getBody().fieldErrors()).isEmpty();
     }
 
     @Test

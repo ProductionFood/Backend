@@ -11,6 +11,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -65,6 +66,15 @@ public class GlobalExceptionHandler {
             AccessDeniedException ex, HttpServletRequest req) {
         return build(HttpStatus.FORBIDDEN, "SIN_PERMISO",
                      "No tiene permisos para realizar esta acción.",
+                     req.getRequestURI(), List.of());
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    ResponseEntity<ErrorResponse> metodoNoPermitido(
+            HttpRequestMethodNotSupportedException ex, HttpServletRequest req) {
+        return build(HttpStatus.METHOD_NOT_ALLOWED, "METODO_NO_PERMITIDO",
+                     "El método '" + ex.getMethod()
+                             + "' no está permitido para este recurso.",
                      req.getRequestURI(), List.of());
     }
 
