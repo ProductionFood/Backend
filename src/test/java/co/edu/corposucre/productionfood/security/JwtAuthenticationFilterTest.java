@@ -13,8 +13,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.usuario.Usuario;
 import co.edu.corposucre.productionfood.usuario.UsuarioRepository;
 
@@ -43,7 +45,7 @@ class JwtAuthenticationFilterTest {
     void tokenDeUsuarioInactivoResponde403() throws Exception {
         var claims = claimsDe(7);
         when(jwtService.validarYExtraer("token-valido")).thenReturn(claims);
-        when(usuarioRepository.findById(7)).thenReturn(Optional.of(usuario(7, false)));
+        when(usuarioRepository.findConRolById(7)).thenReturn(Optional.of(usuario(7, false)));
         var req = peticionConToken("token-valido");
         var res = new MockHttpServletResponse();
         var chain = new MockFilterChain();
@@ -63,7 +65,7 @@ class JwtAuthenticationFilterTest {
     void tokenDeUsuarioActivoAutentica() throws Exception {
         var claims = claimsDe(7);
         when(jwtService.validarYExtraer("token-valido")).thenReturn(claims);
-        when(usuarioRepository.findById(7)).thenReturn(Optional.of(usuario(7, true)));
+        when(usuarioRepository.findConRolById(7)).thenReturn(Optional.of(usuario(7, true)));
         var req = peticionConToken("token-valido");
         var res = new MockHttpServletResponse();
         var chain = new MockFilterChain();
@@ -73,6 +75,46 @@ class JwtAuthenticationFilterTest {
         assertThat(res.getStatus()).isEqualTo(200);
         assertThat(chain.getRequest()).isNotNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("El rol de la base manda sobre el claim del token (R-06)")
+    void elRolDeLaBaseMandaSobreElClaim() throws Exception {
+        var claims = claimsDe(7);
+        when(jwtService.validarYExtraer("token-valido")).thenReturn(claims);
+        when(usuarioRepository.findConRolById(7))
+                .thenReturn(Optional.of(usuario(7, true, "VENTAS")));
+        var req = peticionConToken("token-valido");
+        var res = new MockHttpServletResponse();
+        var chain = new MockFilterChain();
+
+        filtro.doFilter(req, res, chain);
+
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(auth).isNotNull();
+        assertThat(auth.getAuthorities())
+                .extracting(GrantedAuthority::getAuthority)
+                .containsExactly("ROLE_VENTAS");
+        assertThat(((UsuarioAutenticado) auth.getPrincipal()).rol()).isEqualTo("VENTAS");
+    }
+
+    @Test
+    @DisplayName("Token de usuario inexistente responde 403 y corta la petición")
+    void tokenDeUsuarioInexistenteResponde403() throws Exception {
+        var claims = claimsDe(7);
+        when(jwtService.validarYExtraer("token-valido")).thenReturn(claims);
+        when(usuarioRepository.findConRolById(7)).thenReturn(Optional.empty());
+        var req = peticionConToken("token-valido");
+        var res = new MockHttpServletResponse();
+        var chain = new MockFilterChain();
+
+        filtro.doFilter(req, res, chain);
+
+        assertThat(res.getStatus()).isEqualTo(403);
+        assertThat(res.getContentAsString()).contains("\"code\":\"USUARIO_INACTIVO\"");
+        assertThat(chain.getRequest()).isNull();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test
@@ -97,19 +139,20 @@ class JwtAuthenticationFilterTest {
     private Claims claimsDe(int id) {
         var claims = mock(Claims.class);
         when(claims.getSubject()).thenReturn(String.valueOf(id));
-        when(claims.get("correo", String.class)).thenReturn("persona@pf.local");
-        when(claims.get("nombre", String.class)).thenReturn("Persona");
-        when(claims.get("rol", String.class)).thenReturn("ADMIN");
         return claims;
     }
 
     private Usuario usuario(int id, boolean activo) {
+        return usuario(id, activo, "ADMIN");
+    }
+
+    private Usuario usuario(int id, boolean activo, String nombreRol) {
         var u = new Usuario();
         u.setIdUsuario(id);
         u.setNombre("Persona");
         u.setCorreo("persona@pf.local");
         u.setEstado(activo);
-        u.setRol(null);
+        u.setRol(new Rol(1, nombreRol, ""));
         return u;
     }
 }
