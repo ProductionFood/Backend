@@ -45,6 +45,21 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Parámetro inválido responde 400 con el código de la excepción")
+    void parametroInvalidoResponde400() {
+        var resp = handler.parametroInvalido(
+                new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
+                        "El campo de ordenamiento 'password' no es válido."), req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("CAMPO_ORDEN_INVALIDO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("El campo de ordenamiento 'password' no es válido.");
+        assertThat(resp.getBody().fieldErrors()).isEmpty();
+    }
+
+    @Test
     @DisplayName("Recurso inexistente responde 404 con mensaje del recurso y el id")
     void recursoNoEncontradoResponde404() {
         var resp = handler.noEncontrado(
