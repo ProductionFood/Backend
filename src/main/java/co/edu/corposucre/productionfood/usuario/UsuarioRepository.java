@@ -16,6 +16,8 @@ public interface UsuarioRepository extends JpaRepository<Usuario, Integer> {
 
     boolean existsByCorreo(String correo);
 
+    boolean existsByCorreoAndIdUsuarioNot(String correo, Integer idUsuario);
+
     Optional<Usuario> findByCorreo(String correo);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
