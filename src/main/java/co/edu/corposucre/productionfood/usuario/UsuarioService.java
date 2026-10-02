@@ -101,6 +101,16 @@ public class UsuarioService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("el usuario", id));
     }
 
+    private void validarQuedaAdmin(Usuario objetivo) {
+        boolean esAdminActivo = "ADMIN".equals(objetivo.getRol().getNombre())
+                && Boolean.TRUE.equals(objetivo.getEstado());
+        if (esAdminActivo && usuarioRepository.bloquearAdminsActivos().size() <= 1) {
+            throw new ConflictoNegocioException(
+                    "ULTIMO_ADMIN",
+                    "No se puede dejar el sistema sin un administrador activo.");
+        }
+    }
+
     private static UsuarioResponse aResponse(Usuario usuario) {
         var rol = usuario.getRol();
         return new UsuarioResponse(
