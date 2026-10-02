@@ -1,0 +1,495 @@
+{
+ "info": {
+  "_postman_id": "8f3f5d22-2a1b-4d5e-9c7a-000000000001",
+  "name": "ProductionFood - HU-02 Gestión de Usuarios",
+  "description": "Casos de la HU-02: consultar, editar y cambiar estado de usuarios. Corre sobre el backend arrancado con docker compose (MySQL + Flyway).",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ },
+ "item": [
+  {
+   "name": "00 - Setup",
+   "item": [
+    {
+     "name": "Login - Obtener Token",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Login con el administrador semilla para obtener el token JWT",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Login → 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.collectionVariables.set(\"token\", json.token);",
+         "pm.test(\"Viene token\", () => pm.expect(json.token).to.be.a(\"string\").and.not.empty);"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-02 · Consultar",
+   "item": [
+    {
+     "name": "Listar usuarios → 200 PageResponse",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios?page=0&size=20",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ],
+       "query": [
+        {
+         "key": "page",
+         "value": "0"
+        },
+        {
+         "key": "size",
+         "value": "20"
+        }
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "CA-01: listado paginado con los defaults del contrato (page=0, size=20, sort=nombre,asc)"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Listar → 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.test(\"Trae la forma PageResponse\", () => {",
+         "  pm.expect(json).to.have.property(\"content\").that.is.an(\"array\");",
+         "  pm.expect(json).to.have.property(\"page\", 0);",
+         "  pm.expect(json).to.have.property(\"size\", 20);",
+         "  pm.expect(json).to.have.property(\"totalElements\").that.is.a(\"number\");",
+         "  pm.expect(json).to.have.property(\"first\").that.is.a(\"boolean\");",
+         "  pm.expect(json).to.have.property(\"last\").that.is.a(\"boolean\");",
+         "});",
+         "pm.test(\"Sin password ni estado en la respuesta\", () => {",
+         "  if (json.content.length > 0) {",
+         "    pm.expect(json.content[0]).to.not.have.property(\"password\");",
+         "    pm.expect(json.content[0]).to.not.have.property(\"estado\");",
+         "    pm.expect(json.content[0]).to.have.property(\"activo\").that.is.a(\"boolean\");",
+         "    pm.collectionVariables.set(\"usuarioId\", json.content[0].idUsuario);",
+         "  }",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Listar sin sesión → 401",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ]
+      },
+      "header": [],
+      "description": "El listado exige rol ADMIN; sin token responde 401 del contrato"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Sin sesión → 401\", () => pm.response.to.have.status(401));",
+         "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Listar con filtros y sort → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios?busqueda=a&idRol=1&activo=true&size=5&sort=correo,desc",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ],
+       "query": [
+        {
+         "key": "busqueda",
+         "value": "a"
+        },
+        {
+         "key": "idRol",
+         "value": "1"
+        },
+        {
+         "key": "activo",
+         "value": "true"
+        },
+        {
+         "key": "size",
+         "value": "5"
+        },
+        {
+         "key": "sort",
+         "value": "correo,desc"
+        }
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "Filtros combinados: prefijo, rol y estado, tamaño 5 y orden por correo descendente"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Con filtros → 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.test(\"Respeta size=5\", () => pm.expect(json.size).to.eql(5));",
+         "pm.test(\"Todos los resultados están activos y con el rol 1\", () => {",
+         "  json.content.forEach(u => {",
+         "    pm.expect(u.activo).to.eql(true);",
+         "    pm.expect(u.rol.idRol).to.eql(1);",
+         "  });",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Orden inválido → 400 CAMPO_ORDEN_INVALIDO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios?sort=password,asc",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ],
+       "query": [
+        {
+         "key": "sort",
+         "value": "password,asc"
+        }
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "password no está en la lista blanca: el orden jamás llega crudo a la consulta"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+         "pm.test(\"code CAMPO_ORDEN_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"CAMPO_ORDEN_INVALIDO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "size=101 → 400 PARAMETRO_INVALIDO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios?size=101",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ],
+       "query": [
+        {
+         "key": "size",
+         "value": "101"
+        }
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "El contrato acota size a 1..100; por encima responde 400, no recorta"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+         "var json = pm.response.json();",
+         "pm.test(\"code PARAMETRO_INVALIDO\", () => pm.expect(json.code).to.eql(\"PARAMETRO_INVALIDO\"));",
+         "pm.test(\"El mensaje menciona el tope\", () => pm.expect(json.message).to.contain(\"100\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "page=-1 → 400 PARAMETRO_INVALIDO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios?page=-1",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ],
+       "query": [
+        {
+         "key": "page",
+         "value": "-1"
+        }
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "page negativo responde 400 en vez de recortarse a 0"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+         "pm.test(\"code PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Obtener usuario por id → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{usuarioId}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{usuarioId}}"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "CA-02: el id sale del listado (variable usuarioId)"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.test(\"Trae id, nombre, correo, activo y rol\", () => {",
+         "  pm.expect(json).to.have.property(\"idUsuario\");",
+         "  pm.expect(json).to.have.property(\"nombre\").that.is.a(\"string\");",
+         "  pm.expect(json).to.have.property(\"correo\").that.is.a(\"string\");",
+         "  pm.expect(json).to.have.property(\"activo\").that.is.a(\"boolean\");",
+         "  pm.expect(json).to.have.property(\"rol\").with.property(\"nombre\").that.is.a(\"string\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Obtener usuario inexistente → 404",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/99999",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "99999"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "Id que no existe responde 404 con mensaje de dominio"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 404\", () => pm.response.to.have.status(404));",
+         "var json = pm.response.json();",
+         "pm.test(\"code RECURSO_NO_ENCONTRADO\", () => pm.expect(json.code).to.eql(\"RECURSO_NO_ENCONTRADO\"));",
+         "pm.test(\"Menciona el id\", () => pm.expect(json.message).to.contain(\"99999\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Obtener con id no numérico → 400",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/abc",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "abc"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "El path variable no numérico cae en el manejador de parámetros, no en 500"
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+         "pm.test(\"code PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "variable": [
+  {
+   "key": "baseUrl",
+   "value": "http://localhost:8080"
+  },
+  {
+   "key": "token",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "usuarioId",
+   "value": "1",
+   "type": "string"
+  }
+ ]
+}
