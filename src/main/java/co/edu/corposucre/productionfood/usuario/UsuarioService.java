@@ -59,10 +59,15 @@ public class UsuarioService {
                     "Ya existe un usuario registrado con el correo indicado.");
         }
 
+        return aResponse(usuario);
+    }
+
+    private static UsuarioResponse aResponse(Usuario usuario) {
+        var rol = usuario.getRol();
         return new UsuarioResponse(
                 usuario.getIdUsuario(),
-                nombre,
-                correo,
+                usuario.getNombre(),
+                usuario.getCorreo(),
                 Boolean.TRUE.equals(usuario.getEstado()),
                 new UsuarioResponse.RolResponse(rol.getIdRol(), rol.getNombre()));
     }
