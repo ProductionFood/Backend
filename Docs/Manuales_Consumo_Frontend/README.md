@@ -8,7 +8,8 @@ quien consume, complemento de `../../../docs/00-base/04-CONTRATO-API.md`.
 
 | Manual | Módulo | Estado |
 |---|---|---|
-| [HU-01 — Registro de usuarios](HU-01-registro-usuarios.md) | Auth + Usuarios + Roles | En curso (ver defecto 409 en `../../plans/Reestructuracion-HU-01.md`) |
+| [HU-01 — Registro de usuarios](HU-01-registro-usuarios.md) | Auth + Usuarios + Roles | Obsoleto (2026-10-01): ver aviso en su cabecera |
+| [HU-02 — Gestión de usuarios](HU-02-gestion-usuarios.md) | Usuarios (consulta, edición, estado) | Entregado 2026-10-01 |
 
 ## Qué debe tener un manual
 
