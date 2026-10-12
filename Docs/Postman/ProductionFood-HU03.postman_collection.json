@@ -1,0 +1,821 @@
+{
+ "info": {
+  "_postman_id": "hu03-inicio-sesion",
+  "name": "ProductionFood - HU-03 Inicio de Sesión",
+  "description": "Casos de la HU-03: POST /api/v1/auth/login y GET /api/v1/auth/perfil. Contrato vigente tras HU-03: login anidado (usuario), 401 CREDENCIALES_INVALIDAS y 403 USUARIO_INACTIVO. Corre sobre el backend arrancado con docker compose (MySQL + Flyway).",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ },
+ "item": [
+  {
+   "name": "00 - Setup",
+   "description": "Sesión del administrador, necesaria para crear el usuario desactivado",
+   "item": [
+    {
+     "name": "Login admin → 200 (CP-01)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "CA-01, CA-02: credenciales correctas → 200 con token, tipo y usuario anidado",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Login → 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.collectionVariables.set(\"token\", json.token);",
+         "pm.collectionVariables.set(\"adminId\", json.usuario.idUsuario);",
+         "pm.test(\"Trae token no vacío\", () => pm.expect(json.token).to.be.a(\"string\").and.not.empty);",
+         "pm.test(\"tipo es Bearer\", () => pm.expect(json.tipo).to.eql(\"Bearer\"));",
+         "pm.test(\"expiraEn en segundos (3600 = 1 h)\", () => {",
+         "  pm.expect(json.expiraEn).to.be.a(\"number\");",
+         "  pm.expect(json.expiraEn).to.eql(3600);",
+         "});",
+         "pm.test(\"usuario viene anidado con la forma de PerfilResponse\", () => {",
+         "  pm.expect(json.usuario).to.be.an(\"object\");",
+         "  pm.expect(json.usuario.idUsuario).to.be.a(\"number\");",
+         "  pm.expect(json.usuario.nombre).to.be.a(\"string\");",
+         "  pm.expect(json.usuario.correo).to.eql(\"admin@productionfood.local\");",
+         "  pm.expect(json.usuario.rol).to.eql(\"ADMIN\");",
+         "});",
+         "pm.test(\"Ya no viene plano: sin expiresIn ni nombre/correo sueltos (HU-03)\", () => {",
+         "  pm.expect(json).to.not.have.property(\"expiresIn\");",
+         "  pm.expect(json).to.not.have.property(\"nombre\");",
+         "  pm.expect(json).to.not.have.property(\"correo\");",
+         "});",
+         "pm.test(\"Nunca expone el hash (CP-14)\", () => {",
+         "  pm.expect(json).to.not.have.property(\"password\");",
+         "  pm.expect(json.usuario).to.not.have.property(\"password\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-03 · Credenciales inválidas",
+   "description": "CA-04 · R-01 · R-03: los tres fallos comparten el mismo código y mensaje",
+   "item": [
+    {
+     "name": "Contraseña incorrecta → 401 CREDENCIALES_INVALIDAS (CP-03)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Correo válido + contraseña errónea. Antes de HU-03 respondía 409.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"ClaveIncorrecta*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+         "var json = pm.response.json();",
+         "pm.test(\"code CREDENCIALES_INVALIDAS\", () => pm.expect(json.code).to.eql(\"CREDENCIALES_INVALIDAS\"));",
+         "pm.test(\"path del error\", () => pm.expect(json.path).to.eql(\"/api/v1/auth/login\"));",
+         "pm.collectionVariables.set(\"msgPassErr\", json.message);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Correo inexistente → 401 con el MISMO mensaje (CP-04/CP-05)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "R-01: la respuesta no puede revelar qué correos existen. Además el backend ejecuta un matches() contra un hash ficticio para igualar tiempos (R-03).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"noexiste@productionfood.local\",\n  \"password\": \"ClaveIncorrecta*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+         "var json = pm.response.json();",
+         "pm.test(\"code CREDENCIALES_INVALIDAS\", () => pm.expect(json.code).to.eql(\"CREDENCIALES_INVALIDAS\"));",
+         "pm.test(\"CP-05: mensaje idéntico al de contraseña incorrecta\", () =>",
+         "  pm.expect(json.message).to.eql(pm.collectionVariables.get(\"msgPassErr\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Inyección SQL en el correo → 401, no 500 (CP-15)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "El correo va por parámetro ligado: la comilla no cierra nada",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"admin@x.local' OR '1'='1\",\n  \"password\": \"ClaveIncorrecta*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 401 (no 500)\", () => pm.response.to.have.status(401));",
+         "pm.test(\"code CREDENCIALES_INVALIDAS\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"CREDENCIALES_INVALIDAS\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Correo vacío → 400 VALIDACION_FALLIDA (CP-09)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "@NotBlank y @Email sobre LoginRequest",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"\",\n  \"password\": \"x\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+         "var json = pm.response.json();",
+         "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(json.code).to.eql(\"VALIDACION_FALLIDA\"));",
+         "pm.test(\"fieldErrors señala el correo\", () => {",
+         "  var campos = json.fieldErrors.map(f => f.field);",
+         "  pm.expect(campos).to.include(\"correo\");",
+         "});"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-03 · Usuario desactivado",
+   "description": "CA-03 · R-02: el 403 solo llega tras validar la contraseña",
+   "item": [
+    {
+     "name": "Crear usuario a desactivar → 201",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Pre-requisito del folder: necesita el token del admin de 00 - Setup",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Usuario Inactivo HU03\",\n  \"correo\": \"{{inactivoCorreo}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.collectionVariables.set(\"inactivoCorreo\", \"inactivo-\" + Date.now() + \"@productionfood.local\");"
+        ]
+       }
+      },
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"Crear → 201\", () => pm.response.to.have.status(201));",
+         "pm.collectionVariables.set(\"inactivoId\", pm.response.json().idUsuario);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Login del usuario activo → 200",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Control del flujo: mientras está activo el login responde 200 con su token propio",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"{{inactivoCorreo}}\",\n  \"password\": \"Clave2026*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.collectionVariables.set(\"tokenInactivo\", json.token);",
+         "pm.test(\"rol VENTAS\", () => pm.expect(json.usuario.rol).to.eql(\"VENTAS\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Desactivar con el admin → 200",
+     "request": {
+      "method": "PATCH",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{inactivoId}}/estado",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{inactivoId}}",
+        "estado"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Endpoint de HU-02 usado como pre-requisito de HU-03",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"activo\": false\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "pm.test(\"Queda inactivo\", () => pm.expect(pm.response.json().activo).to.eql(false));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Login del desactivado → 403 USUARIO_INACTIVO (CP-07)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Credenciales CORRECTAS sobre cuenta desactivada: 403, no 401. Antes de HU-03 respondía 401 CREDENCIALES_INVALIDAS.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"{{inactivoCorreo}}\",\n  \"password\": \"Clave2026*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+         "var json = pm.response.json();",
+         "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(json.code).to.eql(\"USUARIO_INACTIVO\"));",
+         "pm.test(\"El mensaje menciona la desactivación\", () =>",
+         "  pm.expect(json.message).to.contain(\"desactivado\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "CP-08: desactivado + contraseña errónea → 401, NO 403 (R-02)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "login"
+       ]
+      },
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "El estado se mira DESPUÉS de la contraseña. Si aquí saliera 403, el atacante sabría que el correo existe sin conocerla.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"{{inactivoCorreo}}\",\n  \"password\": \"ClaveIncorrecta*\"\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+         "var json = pm.response.json();",
+         "pm.test(\"code CREDENCIALES_INVALIDAS (no USUARIO_INACTIVO)\", () =>",
+         "  pm.expect(json.code).to.eql(\"CREDENCIALES_INVALIDAS\"));",
+         "pm.test(\"Coincide con el mensaje genérico\", () =>",
+         "  pm.expect(json.message).to.eql(pm.collectionVariables.get(\"msgPassErr\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Token del desactivado en /perfil → 403 USUARIO_INACTIVO (SEC-05)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/perfil",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "perfil"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{tokenInactivo}}"
+       }
+      ],
+      "description": "El token se emitió antes de la desactivación; el filtro lee el estado en cada petición y corta de inmediato (R-05)",
+      "body": {
+       "mode": "raw",
+       "raw": ""
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+         "pm.test(\"code USUARIO_INACTIVO\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Reactivar → 200 (cierre del folder)",
+     "request": {
+      "method": "PATCH",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios/{{inactivoId}}/estado",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "usuarios",
+        "{{inactivoId}}",
+        "estado"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "description": "Deja la base como estaba y reactiva el token ya emitido: el perfil del siguiente folder vuelve a responder 200",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"activo\": true\n}"
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "pm.test(\"Vuelve a estar activo\", () => pm.expect(pm.response.json().activo).to.eql(true));"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-03 · Perfil",
+   "description": "CP-16 · SEC-01..SEC-03: el perfil exige sesión pero no rol",
+   "item": [
+    {
+     "name": "Perfil con token válido → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/perfil",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "perfil"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{token}}"
+       }
+      ],
+      "description": "CP-16: devuelve los mismos datos que devuelve usuario en el login",
+      "body": {
+       "mode": "raw",
+       "raw": ""
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.test(\"Misma forma que PerfilResponse\", () => {",
+         "  pm.expect(json).to.have.property(\"idUsuario\").that.is.a(\"number\");",
+         "  pm.expect(json).to.have.property(\"nombre\").that.is.a(\"string\");",
+         "  pm.expect(json).to.have.property(\"correo\").that.is.a(\"string\");",
+         "  pm.expect(json).to.have.property(\"rol\").that.is.a(\"string\");",
+         "});",
+         "pm.test(\"Coincide con el usuario del login\", () =>",
+         "  pm.expect(json.idUsuario).to.eql(pm.collectionVariables.get(\"adminId\")));",
+         "pm.test(\"Nunca expone el hash (CP-14)\", () =>",
+         "  pm.expect(json).to.not.have.property(\"password\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Perfil de un VENTAS → 200 (cualquier rol autenticado)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/perfil",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "perfil"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer {{tokenInactivo}}"
+       }
+      ],
+      "description": "El endpoint NO exige rol: usa el token VENTAS reactivado en el folder anterior y devuelve su propio perfil",
+      "body": {
+       "mode": "raw",
+       "raw": ""
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+         "var json = pm.response.json();",
+         "pm.test(\"rol VENTAS, no se exige ADMIN\", () => pm.expect(json.rol).to.eql(\"VENTAS\"));",
+         "pm.test(\"Ve su propio id\", () =>",
+         "  pm.expect(json.idUsuario).to.eql(pm.collectionVariables.get(\"inactivoId\")));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Perfil sin sesión → 401 NO_AUTENTICADO (SEC-01)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/perfil",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "perfil"
+       ]
+      },
+      "header": [],
+      "description": "Sin cabecera Authorization. Ojo: el código es NO_AUTENTICADO, NO CREDENCIALES_INVALIDAS — es lo que distingue «sesión caducada» de «credenciales malas».",
+      "body": {
+       "mode": "raw",
+       "raw": ""
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+         "var json = pm.response.json();",
+         "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(json.code).to.eql(\"NO_AUTENTICADO\"));",
+         "pm.test(\"path del error\", () => pm.expect(json.path).to.eql(\"/api/v1/auth/perfil\"));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Perfil con token malformado → 401 NO_AUTENTICADO (SEC-02/CP-11)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/perfil",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "v1",
+        "auth",
+        "perfil"
+       ]
+      },
+      "header": [
+       {
+        "key": "Authorization",
+        "value": "Bearer no-es-un-jwt"
+       }
+      ],
+      "description": "Sin cabecera válida o con firma inválida: mismo 401 NO_AUTENTICADO",
+      "body": {
+       "mode": "raw",
+       "raw": ""
+      }
+     },
+     "response": [],
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+         "pm.test(\"code NO_AUTENTICADO\", () =>",
+         "  pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "variable": [
+  {
+   "key": "baseUrl",
+   "value": "http://localhost:8080"
+  },
+  {
+   "key": "token",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "adminId",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "msgPassErr",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "inactivoCorreo",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "inactivoId",
+   "value": "",
+   "type": "string"
+  },
+  {
+   "key": "tokenInactivo",
+   "value": "",
+   "type": "string"
+  }
+ ]
+}
