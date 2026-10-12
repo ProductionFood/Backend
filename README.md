@@ -43,6 +43,7 @@ archivo.
 | `DB_USER` | `root` | Usuario de MySQL. |
 | `DB_PASSWORD` | `local` | Contraseña de root; debe coincidir con la de Compose. |
 | `JWT_SECRET` | — | Secreto para firmar los JWT. |
+| `SERVER_PORT` | `8080` | Puerto HTTP del backend. Cámbialo si `8080` está ocupado (p. ej. por otro contenedor). |
 
 ## Ejecutar
 
