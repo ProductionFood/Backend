@@ -23,6 +23,13 @@ import io.jsonwebtoken.JwtException;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    /**
+     * Mismo código y mensaje que EntryPointNoAutenticado: el cliente no debe poder
+     * distinguir por el cuerpo por qué falló su token (SEC-01..SEC-03).
+     */
+    private static final String MSG_NO_AUTENTICADO =
+            "Su sesión ha expirado. Inicie sesión nuevamente.";
+
     private final JwtService jwtService;
     private final UsuarioRepository usuarioRepository;
 
@@ -38,13 +45,38 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")) {
             try {
                 Claims claims = jwtService.validarYExtraer(header.substring(7));
-                var usuario = usuarioRepository.findConRolById(
-                        Integer.valueOf(claims.getSubject()));
-                if (usuario.isEmpty() || !Boolean.TRUE.equals(usuario.get().getEstado())) {
+
+                // SEC-02: el `sub` es el id numérico que emite JwtService.generar.
+                // Si no lo es, el token está malformado: NumberFormatException NO es
+                // JwtException, así que el catch de abajo no lo capturaría y subiría
+                // al GlobalExceptionHandler como 500 ERROR_INTERNO. Un token que no
+                // podemos ni identificar es, para el cliente, un token no válido.
+                int idUsuario;
+                try {
+                    idUsuario = Integer.parseInt(claims.getSubject());
+                } catch (NumberFormatException ex) {
+                    escribirNoAutenticado(res, req);
+                    return;
+                }
+
+                var usuario = usuarioRepository.findConRolById(idUsuario);
+
+                // El id del token no está en la base: la identidad que porta el token
+                // ya no existe (borrado o de otro entorno). No es una baja, es una
+                // petición sin identidad reconocible, así que responde 401 y no 403.
+                if (usuario.isEmpty()) {
+                    escribirNoAutenticado(res, req);
+                    return;
+                }
+
+                // R-05 / SEC-05: el estado se comprueba en CADA petición, porque el
+                // token sigue siendo criptográficamente válido tras una baja.
+                if (!Boolean.TRUE.equals(usuario.get().getEstado())) {
                     RespuestaSeguridad.escribir(res, req, HttpStatus.FORBIDDEN,
                             "USUARIO_INACTIVO", "Su usuario está desactivado. Contacte al administrador.");
                     return;
                 }
+
                 var u = usuario.get();
                 var rol = u.getRol().getNombre();
                 var authorities = List.of(
@@ -64,5 +96,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         chain.doFilter(req, res);
+    }
+
+    private void escribirNoAutenticado(HttpServletResponse res, HttpServletRequest req)
+            throws IOException {
+        RespuestaSeguridad.escribir(res, req, HttpStatus.UNAUTHORIZED,
+                "NO_AUTENTICADO", MSG_NO_AUTENTICADO);
     }
 }

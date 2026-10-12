@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -100,8 +101,8 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("Token de usuario inexistente responde 403 y corta la petición")
-    void tokenDeUsuarioInexistenteResponde403() throws Exception {
+    @DisplayName("Token de usuario inexistente responde 401 y corta la petición")
+    void tokenDeUsuarioInexistenteResponde401() throws Exception {
         var claims = claimsDe(7);
         when(jwtService.validarYExtraer("token-valido")).thenReturn(claims);
         when(usuarioRepository.findConRolById(7)).thenReturn(Optional.empty());
@@ -111,10 +112,50 @@ class JwtAuthenticationFilterTest {
 
         filtro.doFilter(req, res, chain);
 
-        assertThat(res.getStatus()).isEqualTo(403);
-        assertThat(res.getContentAsString()).contains("\"code\":\"USUARIO_INACTIVO\"");
+        assertThat(res.getStatus()).isEqualTo(401);
+        assertThat(res.getContentAsString()).contains("\"code\":\"NO_AUTENTICADO\"");
         assertThat(chain.getRequest()).isNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    @DisplayName("Token con subject no numérico responde 401 sin consultar la base de datos")
+    void tokenConSubjectNoNumericoResponde401() throws Exception {
+        var claims = claimsDe("no-es-un-id");
+        when(jwtService.validarYExtraer("token-valido")).thenReturn(claims);
+        var req = peticionConToken("token-valido");
+        var res = new MockHttpServletResponse();
+        var chain = new MockFilterChain();
+
+        filtro.doFilter(req, res, chain);
+
+        assertThat(res.getStatus()).isEqualTo(401);
+        assertThat(res.getContentAsString()).contains("\"code\":\"NO_AUTENTICADO\"");
+        assertThat(chain.getRequest()).isNull();
+        verifyNoInteractions(usuarioRepository);
+    }
+
+    @Test
+    @DisplayName("Usuario inexistente no se confunde con usuario inactivo")
+    void usuarioInexistenteNoSeConfundeConInactivo() throws Exception {
+        var claims = claimsDe(7);
+        when(jwtService.validarYExtraer("token-valido")).thenReturn(claims);
+        when(usuarioRepository.findConRolById(7)).thenReturn(Optional.empty());
+
+        var resInexistente = new MockHttpServletResponse();
+        filtro.doFilter(peticionConToken("token-valido"), resInexistente, new MockFilterChain());
+
+        // Se construye antes del when(): el helper stubbea el mock del rol y no puede
+        // evaluarse dentro de otro when (UnfinishedStubbingException).
+        var inactivo = usuario(7, false);
+        when(usuarioRepository.findConRolById(7)).thenReturn(Optional.of(inactivo));
+        var resInactivo = new MockHttpServletResponse();
+        filtro.doFilter(peticionConToken("token-valido"), resInactivo, new MockFilterChain());
+
+        assertThat(resInexistente.getStatus()).isEqualTo(401);
+        assertThat(resInexistente.getContentAsString()).contains("\"code\":\"NO_AUTENTICADO\"");
+        assertThat(resInactivo.getStatus()).isEqualTo(403);
+        assertThat(resInactivo.getContentAsString()).contains("\"code\":\"USUARIO_INACTIVO\"");
     }
 
     @Test
@@ -139,6 +180,12 @@ class JwtAuthenticationFilterTest {
     private Claims claimsDe(int id) {
         var claims = mock(Claims.class);
         when(claims.getSubject()).thenReturn(String.valueOf(id));
+        return claims;
+    }
+
+    private Claims claimsDe(String subject) {
+        var claims = mock(Claims.class);
+        when(claims.getSubject()).thenReturn(subject);
         return claims;
     }
 
