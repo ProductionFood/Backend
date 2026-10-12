@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -19,6 +20,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -174,6 +176,24 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getBody().code()).isEqualTo("METODO_NO_PERMITIDO");
         assertThat(resp.getBody().message())
                 .isEqualTo("El método 'DELETE' no está permitido para este recurso.");
+        assertThat(resp.getBody().fieldErrors()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Ruta sin controlador responde 404 RECURSO_NO_ENCONTRADO")
+    void rutaNoEncontradaResponde404() {
+        var resp = handler.rutaNoEncontrada(
+                new NoResourceFoundException(
+                        HttpMethod.GET,
+                        "api/v1/loquesea",
+                        "No static resource api/v1/loquesea."),
+                req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("RECURSO_NO_ENCONTRADO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("No existe el recurso solicitado.");
         assertThat(resp.getBody().fieldErrors()).isEmpty();
     }
 

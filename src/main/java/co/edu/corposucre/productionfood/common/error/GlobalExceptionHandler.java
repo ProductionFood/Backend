@@ -18,6 +18,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -84,6 +85,19 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.METHOD_NOT_ALLOWED, "METODO_NO_PERMITIDO",
                      "El método '" + ex.getMethod()
                              + "' no está permitido para este recurso.",
+                     req.getRequestURI(), List.of());
+    }
+
+    // Spring lanza NoResourceFoundException para toda URL sin controlador. Este handler
+    // específico gana sobre el @ExceptionHandler(Exception.class) genérico (Spring elige el
+    // más específico): sin él, cualquier ruta mal escrita o endpoint mal enrutado devuelve
+    // 500 y ensucia los logs con errores que en realidad son 404.
+    @ExceptionHandler(NoResourceFoundException.class)
+    ResponseEntity<ErrorResponse> rutaNoEncontrada(
+            NoResourceFoundException ex, HttpServletRequest req) {
+        log.debug("Ruta sin controlador: {}", req.getRequestURI());
+        return build(HttpStatus.NOT_FOUND, "RECURSO_NO_ENCONTRADO",
+                     "No existe el recurso solicitado.",
                      req.getRequestURI(), List.of());
     }
 
