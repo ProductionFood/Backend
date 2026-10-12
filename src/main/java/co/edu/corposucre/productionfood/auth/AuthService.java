@@ -6,8 +6,10 @@ import org.springframework.stereotype.Service;
 
 import co.edu.corposucre.productionfood.auth.dto.LoginRequest;
 import co.edu.corposucre.productionfood.auth.dto.LoginResponse;
+import co.edu.corposucre.productionfood.auth.dto.PerfilResponse;
 import co.edu.corposucre.productionfood.common.error.AutenticacionException;
 import co.edu.corposucre.productionfood.security.JwtService;
+import co.edu.corposucre.productionfood.security.SecurityUtils;
 import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
 import co.edu.corposucre.productionfood.usuario.UsuarioRepository;
 
@@ -80,6 +82,34 @@ public class AuthService {
                 usuario.getCorreo(),
                 usuario.getNombre(),
                 usuario.getRol().getNombre());
+    }
+
+    /**
+     * Perfil del usuario autenticado (GET /api/v1/auth/perfil).
+     *
+     * Los datos salen del principal que JwtAuthenticationFilter ya dejó en el
+     * SecurityContext, no de la base de datos: una segunda consulta por los mismos
+     * datos sería trabajo desperdiciado y abriría la puerta a devolver información
+     * distinta de la que el token ya vale.
+     */
+    public PerfilResponse perfil() {
+        var usuario = SecurityUtils.usuarioActual();
+
+        if (usuario == null) {
+            // Defensivo: la ruta está protegida por la cadena de filtros, así que aquí
+            // solo se llega desde un camino no cubierto por ella (p. ej. una prueba).
+            // Mismo código y estilo de mensaje que EntryPointNoAutenticado.
+            throw new AutenticacionException(
+                    "NO_AUTENTICADO",
+                    HttpStatus.UNAUTHORIZED,
+                    "Su sesión ha expirado. Inicie sesión nuevamente.");
+        }
+
+        return new PerfilResponse(
+                usuario.idUsuario(),
+                usuario.nombre(),
+                usuario.correo(),
+                usuario.rol());
     }
 
     /**
