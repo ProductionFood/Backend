@@ -8,6 +8,7 @@ import co.edu.corposucre.productionfood.auth.dto.LoginRequest;
 import co.edu.corposucre.productionfood.auth.dto.LoginResponse;
 import co.edu.corposucre.productionfood.auth.dto.PerfilResponse;
 import co.edu.corposucre.productionfood.common.error.AutenticacionException;
+import co.edu.corposucre.productionfood.security.MensajesSeguridad;
 import co.edu.corposucre.productionfood.security.JwtService;
 import co.edu.corposucre.productionfood.security.SecurityUtils;
 import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
@@ -64,7 +65,7 @@ public class AuthService {
             throw new AutenticacionException(
                     "USUARIO_INACTIVO",
                     HttpStatus.FORBIDDEN,
-                    "Su usuario está desactivado. Contacte al administrador.");
+                    MensajesSeguridad.MSG_USUARIO_INACTIVO);
         }
 
         var autenticado = new UsuarioAutenticado(
@@ -75,6 +76,9 @@ public class AuthService {
 
         var token = jwtService.generar(autenticado);
 
+        // R-04: `expiraEn` se deriva de app.jwt.expiration-ms, no de un literal, para
+        // que cambiar la vigencia en la configuración no obligue a tocar este código
+        // (y no pueda quedar desincronizado con la firma real del token).
         return new LoginResponse(
                 token,
                 "Bearer",
@@ -100,11 +104,12 @@ public class AuthService {
         if (usuario == null) {
             // Defensivo: la ruta está protegida por la cadena de filtros, así que aquí
             // solo se llega desde un camino no cubierto por ella (p. ej. una prueba).
-            // Mismo código y estilo de mensaje que EntryPointNoAutenticado.
+            // Comparte código y mensaje con EntryPointNoAutenticado: son la misma
+            // constante, no dos textos que hay que mantener iguales a mano.
             throw new AutenticacionException(
                     "NO_AUTENTICADO",
                     HttpStatus.UNAUTHORIZED,
-                    "Su sesión ha expirado. Inicie sesión nuevamente.");
+                    MensajesSeguridad.MSG_NO_AUTENTICADO);
         }
 
         return new PerfilResponse(

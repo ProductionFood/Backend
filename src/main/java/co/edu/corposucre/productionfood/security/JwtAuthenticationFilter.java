@@ -23,13 +23,6 @@ import io.jsonwebtoken.JwtException;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    /**
-     * Mismo código y mensaje que EntryPointNoAutenticado: el cliente no debe poder
-     * distinguir por el cuerpo por qué falló su token (SEC-01..SEC-03).
-     */
-    private static final String MSG_NO_AUTENTICADO =
-            "Su sesión ha expirado. Inicie sesión nuevamente.";
-
     private final JwtService jwtService;
     private final UsuarioRepository usuarioRepository;
 
@@ -38,9 +31,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.usuarioRepository = usuarioRepository;
     }
 
+    /**
+     * ¿La petición va a la ruta pública de login?
+     *
+     * Comparación por igualdad exacta a propósito (no {@code startsWith}): un
+     * prefijo "/api/v1/auth/" dejaría públicas rutas protegidas como
+     * /api/v1/auth/perfil. Ver {@link RutasPublicas#LOGIN}, que es la misma
+     * constante que usa SecurityConfig para el permitAll.
+     */
+    private static boolean esLogin(HttpServletRequest req) {
+        // requestURI incluye el contextPath; los matchers de Spring no, así que se
+        // compara sobre la ruta relativa al contexto para que ambos coincidan.
+        String uri = req.getRequestURI();
+        String ctx = req.getContextPath();
+        if (ctx != null && !ctx.isEmpty() && uri.startsWith(ctx)) {
+            uri = uri.substring(ctx.length());
+        }
+        return RutasPublicas.LOGIN.equals(uri);
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
                                     FilterChain chain) throws ServletException, IOException {
+
         // El login es la única ruta pública y este filtro corre ANTES que las reglas
         // de autorización: el único modo de respetar `permitAll` es no cortarla nunca.
         // Cortarla impedía que un cliente con un token caducado, de un usuario dado de
@@ -76,7 +89,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 // El id del token no está en la base: la identidad que porta el token
                 // ya no existe (borrado o de otro entorno). No es una baja, es una
-                // petición sin identidad reconocible, así que responde 401 y no 403.
+                // petición sin identidad recognizable, así que responde 401 y no 403.
                 if (usuario.isEmpty()) {
                     escribirNoAutenticado(res, req);
                     return;
@@ -86,7 +99,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // token sigue siendo criptográficamente válido tras una baja.
                 if (!Boolean.TRUE.equals(usuario.get().getEstado())) {
                     RespuestaSeguridad.escribir(res, req, HttpStatus.FORBIDDEN,
-                            "USUARIO_INACTIVO", "Su usuario está desactivado. Contacte al administrador.");
+                            "USUARIO_INACTIVO", MensajesSeguridad.MSG_USUARIO_INACTIVO);
                     return;
                 }
 
@@ -111,26 +124,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         chain.doFilter(req, res);
     }
 
-    /**
-     * Si la petición es al login, única ruta pública. Compara con igualdad EXACTA
-     * contra la misma constante que usa SecurityConfig para el permitAll: un prefijo
-     * tipo "/api/v1/auth/" dejaría públicas rutas futuras como
-     * /api/v1/auth/perfil, que hoy están protegidas.
-     */
-    private static boolean esLogin(HttpServletRequest req) {
-        // requestURI incluye el contextPath; los matchers de Spring no, así que se
-        // compara sobre la ruta relativa al contexto para que ambos coincidan.
-        String uri = req.getRequestURI();
-        String ctx = req.getContextPath();
-        if (ctx != null && !ctx.isEmpty() && uri.startsWith(ctx)) {
-            uri = uri.substring(ctx.length());
-        }
-        return RutasPublicas.LOGIN.equals(uri);
-    }
-
     private void escribirNoAutenticado(HttpServletResponse res, HttpServletRequest req)
             throws IOException {
         RespuestaSeguridad.escribir(res, req, HttpStatus.UNAUTHORIZED,
-                "NO_AUTENTICADO", MSG_NO_AUTENTICADO);
+                "NO_AUTENTICADO", MensajesSeguridad.MSG_NO_AUTENTICADO);
     }
 }
