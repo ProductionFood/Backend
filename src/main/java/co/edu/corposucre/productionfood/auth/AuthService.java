@@ -78,10 +78,12 @@ public class AuthService {
         return new LoginResponse(
                 token,
                 "Bearer",
-                3600,
-                usuario.getCorreo(),
-                usuario.getNombre(),
-                usuario.getRol().getNombre());
+                jwtService.expiracionSegundos(),
+                new PerfilResponse(
+                        usuario.getIdUsuario(),
+                        usuario.getNombre(),
+                        usuario.getCorreo(),
+                        usuario.getRol().getNombre()));
     }
 
     /**

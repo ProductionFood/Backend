@@ -39,6 +39,17 @@ public class JwtService {
                 .compact();
     }
 
+    /**
+     * Vigencia del token en SEGUNDOS, tal y como la anuncia la respuesta de login.
+     *
+     * Se expone para que quien la construya no tenga que repetir (ni inventar) la
+     * conversión: cambiar `app.jwt.expiration-ms` en application.yml cambia a la vez
+     * la firma del token y el `expiraEn` que ve el cliente.
+     */
+    public long expiracionSegundos() {
+        return expiracionMs / 1000;
+    }
+
     public Claims validarYExtraer(String token) {
         return Jwts.parser()
                 .verifyWith(key)

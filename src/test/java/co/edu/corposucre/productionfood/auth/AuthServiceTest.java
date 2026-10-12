@@ -64,21 +64,42 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("Credenciales válidas devuelven token con los datos del usuario")
+    @DisplayName("Credenciales válidas devuelven token con los datos del usuario anidados")
     void loginCredencialesValidasDevuelveToken() {
         usuarioExiste(usuario("admin@productionfood.local", true));
         when(passwordEncoder.matches("Admin123*", "$2a$hash-falso")).thenReturn(true);
         when(jwtService.generar(any())).thenReturn("token-falso");
+        when(jwtService.expiracionSegundos()).thenReturn(3600L);
 
         var r = authService.login(
                 new LoginRequest("admin@productionfood.local", "Admin123*"));
 
         assertThat(r.token()).isEqualTo("token-falso");
         assertThat(r.tipo()).isEqualTo("Bearer");
-        assertThat(r.expiresIn()).isEqualTo(3600);
-        assertThat(r.correo()).isEqualTo("admin@productionfood.local");
-        assertThat(r.nombre()).isEqualTo("Administrador Inicial");
-        assertThat(r.rol()).isEqualTo("ADMIN");
+        assertThat(r.expiraEn()).isEqualTo(3600L);
+        assertThat(r.usuario().idUsuario()).isEqualTo(7);
+        assertThat(r.usuario().nombre()).isEqualTo("Administrador Inicial");
+        assertThat(r.usuario().correo()).isEqualTo("admin@productionfood.local");
+        assertThat(r.usuario().rol()).isEqualTo("ADMIN");
+    }
+
+    @Test
+    @DisplayName("expiraEn sale de la configuración del token, no de un literal")
+    void loginExpiraEnVieneDeLaConfiguracionDelToken() {
+        // R-04: si el valor estuviera escrito en el código, cambiar la vigencia en
+        // application.yml dejaría el token real y el que anuncia la respuesta
+        // diciendo cosas distintas. Se usa un valor que NO es 3600 para que un
+        // literal (o el valor por defecto) no pueda hacer pasar la prueba.
+        usuarioExiste(usuario("admin@productionfood.local", true));
+        when(passwordEncoder.matches("Admin123*", "$2a$hash-falso")).thenReturn(true);
+        when(jwtService.generar(any())).thenReturn("token-falso");
+        when(jwtService.expiracionSegundos()).thenReturn(900L);
+
+        var r = authService.login(
+                new LoginRequest("admin@productionfood.local", "Admin123*"));
+
+        assertThat(r.expiraEn()).isEqualTo(900L);
+        verify(jwtService).expiracionSegundos();
     }
 
     @Test

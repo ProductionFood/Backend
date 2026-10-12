@@ -71,6 +71,23 @@ class JwtServiceTest {
     }
 
     @Test
+    @DisplayName("expiraEn se anuncia en segundos, convertido de la vigencia configurada")
+    void expiracionEnSegundosSaleDeLaVigenciaConfigurada() {
+        assertThat(servicio.expiracionSegundos()).isEqualTo(3_600L);
+    }
+
+    @Test
+    @DisplayName("El token expira en tantos segundos como anuncia expiracionSegundos (R-04)")
+    void elTokenExpiraEnLosSegundosAnunciados() {
+        var claims = servicio.validarYExtraer(servicio.generar(usuario()));
+
+        var segundosDelToken = (claims.getExpiration().getTime()
+                - claims.getIssuedAt().getTime()) / 1000;
+
+        assertThat(segundosDelToken).isEqualTo(servicio.expiracionSegundos());
+    }
+
+    @Test
     @DisplayName("Un token vencido se rechaza con ExpiredJwtException")
     void tokenVencidoSeRechaza() {
         var vencido = new JwtService(SECRETO, -1_000L);
