@@ -17,6 +17,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import co.edu.corposucre.productionfood.security.AccesoDenegadoHandler;
 import co.edu.corposucre.productionfood.security.EntryPointNoAutenticado;
 import co.edu.corposucre.productionfood.security.JwtAuthenticationFilter;
+import co.edu.corposucre.productionfood.security.RutasPublicas;
 
 @Configuration
 @EnableWebSecurity
@@ -42,7 +43,7 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/login").permitAll()
+                .requestMatchers(RutasPublicas.LOGIN).permitAll()
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                 .anyRequest().authenticated())
             .exceptionHandling(e -> e

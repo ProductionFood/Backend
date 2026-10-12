@@ -41,6 +41,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
                                     FilterChain chain) throws ServletException, IOException {
+        // El login es la única ruta pública y este filtro corre ANTES que las reglas
+        // de autorización: el único modo de respetar `permitAll` es no cortarla nunca.
+        // Cortarla impedía que un cliente con un token caducado, de un usuario dado de
+        // baja o de un id que ya no existe en la base pudiera volver a iniciar sesión.
+        // Se resuelve sin mirar la cabecera ni tocar la base (aquí no hay nada que
+        // autenticar) y limpiando el contexto, para que ninguna identidad caducada
+        // llegue al controlador.
+        if (esLogin(req)) {
+            SecurityContextHolder.clearContext();
+            chain.doFilter(req, res);
+            return;
+        }
+
         String header = req.getHeader("Authorization");
         if (header != null && header.startsWith("Bearer ")) {
             try {
@@ -96,6 +109,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         chain.doFilter(req, res);
+    }
+
+    /**
+     * Si la petición es al login, única ruta pública. Compara con igualdad EXACTA
+     * contra la misma constante que usa SecurityConfig para el permitAll: un prefijo
+     * tipo "/api/v1/auth/" dejaría públicas rutas futuras como
+     * /api/v1/auth/perfil, que hoy están protegidas.
+     */
+    private static boolean esLogin(HttpServletRequest req) {
+        // requestURI incluye el contextPath; los matchers de Spring no, así que se
+        // compara sobre la ruta relativa al contexto para que ambos coincidan.
+        String uri = req.getRequestURI();
+        String ctx = req.getContextPath();
+        if (ctx != null && !ctx.isEmpty() && uri.startsWith(ctx)) {
+            uri = uri.substring(ctx.length());
+        }
+        return RutasPublicas.LOGIN.equals(uri);
     }
 
     private void escribirNoAutenticado(HttpServletResponse res, HttpServletRequest req)
