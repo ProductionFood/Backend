@@ -11,7 +11,7 @@
 
 | Método | Ruta | Códigos | Descripción |
 |---|---|---|---|
-| POST | `/api/v1/auth/login` | 200/400/409 | Login, emite JWT Bearer con vigencia de 1 hora |
+| POST | `/api/v1/auth/login` | 200/400/409 → **hoy 200/400/401/403** | Login, emite JWT Bearer con vigencia de 1 hora |
 | POST | `/api/v1/usuarios` | 201/400/409 | Crear usuario (requiere ADMIN) |
 | GET | `/api/v1/roles` | 200/401/403 | Listar roles (requiere ADMIN) |
 
@@ -22,6 +22,12 @@ Reglas de negocio implementadas:
 - El usuario nace con `activo: true`.
 - Login con correo desconocido, contraseña incorrecta **o** usuario inactivo devuelve el
   mismo 409 `CREDENCIALES_INVALIDAS` (no revela cuál de los tres falló).
+  > **Corregido por HU-03 (2026-10-12):** este `409` ya no existe. El contrato vigente
+  > diferencia los casos — `401 CREDENCIALES_INVALIDAS` para correo inexistente o
+  > contraseña incorrecta, y `403 USUARIO_INACTIVO` para credenciales correctas sobre
+  > cuenta desactivada —, con el estado comprobado **después** de validar la contraseña.
+  > Ver `HU-03-inicio-sesion.md`. Lo que sigue describe la entrega de HU-01 tal como
+  > estaba el 2026-09-25.
 - JWT HS384 con vigencia de 1 h (`app.jwt.expiration-ms=3600000`); sin refresh token
   (alcance de HU-01 según `docs/00-base/04-CONTRATO-API.md` §2).
 - Contrato de errores de seguridad: 401 `NO_AUTENTICADO`, 403 `SIN_PERMISO` y
@@ -34,6 +40,10 @@ Reglas de negocio implementadas:
 Ejemplos reales (ejecución del 2026-09-25, token truncado):
 
 **POST /api/v1/auth/login → 200**
+
+> **Ejemplo histórico.** El contrato vigente devuelve `{token, tipo, expiraEn, usuario:
+> {idUsuario, nombre, correo, rol}}` en lugar de estos campos planos, y responde `401`
+> (no `409`) con credenciales incorrectas. Ver `HU-03-inicio-sesion.md`.
 
 ```json
 {

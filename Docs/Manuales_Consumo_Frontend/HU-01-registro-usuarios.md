@@ -1,14 +1,24 @@
 # HU-01 — Registro de usuarios · Manual de consumo
 
 > **⚠️ OBSOLETO (2026-10-01).** Este manual quedó atrás respecto del contrato vigente:
-> aún habla de un «409 falso al crear usuario» (defecto ya resuelto), muestra `estado`
-> en vez de `activo` en la respuesta, y listaba login inválido como `401` (el contrato
-> es `409 CREDENCIALES_INVALIDAS`). La fuente autoritativa actual es
+> aún habla de un «409 falso al crear usuario» (defecto ya resuelto) y muestra `estado`
+> en vez de `activo` en la respuesta. La fuente autoritativa actual es
 > `../../../docs/00-base/04-CONTRATO-API.md`; para la gestión de usuarios ver
-> [HU-02 — Gestión de usuarios](HU-02-gestion-usuarios.md). Se mantiene solo como
-> histórico.
+> [HU-02 — Gestión de usuarios](HU-02-gestion-usuarios.md), y para autenticación
+> [HU-03 — Inicio de sesión](HU-03-inicio-sesion.md). Se mantiene solo como histórico.
+>
+> **Nota — la sección de autenticación de abajo quedó desalineada por HU-03.** El
+> ejemplo de respuesta del login y el status del login inválido que aquí se describen
+> **ya no son ciertos**: el contrato vigente es `401 CREDENCIALES_INVALIDAS` y respuesta
+> anidada (`expiraEn` + `usuario`). Usa
+> [HU-03 — Inicio de sesión](HU-03-inicio-sesion.md) para autenticar; lo que sigue vale
+> para registro y roles.
 
 ## Autenticación
+
+> **Sección superada por [HU-03](HU-03-inicio-sesion.md).** El status del login inválido
+> es `401 CREDENCIALES_INVALIDAS` (no `409`) y la respuesta viene anidada con `expiraEn` y
+> `usuario`. Se conserva aquí la versión de HU-01 como histórico.
 
 El módulo requiere JWT con rol `ADMIN`:
 
