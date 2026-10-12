@@ -1,0 +1,697 @@
+{
+ "info": {
+  "_postman_id": "hu04-bitacora-auditoria",
+  "name": "ProductionFood - HU-04 Bitácora de Auditoría",
+  "description": "Casos de la HU-04: GET /api/v1/bitacora y GET /api/v1/bitacora/acciones (solo ADMIN, solo lectura). Verifica además que las escrituras de usuarios y el login quedan auditados. Corre sobre el backend arrancado con docker compose (MySQL + Flyway) en {{baseUrl}} (por defecto http://localhost:9211, el SERVER_PORT del .env).",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ },
+ "item": [
+  {
+   "name": "00 - Setup",
+   "description": "Sesión del administrador; el token lo usan todas las peticiones de bitácora",
+   "item": [
+    {
+     "name": "Login admin → 200",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "auth", "login"]
+      },
+      "header": [{ "key": "Content-Type", "value": "application/json" }],
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "var json = pm.response.json();",
+        "pm.collectionVariables.set(\"token\", json.token);",
+        "pm.collectionVariables.set(\"adminId\", json.usuario.idUsuario);",
+        "pm.test(\"rol ADMIN\", () => pm.expect(json.usuario.rol).to.eql(\"ADMIN\"));"
+       ]
+      }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-04 · Consulta",
+   "description": "CA-01..CA-03: listado, filtros, paginación y catálogo de acciones",
+   "item": [
+    {
+     "name": "Listar bitácora → 200 (envelope paginado)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?size=20&sort=fecha,desc",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "size", "value": "20" },
+        { "key": "sort", "value": "fecha,desc" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "var json = pm.response.json();",
+        "pm.test(\"envelope de colección completo\", () => {",
+        "  pm.expect(json).to.have.property(\"content\").that.is.an(\"array\");",
+        "  pm.expect(json).to.have.property(\"page\", 0);",
+        "  pm.expect(json).to.have.property(\"size\", 20);",
+        "  pm.expect(json).to.have.property(\"totalElements\").that.is.a(\"number\");",
+        "  pm.expect(json).to.have.property(\"totalPages\").that.is.a(\"number\");",
+        "  pm.expect(json).to.have.property(\"first\");",
+        "  pm.expect(json).to.have.property(\"last\");",
+        "});",
+        "pm.test(\"hay registros (la semilla deja al menos uno)\", () =>",
+        "  pm.expect(json.totalElements).to.be.above(0));",
+        "pm.test(\"orden fecha desc\", () => {",
+        "  var c = json.content;",
+        "  for (var i = 1; i < c.length; i++) { pm.expect(c[i-1].fecha >= c[i].fecha).to.be.true; }",
+        "});",
+        "pm.test(\"cada fila tiene accion, tablaAfectada y fecha\", () => {",
+        "  json.content.forEach(function (f) {",
+        "    pm.expect(f.accion).to.be.a(\"string\");",
+        "    pm.expect(f.tablaAfectada).to.be.a(\"string\");",
+        "    pm.expect(f.fecha).to.be.a(\"string\");",
+        "  });",
+        "});"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Filtro accion=LOGIN → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?accion=LOGIN&size=5&sort=id,desc",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "accion", "value": "LOGIN" },
+        { "key": "size", "value": "5" },
+        { "key": "sort", "value": "id,desc" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "pm.test(\"todas las filas son LOGIN\", () =>",
+        "  pm.expect(pm.response.json().content.every(f => f.accion === \"LOGIN\")).to.be.true);"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Filtro tabla=usuarios → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?tabla=usuarios&size=20",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "tabla", "value": "usuarios" },
+        { "key": "size", "value": "20" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "pm.test(\"todas las filas son de la tabla usuarios\", () =>",
+        "  pm.expect(pm.response.json().content.every(f => f.tablaAfectada === \"usuarios\")).to.be.true);"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Rango inclusivo de hoy → 200 (frontera inicio=fin)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?fechaInicio={{hoy}}&fechaFin={{hoy}}&size=20",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "fechaInicio", "value": "{{hoy}}" },
+        { "key": "fechaFin", "value": "{{hoy}}" },
+        { "key": "size", "value": "20" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "var d = new Date();",
+        "var iso = d.getFullYear() + \"-\" + String(d.getMonth()+1).padStart(2,\"0\") + \"-\" + String(d.getDate()).padStart(2,\"0\");",
+        "pm.collectionVariables.set(\"hoy\", iso);"
+       ]
+      }
+      },
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "pm.test(\"el rango de un solo día es válido\", () =>",
+        "  pm.expect(pm.response.json()).to.have.property(\"content\"));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Paginación size=2 → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?size=2&page=0&sort=id,asc",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "size", "value": "2" },
+        { "key": "page", "value": "0" },
+        { "key": "sort", "value": "id,asc" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "var json = pm.response.json();",
+        "pm.test(\"devuelve como máximo 2 filas\", () =>",
+        "  pm.expect(json.content.length).to.be.at.most(2));",
+        "pm.test(\"totalPages coherente\", () =>",
+        "  pm.expect(json.totalPages).to.eql(Math.ceil(json.totalElements / json.size)));",
+        "pm.test(\"first=true en la página 0\", () => pm.expect(json.first).to.be.true);"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Catálogo de acciones → 200",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora/acciones",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora", "acciones"]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "var json = pm.response.json();",
+        "pm.test(\"es un array de strings\", () => {",
+        "  pm.expect(json).to.be.an(\"array\");",
+        "  json.forEach(a => pm.expect(a).to.be.a(\"string\"));",
+        "});",
+        "pm.test(\"incluye CREAR y LOGIN (acciones ya ocurridas)\", () => {",
+        "  pm.expect(json).to.include(\"CREAR\");",
+        "  pm.expect(json).to.include(\"LOGIN\");",
+        "});"
+       ]
+      }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-04 · Auditoría de escrituras",
+   "description": "CA-01 · R-05 · R-06: una escritura de usuario queda en la bitácora sin credenciales",
+   "item": [
+    {
+     "name": "Crear usuario (a auditar) → 201",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/usuarios",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "usuarios"]
+      },
+      "header": [
+       { "key": "Authorization", "value": "Bearer {{token}}" },
+       { "key": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"nombre\": \"Usuario Auditado HU04\",\n  \"correo\": \"{{correoAuditado}}\",\n  \"password\": \"ClaveSecreta2026*\",\n  \"idRol\": 4\n}"
+      }
+     },
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.collectionVariables.set(\"correoAuditado\", \"auditado-\" + Date.now() + \"@productionfood.local\");"
+       ]
+      }
+      },
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+        "var json = pm.response.json();",
+        "pm.collectionVariables.set(\"auditadoId\", json.idUsuario);",
+        "pm.collectionVariables.set(\"auditadoRol\", json.rol.nombre);"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "La creación aparece auditada, sin la contraseña (R-05)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?accion=CREAR&tabla=usuarios&size=100",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "accion", "value": "CREAR" },
+        { "key": "tabla", "value": "usuarios" },
+        { "key": "size", "value": "100" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "var correo = pm.collectionVariables.get(\"correoAuditado\");",
+        "var fila = pm.response.json().content.filter(f => f.detalle && f.detalle.indexOf(correo) !== -1)[0];",
+        "pm.test(\"existe la fila CREAR del usuario recién creado\", () => pm.expect(fila).to.not.be.undefined);",
+        "pm.test(\"el detalle menciona el rol\", () =>",
+        "  pm.expect(fila.detalle).to.contain(pm.collectionVariables.get(\"auditadoRol\")));",
+        "pm.test(\"el detalle NO contiene la contraseña (R-05)\", () =>",
+        "  pm.expect(fila.detalle).to.not.contain(\"ClaveSecreta2026\"));",
+        "pm.test(\"la fila está atribuida al admin que la ejecutó\", () =>",
+        "  pm.expect(fila.usuario.idUsuario).to.eql(pm.collectionVariables.get(\"adminId\")));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Login fallido → queda LOGIN_FALLIDO como sistema",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/auth/login",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "auth", "login"]
+      },
+      "header": [{ "key": "Content-Type", "value": "application/json" }],
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"correo\": \"desconocido@productionfood.local\",\n  \"password\": \"ClaveMala*\"\n}"
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 401 CREDENCIALES_INVALIDAS\", () => {",
+        "  pm.response.to.have.status(401);",
+        "  pm.expect(pm.response.json().code).to.eql(\"CREDENCIALES_INVALIDAS\");",
+        "});"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "El intento fallido se auditó sin usuario (usuario ausente)",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?accion=LOGIN_FALLIDO&size=5&sort=id,desc",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "accion", "value": "LOGIN_FALLIDO" },
+        { "key": "size", "value": "5" },
+        { "key": "sort", "value": "id,desc" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+        "var fila = pm.response.json().content[0];",
+        "pm.test(\"hay al menos un LOGIN_FALLIDO\", () => pm.expect(fila).to.not.be.undefined);",
+        "pm.test(\"la fila del sistema NO trae 'usuario' (non_null la omite, no viene null)\", () =>",
+        "  pm.expect(fila).to.not.have.property(\"usuario\"));",
+        "pm.test(\"el detalle lleva el correo intentado\", () =>",
+        "  pm.expect(fila.detalle).to.contain(\"desconocido@productionfood.local\"));"
+       ]
+      }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-04 · Errores",
+   "description": "Validaciones del listado y de la paginación",
+   "item": [
+    {
+     "name": "Rango invertido → 400 RANGO_FECHAS_INVALIDO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?fechaInicio=2026-12-31&fechaFin=2026-01-01",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [
+        { "key": "fechaInicio", "value": "2026-12-31" },
+        { "key": "fechaFin", "value": "2026-01-01" }
+       ]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+        "pm.test(\"code RANGO_FECHAS_INVALIDO\", () =>",
+        "  pm.expect(pm.response.json().code).to.eql(\"RANGO_FECHAS_INVALIDO\"));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "sort fuera de la lista blanca → 400 CAMPO_ORDEN_INVALIDO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?sort=correo,asc",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [{ "key": "sort", "value": "correo,asc" }]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+        "pm.test(\"code CAMPO_ORDEN_INVALIDO\", () =>",
+        "  pm.expect(pm.response.json().code).to.eql(\"CAMPO_ORDEN_INVALIDO\"));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "size por encima de 100 → 400 PARAMETRO_INVALIDO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?size=101",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [{ "key": "size", "value": "101" }]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+        "pm.test(\"code PARAMETRO_INVALIDO\", () =>",
+        "  pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "page negativo → 400",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora?page=-1",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"],
+       "query": [{ "key": "page", "value": "-1" }]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": ["pm.test(\"→ 400\", () => pm.response.to.have.status(400));"]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Ruta inexistente → 404 RECURSO_NO_ENCONTRADO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora/1",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora", "1"]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 404 (no 500)\", () => pm.response.to.have.status(404));",
+        "pm.test(\"code RECURSO_NO_ENCONTRADO\", () =>",
+        "  pm.expect(pm.response.json().code).to.eql(\"RECURSO_NO_ENCONTRADO\"));"
+       ]
+      }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "HU-04 · Autorización",
+   "description": "CA-04: solo ADMIN y solo lectura",
+   "item": [
+    {
+     "name": "Sin token → 401 NO_AUTENTICADO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"]
+      },
+      "header": []
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+        "pm.test(\"code NO_AUTENTICADO\", () =>",
+        "  pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "Rol VENTAS → 403 SIN_PERMISO",
+     "request": {
+      "method": "GET",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{tokenVentas}}" }]
+     },
+     "event": [
+      {
+       "listen": "prerequest",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "var correo = \"ventas-\" + Date.now() + \"@productionfood.local\";",
+        "pm.collectionVariables.set(\"correoVentas\", correo);",
+        "pm.sendRequest({",
+        "  url: pm.collectionVariables.get(\"baseUrl\") + \"/api/v1/usuarios\",",
+        "  method: \"POST\",",
+        "  header: { \"Authorization\": \"Bearer \" + pm.collectionVariables.get(\"token\"), \"Content-Type\": \"application/json\" },",
+        "  body: { mode: \"raw\", raw: JSON.stringify({ nombre: \"Ventas HU04\", correo: correo, password: \"Clave2026*\", idRol: 4 }) }",
+        "}, function (err, res) {",
+        "  pm.sendRequest({",
+        "    url: pm.collectionVariables.get(\"baseUrl\") + \"/api/v1/auth/login\",",
+        "    method: \"POST\",",
+        "    header: { \"Content-Type\": \"application/json\" },",
+        "    body: { mode: \"raw\", raw: JSON.stringify({ correo: correo, password: \"Clave2026*\" }) }",
+        "  }, function (err2, res2) {",
+        "    pm.collectionVariables.set(\"tokenVentas\", res2.json().token);",
+        "  });",
+        "});"
+       ]
+      }
+      },
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+        "pm.test(\"code SIN_PERMISO\", () =>",
+        "  pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "POST /bitacora → 405 (solo lectura)",
+     "request": {
+      "method": "POST",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora"]
+      },
+      "header": [
+       { "key": "Authorization", "value": "Bearer {{token}}" },
+       { "key": "Content-Type", "value": "application/json" }
+      ],
+      "body": { "mode": "raw", "raw": "{}" }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+        "pm.test(\"code METODO_NO_PERMITIDO\", () =>",
+        "  pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+       ]
+      }
+      }
+     ]
+    },
+    {
+     "name": "DELETE /bitacora/1 → 405 (solo lectura)",
+     "request": {
+      "method": "DELETE",
+      "url": {
+       "raw": "{{baseUrl}}/api/v1/bitacora/1",
+       "host": ["{{baseUrl}}"],
+       "path": ["api", "v1", "bitacora", "1"]
+      },
+      "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+       "type": "text/javascript",
+       "exec": [
+        "pm.test(\"→ 404 o 405: nunca 200\", () =>",
+        "  pm.expect(pm.response.code).to.be.oneOf([404, 405]));"
+       ]
+      }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "variable": [
+  { "key": "baseUrl", "value": "http://localhost:9211" },
+  { "key": "token", "value": "", "type": "string" },
+  { "key": "adminId", "value": "", "type": "string" },
+  { "key": "correoAuditado", "value": "", "type": "string" },
+  { "key": "auditadoId", "value": "", "type": "string" },
+  { "key": "auditadoRol", "value": "", "type": "string" },
+  { "key": "hoy", "value": "", "type": "string" },
+  { "key": "correoVentas", "value": "", "type": "string" },
+  { "key": "tokenVentas", "value": "", "type": "string" }
+ ]
+}

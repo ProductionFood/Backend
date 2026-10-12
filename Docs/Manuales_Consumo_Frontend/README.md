@@ -11,6 +11,7 @@ quien consume, complemento de `../../../docs/00-base/04-CONTRATO-API.md`.
 | [HU-01 — Registro de usuarios](HU-01-registro-usuarios.md) | Auth + Usuarios + Roles | Obsoleto (2026-10-01): ver aviso en su cabecera. Para autenticar, usar HU-03 |
 | [HU-02 — Gestión de usuarios](HU-02-gestion-usuarios.md) | Usuarios (consulta, edición, estado) | Entregado 2026-10-01 |
 | [HU-03 — Inicio de sesión](HU-03-inicio-sesion.md) | Auth (login + perfil) | Entregado 2026-10-12 |
+| [HU-04 — Bitácora de auditoría](HU-04-bitacora-auditoria.md) | Auditoría (consulta solo ADMIN) | Entregado 2026-10-12 |
 
 ## Qué debe tener un manual
 
