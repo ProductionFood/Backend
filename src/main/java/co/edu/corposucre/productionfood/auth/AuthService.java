@@ -14,9 +14,22 @@ import co.edu.corposucre.productionfood.usuario.UsuarioRepository;
 @Service
 public class AuthService {
 
+    /**
+     * Semilla del hash ficticio con el que se igualan los tiempos de respuesta
+     * (HU-03 R-03). Nunca corresponde a un usuario real.
+     */
+    private static final String SEMILLA_HASH_FICTICIO = "hash-ficticio-hu-03";
+
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+
+    /**
+     * BCrypt válido con la misma parametrización que las contraseñas reales, generado
+     * una única vez al arrancar. Codificarlo en cada intento sería MÁS lento que un
+     * fallo de contraseña, no igual: el objetivo es que ambos caminos cuesten lo mismo.
+     */
+    private final String hashFicticio;
 
     public AuthService(UsuarioRepository usuarioRepository,
                        PasswordEncoder passwordEncoder,
@@ -24,21 +37,32 @@ public class AuthService {
         this.usuarioRepository = usuarioRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.hashFicticio = passwordEncoder.encode(SEMILLA_HASH_FICTICIO);
     }
 
     public LoginResponse login(LoginRequest req) {
-        var usuario = usuarioRepository.findByCorreo(req.correo().trim().toLowerCase())
-                .orElseThrow(() -> new AutenticacionException(
-                        "CREDENCIALES_INVALIDAS",
-                        HttpStatus.UNAUTHORIZED,
-                        "Correo o contraseña incorrectos."));
+        var encontrado = usuarioRepository.findByCorreo(req.correo().trim().toLowerCase());
 
-        if (!Boolean.TRUE.equals(usuario.getEstado())
-                || !passwordEncoder.matches(req.password(), usuario.getPassword())) {
+        if (encontrado.isEmpty()) {
+            // R-03: se verifica igualmente contra el hash ficticio para que este camino
+            // tarde lo mismo que "contraseña incorrecta" y no delate qué correos existen.
+            passwordEncoder.matches(req.password(), hashFicticio);
+            throw credencialesInvalidas();
+        }
+
+        var usuario = encontrado.get();
+
+        // R-02: SIEMPRE se verifica la contraseña. El estado se mira solo después,
+        // porque un 403 antes de tiempo confirmaría que el correo existe.
+        if (!passwordEncoder.matches(req.password(), usuario.getPassword())) {
+            throw credencialesInvalidas();
+        }
+
+        if (!Boolean.TRUE.equals(usuario.getEstado())) {
             throw new AutenticacionException(
-                    "CREDENCIALES_INVALIDAS",
-                    HttpStatus.UNAUTHORIZED,
-                    "Correo o contraseña incorrectos.");
+                    "USUARIO_INACTIVO",
+                    HttpStatus.FORBIDDEN,
+                    "Su usuario está desactivado. Contacte al administrador.");
         }
 
         var autenticado = new UsuarioAutenticado(
@@ -56,5 +80,17 @@ public class AuthService {
                 usuario.getCorreo(),
                 usuario.getNombre(),
                 usuario.getRol().getNombre());
+    }
+
+    /**
+     * Un único punto de construcción para los dos fallos de credenciales: garantiza
+     * que "correo inexistente" y "contraseña incorrecta" llevan el mismo código y el
+     * mismo mensaje (HU-03 R-01), sin depender de que alguien los escriba iguales.
+     */
+    private AutenticacionException credencialesInvalidas() {
+        return new AutenticacionException(
+                "CREDENCIALES_INVALIDAS",
+                HttpStatus.UNAUTHORIZED,
+                "Correo o contraseña incorrectos.");
     }
 }
