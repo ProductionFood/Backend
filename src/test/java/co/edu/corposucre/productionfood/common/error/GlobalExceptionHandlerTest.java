@@ -37,7 +37,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("Conflicto de negocio responde 409 con el código original")
     void conflictoDeNegocioResponde409() {
-        var resp = handler.conflicto(
+        var resp = handler.apiException(
                 new ConflictoNegocioException("CORREO_DUPLICADO", "Correo ya registrado."), req);
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
@@ -51,7 +51,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("Parámetro inválido responde 400 con el código de la excepción")
     void parametroInvalidoResponde400() {
-        var resp = handler.parametroInvalido(
+        var resp = handler.apiException(
                 new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
                         "El campo de ordenamiento 'password' no es válido."), req);
 
@@ -66,7 +66,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("Recurso inexistente responde 404 con mensaje del recurso y el id")
     void recursoNoEncontradoResponde404() {
-        var resp = handler.noEncontrado(
+        var resp = handler.apiException(
                 new RecursoNoEncontradoException("usuario", 99), req);
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);

@@ -1,11 +1,12 @@
 package co.edu.corposucre.productionfood.auth;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import co.edu.corposucre.productionfood.auth.dto.LoginRequest;
 import co.edu.corposucre.productionfood.auth.dto.LoginResponse;
-import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
+import co.edu.corposucre.productionfood.common.error.AutenticacionException;
 import co.edu.corposucre.productionfood.security.JwtService;
 import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
 import co.edu.corposucre.productionfood.usuario.UsuarioRepository;
@@ -27,14 +28,16 @@ public class AuthService {
 
     public LoginResponse login(LoginRequest req) {
         var usuario = usuarioRepository.findByCorreo(req.correo().trim().toLowerCase())
-                .orElseThrow(() -> new ConflictoNegocioException(
+                .orElseThrow(() -> new AutenticacionException(
                         "CREDENCIALES_INVALIDAS",
+                        HttpStatus.UNAUTHORIZED,
                         "Correo o contraseña incorrectos."));
 
         if (!Boolean.TRUE.equals(usuario.getEstado())
                 || !passwordEncoder.matches(req.password(), usuario.getPassword())) {
-            throw new ConflictoNegocioException(
+            throw new AutenticacionException(
                     "CREDENCIALES_INVALIDAS",
+                    HttpStatus.UNAUTHORIZED,
                     "Correo o contraseña incorrectos.");
         }
 

@@ -32,7 +32,8 @@ public class AuthController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Autenticación exitosa"),
         @ApiResponse(responseCode = "400", description = "Datos inválidos"),
-        @ApiResponse(responseCode = "409", description = "Credenciales incorrectas")
+        @ApiResponse(responseCode = "401", description = "Credenciales incorrectas"),
+        @ApiResponse(responseCode = "403", description = "Usuario desactivado")
     })
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
         return ResponseEntity.ok(authService.login(req));

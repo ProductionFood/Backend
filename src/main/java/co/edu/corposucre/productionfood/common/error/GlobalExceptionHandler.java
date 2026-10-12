@@ -34,23 +34,9 @@ public class GlobalExceptionHandler {
                      "Los datos enviados no son válidos.", req.getRequestURI(), campos);
     }
 
-    @ExceptionHandler(ParametroInvalidoException.class)
-    ResponseEntity<ErrorResponse> parametroInvalido(
-            ParametroInvalidoException ex, HttpServletRequest req) {
-        return build(ex.getStatus(), ex.getCodigo(), ex.getMessage(),
-                     req.getRequestURI(), List.of());
-    }
-
-    @ExceptionHandler(RecursoNoEncontradoException.class)
-    ResponseEntity<ErrorResponse> noEncontrado(
-            RecursoNoEncontradoException ex, HttpServletRequest req) {
-        return build(ex.getStatus(), ex.getCodigo(), ex.getMessage(),
-                     req.getRequestURI(), List.of());
-    }
-
-    @ExceptionHandler(ConflictoNegocioException.class)
-    ResponseEntity<ErrorResponse> conflicto(
-            ConflictoNegocioException ex, HttpServletRequest req) {
+    @ExceptionHandler(ApiException.class)
+    ResponseEntity<ErrorResponse> apiException(
+            ApiException ex, HttpServletRequest req) {
         return build(ex.getStatus(), ex.getCodigo(), ex.getMessage(),
                      req.getRequestURI(), List.of());
     }

@@ -13,10 +13,11 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import co.edu.corposucre.productionfood.auth.dto.LoginRequest;
-import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
+import co.edu.corposucre.productionfood.common.error.AutenticacionException;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.security.JwtService;
 import co.edu.corposucre.productionfood.usuario.Usuario;
@@ -78,8 +79,9 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(
                 new LoginRequest("nadie@productionfood.local", "OtraClave1*")))
-                .isInstanceOf(ConflictoNegocioException.class)
-                .hasFieldOrPropertyWithValue("codigo", "CREDENCIALES_INVALIDAS");
+                .isInstanceOf(AutenticacionException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CREDENCIALES_INVALIDAS")
+                .hasFieldOrPropertyWithValue("status", HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -90,8 +92,9 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(
                 new LoginRequest("admin@productionfood.local", "MalaClave1*")))
-                .isInstanceOf(ConflictoNegocioException.class)
-                .hasFieldOrPropertyWithValue("codigo", "CREDENCIALES_INVALIDAS");
+                .isInstanceOf(AutenticacionException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CREDENCIALES_INVALIDAS")
+                .hasFieldOrPropertyWithValue("status", HttpStatus.UNAUTHORIZED);
         verify(jwtService, never()).generar(any());
     }
 
@@ -115,7 +118,7 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(
                 new LoginRequest("admin@productionfood.local", "Admin123*")))
-                .isInstanceOf(ConflictoNegocioException.class)
+                .isInstanceOf(AutenticacionException.class)
                 .hasFieldOrPropertyWithValue("codigo", "CREDENCIALES_INVALIDAS");
         verify(jwtService, never()).generar(any());
     }
