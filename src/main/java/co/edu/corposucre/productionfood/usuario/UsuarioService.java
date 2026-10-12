@@ -8,6 +8,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import co.edu.corposucre.productionfood.common.audit.Auditable;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
@@ -39,6 +40,12 @@ public class UsuarioService {
     }
 
     @Transactional
+    // En las tres expresiones de este servicio los accesores de record se leen como
+    // propiedades (#resultado.correo) y no como métodos (#resultado.correo()): el contexto
+    // SpEL de solo lectura del aspecto no resuelve la llamada y el detalle se perdería en
+    // silencio, que es justo lo que la bitácora no debe hacer.
+    @Auditable(accion = "CREAR", tabla = "usuarios",
+            detalle = "'Usuario creado: ' + #resultado.correo + ' con rol ' + #resultado.rol.nombre")
     public UsuarioResponse crear(CrearUsuarioRequest req) {
         var correo = req.correo().trim().toLowerCase();
         var nombre = req.nombre().trim();
@@ -106,6 +113,8 @@ public class UsuarioService {
     }
 
     @Transactional
+    @Auditable(accion = "EDITAR", tabla = "usuarios",
+            detalle = "'Usuario editado: ' + #resultado.correo + ' con rol ' + #resultado.rol.nombre")
     public UsuarioResponse actualizar(Integer id, ActualizarUsuarioRequest req) {
         var usuario = obtenerEntidad(id);
         var correo = req.correo().trim().toLowerCase();
@@ -144,6 +153,8 @@ public class UsuarioService {
     }
 
     @Transactional
+    @Auditable(accion = "CAMBIAR_ESTADO", tabla = "usuarios",
+            detalle = "'Usuario ' + #id + ' estado ' + #req.activo")
     public UsuarioResponse cambiarEstado(Integer id, CambiarEstadoRequest req) {
         var usuario = obtenerEntidad(id);
         if (!req.activo()) {
