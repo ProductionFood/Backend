@@ -15,7 +15,7 @@ Docs/
 │   ├── README.md                    Índice y guía para escribir un manual
 │   └── HU-NN-*.md                   Un manual por módulo/HU
 └── Postman/                     Colecciones de pruebas (se versionan aquí, no en la raíz)
-    └── ProductionFood-HU01.postman_collection.json
+    └── ProductionFood-HUNN.postman_collection.json
 ```
 
 ## Cómo usar estas carpetas
@@ -40,4 +40,7 @@ Docs/
 
 | HU | Estado |
 |---|---|
-| HU-01 Registro de usuarios | **En curso** — defecto 409 falso abierto (ver [`../plans/Reestructuracion-HU-01.md`](../plans/Reestructuracion-HU-01.md)) |
+| HU-01 Registro de usuarios | Entregada 2026-09-25 · contrato de autenticación superado por HU-03 |
+| HU-02 Gestión de usuarios | Entregada 2026-10-01 |
+| HU-03 Inicio de sesión | Entregada 2026-10-12 |
+| HU-04 Bitácora de auditoría | Entregada 2026-10-12 |
