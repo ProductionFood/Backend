@@ -19,14 +19,12 @@ public class BitacoraRowMapper implements RowMapper<Bitacora> {
         // getObject con clase y no getLong porque getLong devuelve 0 ante un NULL,
         // y el registro del sistema aparecería atribuido a un usuario inexistente.
         Long idUsuario = rs.getObject("id_usuario", Long.class);
-        Long idRol = rs.getObject("id_rol", Long.class);
 
         return new Bitacora(
                 rs.getObject("id_bitacora", Integer.class),
                 idUsuario == null ? null : idUsuario.intValue(),
                 // getString ya devuelve null si el LEFT JOIN no encontró autor.
                 rs.getString("usuario_nombre"),
-                idRol == null ? null : idRol.intValue(),
                 rs.getString("accion"),
                 rs.getString("tabla_afectada"),
                 rs.getString("detalle"),

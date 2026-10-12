@@ -143,4 +143,4 @@ class BitacoraServiceTest {
         verify(bitacoraRepository).insertar(7, accion, "usuarios", null);
     }
 
-    }
+}
