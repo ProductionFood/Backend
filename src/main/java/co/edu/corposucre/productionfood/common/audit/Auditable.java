@@ -19,8 +19,13 @@ import java.lang.annotation.Target;
  * "ocurrió", y para una auditoría eso es peor que no tener registro.
  *
  * <p>{@link #detalle()} es una expresión SpEL opcional que se evalúa contra los argumentos
- * del método y el valor que este retorna; por ejemplo {@code "Usuario creado: #req.correo()"}.
- * Si se omite, la acción queda registrada sin resumen.
+ * del método y el valor que este retorna; por ejemplo
+ * {@code "Usuario creado: #req.correo + ' con rol ' + #resultado.rol.nombre"}. Si se omite,
+ * la acción queda registrada sin resumen.
+ *
+ * <p>Los accesores de un record se escriben como propiedades ({@code #obj.campo}), nunca como
+ * llamadas ({@code #obj.campo()}): la expresión corre en un contexto de solo lectura, así que
+ * con paréntesis la anotación compila pero el detalle se pierde en silencio.
  *
  * <p>NUNCA deben incluirse contraseñas, hashes ni tokens en {@code detalle} (regla R-05):
  * la bitácora se conserva y se consulta con frecuencia, y es el lugar donde un dato
