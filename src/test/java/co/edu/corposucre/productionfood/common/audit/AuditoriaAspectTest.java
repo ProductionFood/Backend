@@ -143,6 +143,20 @@ class AuditoriaAspectTest {
     }
 
     @Test
+    @DisplayName("El detalle navega un record y su record anidado por PROPIEDAD, no por llamada")
+    void navegaElRecordPorPropiedad() {
+        autenticarComo(4);
+
+        servicio.crearConResultadoRecord("ana@pf.local");
+
+        // Fija la navegación por PROPIEDAD (#resultado.correo, #resultado.rol.nombre), que es lo
+        // único que resuelve el SimpleEvaluationContext de solo lectura del aspecto: con la forma
+        // de llamada (#resultado.correo()) la anotación compilaría pero el detalle se perdería.
+        verify(bitacoraService).registrar(4, "CREAR_USUARIO", "usuarios",
+                "creado: ana@pf.local rol ADMIN");
+    }
+
+    @Test
     @DisplayName("Los argumentos también se alcanzan por su alias posicional")
     void losArgumentosSeAlcanzanPorAliasPosicional() {
         autenticarComo(2);
@@ -202,9 +216,23 @@ class AuditoriaAspectTest {
             return codigo + "|" + estado;
         }
 
+        @Auditable(accion = "CREAR_USUARIO", tabla = "usuarios",
+                detalle = "'creado: ' + #resultado.correo + ' rol ' + #resultado.rol.nombre")
+        public Resultado crearConResultadoRecord(String correo) {
+            return new Resultado(correo, new Rol("ADMIN"));
+        }
+
         @Auditable(accion = "CREAR_USUARIO", tabla = "usuarios", detalle = "#nombre")
         public String fallar() {
             throw new IllegalStateException("la operación de negocio falló después del cambio");
         }
+    }
+
+    /** Valor de retorno de prueba: el aspecto debe poder navegarlo por PROPIEDAD. */
+    record Resultado(String correo, Rol rol) {
+    }
+
+    /** Record anidado, para fijar también la navegación encadenada por propiedad. */
+    record Rol(String nombre) {
     }
 }
