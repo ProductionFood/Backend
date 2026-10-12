@@ -19,6 +19,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import co.edu.corposucre.productionfood.auth.dto.PerfilResponse;
+import co.edu.corposucre.productionfood.common.audit.BitacoraService;
 import co.edu.corposucre.productionfood.common.error.AutenticacionException;
 import co.edu.corposucre.productionfood.security.JwtService;
 import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
@@ -39,7 +40,8 @@ class AuthServicePerfilTest {
         PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
         when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$hashFicticioNoRegistrado");
         authService = new AuthService(
-                mock(UsuarioRepository.class), passwordEncoder, mock(JwtService.class));
+                mock(UsuarioRepository.class), passwordEncoder, mock(JwtService.class),
+                mock(BitacoraService.class));
     }
 
     @AfterEach
