@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,10 +16,12 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import co.edu.corposucre.productionfood.auth.dto.LoginRequest;
+import co.edu.corposucre.productionfood.common.audit.BitacoraService;
 import co.edu.corposucre.productionfood.common.error.AutenticacionException;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.security.JwtService;
@@ -37,6 +40,7 @@ class AuthServiceTest {
     private UsuarioRepository usuarioRepository;
     private PasswordEncoder passwordEncoder;
     private JwtService jwtService;
+    private BitacoraService bitacoraService;
     private AuthService authService;
 
     @BeforeEach
@@ -44,8 +48,9 @@ class AuthServiceTest {
         usuarioRepository = mock(UsuarioRepository.class);
         passwordEncoder = mock(PasswordEncoder.class);
         jwtService = mock(JwtService.class);
+        bitacoraService = mock(BitacoraService.class);
         when(passwordEncoder.encode(anyString())).thenReturn(HASH_FICTICIO);
-        authService = new AuthService(usuarioRepository, passwordEncoder, jwtService);
+        authService = new AuthService(usuarioRepository, passwordEncoder, jwtService, bitacoraService);
     }
 
     private Usuario usuario(String correo, Boolean estado) {
@@ -209,5 +214,116 @@ class AuthServiceTest {
         assertThat(inexistente.getMessage()).isEqualTo(passwordIncorrecta.getMessage());
         assertThat(inexistente.getStatus()).isEqualTo(passwordIncorrecta.getStatus());
         verify(jwtService, never()).generar(any());
+    }
+
+    @Test
+    @DisplayName("Login exitoso registra LOGIN con el id del usuario y su correo")
+    void loginExitosoRegistraLogin() {
+        usuarioExiste(usuario("admin@productionfood.local", true));
+        when(passwordEncoder.matches("Admin123*", "$2a$hash-falso")).thenReturn(true);
+        when(jwtService.generar(any())).thenReturn("token-falso");
+
+        authService.login(new LoginRequest("admin@productionfood.local", "Admin123*"));
+
+        verify(bitacoraService).registrar(
+                7, "LOGIN", "usuarios", "Inicio de sesión: admin@productionfood.local");
+    }
+
+    @Test
+    @DisplayName("Correo inexistente registra LOGIN_FALLIDO atribuido al sistema (idUsuario null)")
+    void loginCorreoInexistenteRegistraLoginFallido() {
+        // R-01: no hay usuario válido que atribuir al intento, así que el autor es NULL.
+        when(usuarioRepository.findByCorreo("nadie@productionfood.local"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("nadie@productionfood.local", "OtraClave1*")))
+                .isInstanceOf(AutenticacionException.class);
+
+        verify(bitacoraService).registrar(
+                null, "LOGIN_FALLIDO", "usuarios",
+                "Intento fallido para el correo: nadie@productionfood.local");
+    }
+
+    @Test
+    @DisplayName("Contraseña incorrecta registra LOGIN_FALLIDO atribuido al sistema (idUsuario null)")
+    void loginPasswordIncorrectaRegistraLoginFallido() {
+        // Aunque el correo exista, la clave no se validó: la identidad no está probada.
+        usuarioExiste(usuario("admin@productionfood.local", true));
+        when(passwordEncoder.matches("MalaClave1*", "$2a$hash-falso")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("admin@productionfood.local", "MalaClave1*")))
+                .isInstanceOf(AutenticacionException.class);
+
+        verify(bitacoraService).registrar(
+                null, "LOGIN_FALLIDO", "usuarios",
+                "Intento fallido para el correo: admin@productionfood.local");
+    }
+
+    @Test
+    @DisplayName("Usuario inactivo registra LOGIN_FALLIDO con el id real del usuario")
+    void loginUsuarioInactivoRegistraLoginFallidoConIdReal() {
+        // La contraseña sí se verificó, así que la identidad está establecida: se atribuye
+        // al usuario real y no al sistema, para no perder quién intentó entrar.
+        usuarioExiste(usuario("admin@productionfood.local", false));
+        when(passwordEncoder.matches("Admin123*", "$2a$hash-falso")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("admin@productionfood.local", "Admin123*")))
+                .isInstanceOf(AutenticacionException.class)
+                .hasFieldOrPropertyWithValue("codigo", "USUARIO_INACTIVO");
+
+        verify(bitacoraService).registrar(
+                7, "LOGIN_FALLIDO", "usuarios",
+                "Intento fallido para el correo: admin@productionfood.local");
+    }
+
+    @Test
+    @DisplayName("El detalle auditado nunca contiene la contraseña enviada (R-05)")
+    void loginNoRegistraLaContrasenaEnElDetalle() {
+        var clave = "OtraClave1*";
+        usuarioExiste(usuario("admin@productionfood.local", true));
+        when(passwordEncoder.matches(clave, "$2a$hash-falso")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("admin@productionfood.local", clave)))
+                .isInstanceOf(AutenticacionException.class);
+
+        var detalle = ArgumentCaptor.forClass(String.class);
+        verify(bitacoraService).registrar(any(), anyString(), anyString(), detalle.capture());
+        assertThat(detalle.getValue()).doesNotContain(clave);
+    }
+
+    @Test
+    @DisplayName("Un fallo al auditar el login exitoso no impide devolver el token (R-03)")
+    void loginExitosoSigueSiLaAuditoriaFalla() {
+        // El detalle duradero no puede costar el token: si la auditoría revienta, el login
+        // debe completarse igual, tal como garantiza BitacoraService (aquí simulado).
+        usuarioExiste(usuario("admin@productionfood.local", true));
+        when(passwordEncoder.matches("Admin123*", "$2a$hash-falso")).thenReturn(true);
+        when(jwtService.generar(any())).thenReturn("token-falso");
+        doThrow(new RuntimeException("bitácora caída"))
+                .when(bitacoraService).registrar(any(), anyString(), anyString(), anyString());
+
+        var r = authService.login(new LoginRequest("admin@productionfood.local", "Admin123*"));
+
+        assertThat(r.token()).isEqualTo("token-falso");
+    }
+
+    @Test
+    @DisplayName("Un fallo al auditar no reemplaza el CREDENCIALES_INVALIDAS del login fallido (R-03)")
+    void loginFallidoSigueRespondiendoCredencialesInvalidasSiLaAuditoriaFalla() {
+        // El error de auditoría no puede enmascarar la respuesta de negocio: el usuario debe
+        // seguir viendo 401 CREDENCIALES_INVALIDAS y no un 500.
+        usuarioExiste(usuario("admin@productionfood.local", true));
+        when(passwordEncoder.matches("MalaClave1*", "$2a$hash-falso")).thenReturn(false);
+        doThrow(new RuntimeException("bitácora caída"))
+                .when(bitacoraService).registrar(any(), anyString(), anyString(), anyString());
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("admin@productionfood.local", "MalaClave1*")))
+                .isInstanceOf(AutenticacionException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CREDENCIALES_INVALIDAS");
     }
 }
