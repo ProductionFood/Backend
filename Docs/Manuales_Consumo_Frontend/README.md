@@ -13,6 +13,7 @@ quien consume, complemento de `../../../PFDocs/00-base/04-CONTRATO-API.md`.
 | [HU-03 — Inicio de sesión](HU-03-inicio-sesion.md) | Auth (login + perfil) | Entregado 2026-10-12 |
 | [HU-04 — Bitácora de auditoría](HU-04-bitacora-auditoria.md) | Auditoría (consulta solo ADMIN) | Entregado 2026-10-12 |
 | [HU-05 — Gestión de clientes](HU-05-gestion-clientes.md) | Clientes (alta, edición, consulta y estado) | Entregado 2026-10-20 |
+| [HU-06 — Gestión de proveedores](HU-06-gestion-proveedores.md) | Proveedores (escritura ADMIN y COMPRAS) | Backend entregado 2026-10-19 |
 
 ## Qué debe tener un manual
 
