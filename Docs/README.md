@@ -46,3 +46,4 @@ Docs/
 | HU-04 Bitácora de auditoría | Entregada 2026-10-12 |
 | HU-05 Gestión de clientes | Entregada 2026-10-20 |
 | HU-06 Gestión de proveedores | Entregada 2026-10-19 (backend; frontend y HU-13 pendientes) |
+| HU-07 Unidades de medida | Entregada 2026-10-20 (backend; frontend pendiente) |
