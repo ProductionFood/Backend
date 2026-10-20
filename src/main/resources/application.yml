@@ -37,6 +37,10 @@ server:
     context-path: /
 
 app:
+  clientes:
+    # 409 al desactivar un cliente con pedidos en curso (HU-05, R-02).
+    # En false, la desactivación se permite aunque el cliente tenga pedidos abiertos.
+    bloquear-desactivacion-con-pedidos: true
   jwt:
     secret: ${JWT_SECRET:2PtgOzmpdKIUAUgwwgZ1jfog2J0ABc1FMHZaVwVC2YdQGf6BcRRCTeZX36BGzZs3}
     expiration-ms: 3600000
