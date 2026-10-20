@@ -1,13 +1,23 @@
 package co.edu.corposucre.productionfood.proveedor;
 
+import java.net.URI;
+
+import jakarta.validation.Valid;
+
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.proveedor.dto.ActualizarProveedorRequest;
+import co.edu.corposucre.productionfood.proveedor.dto.CrearProveedorRequest;
 import co.edu.corposucre.productionfood.proveedor.dto.ProveedorResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -70,5 +80,45 @@ public class ProveedorController {
     })
     public ProveedorResponse obtener(@PathVariable Integer id) {
         return proveedorService.obtener(id);
+    }
+
+    @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN','COMPRAS')")
+    @Operation(summary = "Registrar un proveedor",
+               description = "Crea un proveedor activo con nombre obligatorio y contacto, teléfono "
+                        + "y correo opcionales. El correo es opcional, una cadena vacía se guarda "
+                        + "como null y no es único: varios proveedores pueden compartirlo. "
+                        + "Devuelve 201 con la cabecera Location apuntando al proveedor creado.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "201", description = "Proveedor creado"),
+        @ApiResponse(responseCode = "400", description = "Datos inválidos o validación fallida"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos")
+    })
+    public ResponseEntity<ProveedorResponse> crear(@Valid @RequestBody CrearProveedorRequest req) {
+        var creado = proveedorService.crear(req);
+        return ResponseEntity
+                .created(URI.create("/api/v1/proveedores/" + creado.idProveedor()))
+                .body(creado);
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPRAS')")
+    @Operation(summary = "Editar un proveedor",
+               description = "Reemplaza todos los datos del proveedor: nombre, contacto, teléfono "
+                        + "y correo se sobrescriben siempre, de modo que un valor nulo borra el "
+                        + "anterior en lugar de conservarlo. El correo es opcional, una cadena "
+                        + "vacía se guarda como null y no es único. El estado no se modifica por "
+                        + "este endpoint: solo cambia con el PATCH de estado.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Proveedor actualizado"),
+        @ApiResponse(responseCode = "400", description = "Cuerpo inválido o validación fallida"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos"),
+        @ApiResponse(responseCode = "404", description = "Proveedor inexistente")
+    })
+    public ProveedorResponse actualizar(@PathVariable Integer id,
+                                        @Valid @RequestBody ActualizarProveedorRequest req) {
+        return proveedorService.actualizar(id, req);
     }
 }
