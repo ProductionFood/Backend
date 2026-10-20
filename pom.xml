@@ -112,6 +112,21 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Spring Boot 4 separó los slices de test en módulos propios: sin
+             spring-boot-webmvc-test no existe @WebMvcTest y sin
+             spring-boot-security-test el slice no aplica la cadena de seguridad
+             (SecurityAutoConfiguration, SecurityFilterAutoConfiguration y
+             ServletWebSecurityAutoConfiguration) a las peticiones de MockMvc. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
