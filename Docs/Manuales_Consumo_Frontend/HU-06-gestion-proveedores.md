@@ -53,3 +53,57 @@ interface PageResponse<T> {
 
 `contacto`, `telefono` y `correo` **siempre llegan en el JSON**, con valor `null` si el
 proveedor no los tiene (a diferencia de otros módulos, donde los nulos se omiten).
+
+## Endpoints
+
+| Método | Ruta | Requiere | Códigos |
+|---|---|---|---|
+| GET | `/api/v1/proveedores` | ADMIN, COMPRAS, CONSULTA | 200, 400, 401, 403 |
+| GET | `/api/v1/proveedores/{id}` | ADMIN, COMPRAS, CONSULTA | 200, 400, 401, 403, 404 |
+| POST | `/api/v1/proveedores` | ADMIN, COMPRAS | 201, 400, 401, 403 |
+| PUT | `/api/v1/proveedores/{id}` | ADMIN, COMPRAS | 200, 400, 401, 403, 404 |
+| PATCH | `/api/v1/proveedores/{id}/estado` | ADMIN, COMPRAS | 200, 400, 401, 403, 404 |
+
+### GET /api/v1/proveedores — listado
+
+| Parámetro | Valores | Por defecto | Error |
+|---|---|---|---|
+| `nombre` | Prefijo, sin distinguir mayúsculas; `%` y `_` se tratan como texto literal | — | — |
+| `activo` | `true`, `false` u omitido (todos) | omitido | 400 `PARAMETRO_INVALIDO` si no es booleano |
+| `page` | `>= 0` | `0` | 400 `PARAMETRO_INVALIDO` |
+| `size` | `1..100` (no se recorta) | `20` | 400 `PARAMETRO_INVALIDO` |
+| `sort` | `nombre` o `id`, con `,asc` o `,desc` | `nombre,asc` | 400 `CAMPO_ORDEN_INVALIDO` |
+
+```http
+GET /api/v1/proveedores?nombre=agro&activo=true&page=0&size=20&sort=nombre,asc
+Authorization: Bearer {{token}}
+```
+
+```json
+{
+  "content": [
+    {
+      "idProveedor": 3,
+      "nombre": "Agroinsumos del Caribe",
+      "contacto": "Marta Pérez",
+      "telefono": "3001234567",
+      "correo": "ventas@agrocaribe.example",
+      "activo": true
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1,
+  "first": true,
+  "last": true
+}
+```
+
+Sin coincidencias devuelve `200` con `content: []` y `totalElements: 0`, no un error.
+
+### GET /api/v1/proveedores/{id} — detalle
+
+Respuesta `200 OK`: un `Proveedor` como el del listado. Un `id` que no existe devuelve
+`404 RECURSO_NO_ENCONTRADO` y un `id` no numérico (`/proveedores/abc`) devuelve
+`400 PARAMETRO_INVALIDO`.
