@@ -62,3 +62,4 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-04 | Bitácora de auditoría | 2026-10-12 · [`HU-04-bitacora-auditoria.md`](HU-04-bitacora-auditoria.md) |
 | HU-05 | Gestión de clientes | 2026-10-20 · [`HU-05-gestion-clientes.md`](HU-05-gestion-clientes.md) |
 | HU-06 | Gestión de proveedores | 2026-10-19 · [`HU-06-gestion-proveedores.md`](HU-06-gestion-proveedores.md) |
+| HU-07 | Unidades de medida | 2026-10-20 · [`HU-07-unidades-medida.md`](HU-07-unidades-medida.md) |
