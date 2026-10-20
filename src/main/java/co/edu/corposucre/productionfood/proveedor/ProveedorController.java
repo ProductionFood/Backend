@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.proveedor.dto.ActualizarProveedorRequest;
 import co.edu.corposucre.productionfood.proveedor.dto.CrearProveedorRequest;
@@ -120,5 +122,23 @@ public class ProveedorController {
     public ProveedorResponse actualizar(@PathVariable Integer id,
                                         @Valid @RequestBody ActualizarProveedorRequest req) {
         return proveedorService.actualizar(id, req);
+    }
+
+    @PatchMapping("/{id}/estado")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPRAS')")
+    @Operation(summary = "Activar o desactivar un proveedor",
+               description = "Cambio de estado del proveedor. Desactivar impide compras nuevas "
+                        + "(HU-13, R-02) pero no cancela las compras ya registradas, ni siquiera "
+                        + "las PENDIENTES. El cambio es idempotente.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Estado actualizado"),
+        @ApiResponse(responseCode = "400", description = "Cuerpo inválido o validación fallida"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos"),
+        @ApiResponse(responseCode = "404", description = "Proveedor inexistente")
+    })
+    public ProveedorResponse cambiarEstado(@PathVariable Integer id,
+                                           @Valid @RequestBody CambiarEstadoRequest req) {
+        return proveedorService.cambiarEstado(id, req);
     }
 }
