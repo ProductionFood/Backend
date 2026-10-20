@@ -56,3 +56,38 @@ Sin migración nueva: la tabla viene de V1 y `idx_proveedores_nombre` de V2.
 | `CREAR` | `Proveedor creado: <nombre>` |
 | `EDITAR` | `Proveedor editado: <nombre>` |
 | `CAMBIAR_ESTADO` | `Proveedor <id> estado <true/false>` |
+
+## Evidencia (verificación backend)
+
+- **Pruebas unitarias:** `ProveedorServiceTest` (12) y validación de DTOs (10:
+  `CrearProveedorRequestTest` 8, `ActualizarProveedorRequestTest` 2). Suite completa
+  **154/154 en verde**.
+- **Verificación manual contra MySQL real** (app en el puerto 8082, 2026-10-19):
+  **81/81 comprobaciones OK**. Cubre CP-01…CP-20 (incluidos comodines `%` y `_`,
+  inyección SQL, `sort` fuera de la lista blanca y `size` 101), la matriz de roles ADMIN /
+  COMPRAS / CONSULTA / VENTAS / PRODUCCION en los cinco endpoints, SEC-01, SEC-02, SEC-04 y
+  SEC-05 en los cinco endpoints, RNF-02 y un `EXPLAIN` que usa `idx_proveedores_nombre`.
+  Un correo `''` queda en 0 filas con ese valor (se guarda `null`).
+- **Limitaciones:**
+  - **SEC-03 (token expirado) no se probó.**
+  - **No hay prueba automatizada de autorización por rol**; SEC-04 se verificó solo a mano.
+  - La colección Postman llega en este mismo PR de docs.
+
+## Desviaciones vs especificación
+
+- **D1 · JPA en vez de `JdbcTemplate`.** `PFDocs/tarea-backend.md` pedía `JdbcTemplate`; se
+  usó JPA/Spring Data y por tanto no hay `RowMapper`.
+- **D2 · filtro `activo` añadido.** CA-04 solo pedía filtrar por nombre; `diseno.md` ya lo
+  usa, así que se incluyó.
+- **D3 · `@JsonInclude(ALWAYS)` en `ProveedorResponse`.** El ajuste global `non_null` haría
+  desaparecer `contacto`, `telefono` y `correo` nulos; el contrato exige verlos como `null`.
+- **D4 · sin regla de compras en curso.** A diferencia de clientes, desactivar un proveedor
+  no consulta compras pendientes (ver «Reglas»).
+
+## Pendientes / deuda
+
+- **Frontend y HU-13** pendientes; HU-13 consumirá `existeActivo` y validará
+  `PROVEEDOR_INACTIVO`.
+- `patronPrefijo` duplica `ClienteService.patronPrefijo`: candidato a helper común.
+- Cubrir SEC-03 y automatizar la prueba de roles.
+- Cadena de ramas sin push ni PR todavía; QA ejecuta su batería formal (`tarea-qa.md`).
