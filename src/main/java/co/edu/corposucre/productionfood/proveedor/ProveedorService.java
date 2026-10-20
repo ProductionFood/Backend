@@ -7,9 +7,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import co.edu.corposucre.productionfood.common.audit.Auditable;
+import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.proveedor.dto.ActualizarProveedorRequest;
 import co.edu.corposucre.productionfood.proveedor.dto.CrearProveedorRequest;
 import co.edu.corposucre.productionfood.proveedor.dto.ProveedorResponse;
 
@@ -75,6 +77,36 @@ public class ProveedorService {
     private Proveedor obtenerEntidad(Integer id) {
         return proveedorRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("el proveedor", id));
+    }
+
+    @Transactional
+    @Auditable(accion = "EDITAR", tabla = "proveedores",
+            detalle = "'Proveedor editado: ' + #resultado.nombre")
+    public ProveedorResponse actualizar(Integer id, ActualizarProveedorRequest req) {
+        var proveedor = obtenerEntidad(id);
+        // El PUT es un reemplazo completo: un valor opcional nulo borra el anterior.
+        // El estado no se toca aquí: solo cambia por la operación dedicada.
+        proveedor.setNombre(req.nombre().trim());
+        proveedor.setContacto(textoOpcional(req.contacto()));
+        proveedor.setTelefono(textoOpcional(req.telefono()));
+        proveedor.setCorreo(textoOpcional(req.correo()));
+        return aResponse(proveedorRepository.saveAndFlush(proveedor));
+    }
+
+    @Transactional
+    @Auditable(accion = "CAMBIAR_ESTADO", tabla = "proveedores",
+            detalle = "'Proveedor ' + #id + ' estado ' + #req.activo")
+    public ProveedorResponse cambiarEstado(Integer id, CambiarEstadoRequest req) {
+        var proveedor = obtenerEntidad(id);
+        // Sin consulta de compras: la regla R-02 se valida en HU-13 y las compras
+        // PENDIENTE de un proveedor desactivado siguen su curso.
+        proveedor.setEstado(req.activo());
+        return aResponse(proveedorRepository.saveAndFlush(proveedor));
+    }
+
+    @Transactional(readOnly = true)
+    public boolean existeActivo(Integer id) {
+        return proveedorRepository.existeActivo(id);
     }
 
     private static String textoOpcional(String texto) {
