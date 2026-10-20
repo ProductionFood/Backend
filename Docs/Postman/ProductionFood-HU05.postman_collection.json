@@ -1,0 +1,1683 @@
+{
+  "info": {
+    "_postman_id": "hu05-gestion-clientes",
+    "name": "ProductionFood - HU-05 Gestión de Clientes",
+    "description": "Casos de la HU-05: alta, consulta con filtros y paginación, edición y baja por desactivación de clientes. Comprueba también que no hay DELETE, que COMPRAS y CONSULTA no escriben y que los filtros no devuelven la tabla entera. Corre sobre el backend arrancado con docker compose (MySQL + Flyway) en {{baseUrl}} (por defecto http://localhost:9211, el SERVER_PORT del .env).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Setup",
+      "description": "Sesiones de ADMIN, VENTAS y CONSULTA; los tokens los usan el resto de peticiones de la colección",
+      "item": [
+        {
+          "name": "Login admin → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set(\"token\", json.token);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(json.usuario.rol).to.eql(\"ADMIN\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Consulta HU05\",\n  \"correo\": \"{{correoConsulta}}\",\n  \"password\": \"ClaveHU05*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"correoConsulta\", \"consulta-hu05-\" + Date.now() + \"@productionfood.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"rol CONSULTA\", () => pm.expect(json.rol.nombre).to.eql(\"CONSULTA\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{correoConsulta}}\",\n  \"password\": \"ClaveHU05*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set(\"tokenConsulta\", json.token);",
+                  "pm.test(\"rol CONSULTA\", () => pm.expect(json.usuario.rol).to.eql(\"CONSULTA\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Ventas HU05\",\n  \"correo\": \"{{correoVentas}}\",\n  \"password\": \"ClaveHU05*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"correoVentas\", \"ventas-hu05-\" + Date.now() + \"@productionfood.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"rol VENTAS\", () => pm.expect(json.rol.nombre).to.eql(\"VENTAS\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{correoVentas}}\",\n  \"password\": \"ClaveHU05*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set(\"tokenVentas\", json.token);",
+                  "pm.test(\"rol VENTAS\", () => pm.expect(json.usuario.rol).to.eql(\"VENTAS\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "HU-05 · Alta, edición y estado",
+      "description": "CA-01..CA-05: alta con nombre obligatorio, edición y baja por desactivación",
+      "item": [
+        {
+          "name": "Crear cliente con solo el nombre → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"{{nombreCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set(\"idCliente\", json.idCliente);",
+                  "pm.test(\"la cabecera Location apunta al cliente creado\", () =>",
+                  "  pm.expect(pm.response.headers.get(\"Location\")).to.eql(\"/api/v1/clientes/\" + json.idCliente));",
+                  "pm.test(\"nace activo\", () => pm.expect(json.activo).to.be.true);",
+                  "pm.test(\"contacto y telefono vienen como null, no ausentes\", () => {",
+                  "  pm.expect(json).to.have.property(\"contacto\").that.is.null;",
+                  "  pm.expect(json).to.have.property(\"telefono\").that.is.null;",
+                  "});",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente con los tres campos → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Panadería El Trigo\",\n  \"contacto\": \"Ana Restrepo\",\n  \"telefono\": \"310 444 2211\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"contacto y telefono vienen con valor\", () => {",
+                  "  pm.expect(json.contacto).to.eql(\"Ana Restrepo\");",
+                  "  pm.expect(json.telefono).to.eql(\"310 444 2211\");",
+                  "});",
+                  "pm.test(\"nace activo\", () => pm.expect(json.activo).to.be.true);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Editar cliente → 200",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes/{{idCliente}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes",
+                "{{idCliente}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Tienda La Esquina (editada)\",\n  \"contacto\": \"Pedro Ruiz\",\n  \"telefono\": \"300 555 1234\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"el cambio está en la respuesta\", () => {",
+                  "  pm.expect(json.idCliente).to.eql(Number(pm.collectionVariables.get(\"idCliente\")));",
+                  "  pm.expect(json.nombre).to.eql(\"Tienda La Esquina (editada)\");",
+                  "  pm.expect(json.contacto).to.eql(\"Pedro Ruiz\");",
+                  "  pm.expect(json.telefono).to.eql(\"300 555 1234\");",
+                  "});",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar cliente → 200",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes/{{idCliente}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes",
+                "{{idCliente}}",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"activo viene en false\", () => pm.expect(json.activo).to.be.false);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reactivar cliente → 200",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes/{{idCliente}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes",
+                "{{idCliente}}",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"activo viene en true\", () => pm.expect(json.activo).to.be.true);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar un cliente inexistente → 404",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes/9999/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes",
+                "9999",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"code RECURSO_NO_ENCONTRADO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"RECURSO_NO_ENCONTRADO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "HU-05 · Consulta",
+      "description": "CA-04: listado paginado, filtro por prefijo, filtro por estado y orden",
+      "item": [
+        {
+          "name": "Listar clientes → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.collectionVariables.set(\"totalClientes\", json.totalElements);",
+                  "pm.test(\"envelope de colección completo\", () => {",
+                  "  pm.expect(json).to.have.property(\"content\").that.is.an(\"array\");",
+                  "  pm.expect(json).to.have.property(\"page\", 0);",
+                  "  pm.expect(json).to.have.property(\"size\", 20);",
+                  "  pm.expect(json).to.have.property(\"totalElements\").that.is.a(\"number\");",
+                  "  pm.expect(json).to.have.property(\"totalPages\").that.is.a(\"number\");",
+                  "  pm.expect(json).to.have.property(\"first\");",
+                  "  pm.expect(json).to.have.property(\"last\");",
+                  "});",
+                  "pm.test(\"cada cliente trae los cinco campos\", () => {",
+                  "  json.content.forEach(function (c) {",
+                  "    pm.expect(c).to.have.property(\"idCliente\").that.is.a(\"number\");",
+                  "    pm.expect(c).to.have.property(\"nombre\").that.is.a(\"string\");",
+                  "    pm.expect(c).to.have.property(\"contacto\");",
+                  "    pm.expect(c).to.have.property(\"telefono\");",
+                  "    pm.expect(c).to.have.property(\"activo\").that.is.a(\"boolean\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filtro por prefijo de nombre → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?nombre=Tien",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "nombre",
+                  "value": "Tien"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"el filtro es por prefijo, no por contenido\", () =>",
+                  "  pm.expect(json.content.every(c => c.nombre.toLowerCase().indexOf(\"tien\") === 0)).to.be.true);",
+                  "pm.test(\"encuentra el cliente que empieza por Tien\", () =>",
+                  "  pm.expect(json.totalElements).to.be.above(0));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filtro por estado activo → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?activo=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "activo",
+                  "value": "true"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"todos los clientes del filtro están activos\", () =>",
+                  "  pm.expect(pm.response.json().content.every(c => c.activo === true)).to.be.true);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Paginación size=2 → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?page=0&size=2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "2"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"devuelve como máximo 2 clientes\", () =>",
+                  "  pm.expect(json.content.length).to.be.at.most(2));",
+                  "pm.test(\"totalPages coherente\", () =>",
+                  "  pm.expect(json.totalPages).to.eql(Math.ceil(json.totalElements / json.size)));",
+                  "pm.test(\"first=true en la página 0\", () => pm.expect(json.first).to.be.true);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Orden por nombre asc → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?sort=nombre,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "nombre,asc"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var nombres = pm.response.json().content.map(c => c.nombre.toLowerCase().normalize(\"NFD\").replace(/[\\u0300-\\u036f]/g, \"\"));",
+                  "pm.test(\"los nombres van en orden ascendente\", () => {",
+                  "  for (var i = 1; i < nombres.length; i++) { pm.expect(nombres[i-1] <= nombres[i]).to.be.true; }",
+                  "});",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Orden por id desc → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?sort=id,desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "id,desc"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var ids = pm.response.json().content.map(c => c.idCliente);",
+                  "pm.test(\"los ids van en orden descendente\", () => {",
+                  "  for (var i = 1; i < ids.length; i++) { pm.expect(ids[i-1] > ids[i]).to.be.true; }",
+                  "});",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener un cliente por id → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes/{{idCliente}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes",
+                "{{idCliente}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"es el cliente pedido\", () =>",
+                  "  pm.expect(json.idCliente).to.eql(Number(pm.collectionVariables.get(\"idCliente\"))));",
+                  "pm.test(\"el estado es un booleano\", () =>",
+                  "  pm.expect(json.activo).to.be.a(\"boolean\"));",
+                  "pm.test(\"contacto y telefono están presentes aunque valgan null\", () => {",
+                  "  pm.expect(json).to.have.property(\"contacto\");",
+                  "  pm.expect(json).to.have.property(\"telefono\");",
+                  "});",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filtro sin coincidencias → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?nombre=zzz-no-existe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "nombre",
+                  "value": "zzz-no-existe"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"la página viene vacía\", () => {",
+                  "  pm.expect(json.content).to.be.an(\"array\").that.is.empty;",
+                  "  pm.expect(json.totalElements).to.eql(0);",
+                  "});",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "HU-05 · Errores",
+      "description": "Validaciones del formulario, de la paginación y del filtro por nombre",
+      "item": [
+        {
+          "name": "Nombre vacío → 400 VALIDACION_FALLIDA",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(json.code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"el error señala el campo nombre\", () =>",
+                  "  pm.expect(json.fieldErrors[0].field).to.eql(\"nombre\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nombre de 101 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(json.code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"el error señala el campo nombre\", () =>",
+                  "  pm.expect(json.fieldErrors[0].field).to.eql(\"nombre\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Contacto de 101 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente con contacto largo\",\n  \"contacto\": \"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(json.code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"el error señala el campo contacto\", () =>",
+                  "  pm.expect(json.fieldErrors[0].field).to.eql(\"contacto\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Teléfono de 21 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente con teléfono largo\",\n  \"telefono\": \"TTTTTTTTTTTTTTTTTTTTT\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(json.code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"el error señala el campo telefono\", () =>",
+                  "  pm.expect(json.fieldErrors[0].field).to.eql(\"telefono\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Comodín % en el filtro → 200 (no devuelve todo)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?nombre=%25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "nombre",
+                  "value": "%25"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"el % se trata como texto literal, no devuelve la tabla entera\", () =>",
+                  "  pm.expect(json.totalElements).to.be.below(Number(pm.collectionVariables.get(\"totalClientes\"))));",
+                  "pm.test(\"no viene ningún cliente\", () => pm.expect(json.content).to.be.an(\"array\").that.is.empty);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inyección SQL en el filtro → 200 (sin 500)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?nombre=' OR '1'='1 --",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "nombre",
+                  "value": "' OR '1'='1 --"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200 (nunca 500)\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"la inyección no devuelve clientes\", () =>",
+                  "  pm.expect(pm.response.json().content).to.be.an(\"array\").that.is.empty);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "sort fuera de la lista blanca → 400 CAMPO_ORDEN_INVALIDO",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?sort=estado,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "estado,asc"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code CAMPO_ORDEN_INVALIDO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"CAMPO_ORDEN_INVALIDO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "size por encima de 100 → 400 PARAMETRO_INVALIDO",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?size=101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "101"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code PARAMETRO_INVALIDO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "page negativo → 400 PARAMETRO_INVALIDO",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes?page=-1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "-1"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code PARAMETRO_INVALIDO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "HU-05 · Seguridad y autorización",
+      "description": "SEC-01..SEC-04: autenticación, roles y ausencia de DELETE",
+      "item": [
+        {
+          "name": "Sin token → 401 NO_AUTENTICADO",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token malformado → 401 NO_AUTENTICADO",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol CONSULTA puede listar → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"devuelve el envelope de colección\", () =>",
+                  "  pm.expect(pm.response.json()).to.have.property(\"content\").that.is.an(\"array\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol CONSULTA intenta crear → 403 SIN_PERMISO",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente de un rol sin permiso\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol CONSULTA intenta editar → 403 SIN_PERMISO",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes/{{idCliente}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes",
+                "{{idCliente}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente editado por un rol sin permiso\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol VENTAS puede crear → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente creado por Ventas HU05\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var json = pm.response.json();",
+                  "pm.test(\"nace activo\", () => pm.expect(json.activo).to.be.true);",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE no existe → 405 METODO_NO_PERMITIDO",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes/{{idCliente}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes",
+                "{{idCliente}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"code METODO_NO_PERMITIDO\", () =>",
+                  "  pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));",
+                  "pm.test(\"Responde en menos de 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9211"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenConsulta",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenVentas",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idCliente",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "nombreCliente",
+      "value": "Tienda La Esquina",
+      "type": "string"
+    },
+    {
+      "key": "correoConsulta",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "correoVentas",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "totalClientes",
+      "value": "0",
+      "type": "string"
+    }
+  ]
+}
