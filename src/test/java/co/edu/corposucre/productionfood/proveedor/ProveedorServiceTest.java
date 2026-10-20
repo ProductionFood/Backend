@@ -1,16 +1,24 @@
 package co.edu.corposucre.productionfood.proveedor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
+import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.proveedor.dto.CrearProveedorRequest;
 
 class ProveedorServiceTest {
@@ -65,5 +73,49 @@ class ProveedorServiceTest {
         service.crear(new CrearProveedorRequest("Lácteos", null, null, "  a@b.co  "));
 
         assertThat(capturarGuardado().getCorreo()).isEqualTo("a@b.co");
+    }
+
+    @Test
+    @DisplayName("patronPrefijo normaliza, escapa comodines y devuelve null sin texto")
+    void patronPrefijoNormaliza() {
+        assertThat(ProveedorService.patronPrefijo(null)).isNull();
+        assertThat(ProveedorService.patronPrefijo("  ")).isNull();
+        assertThat(ProveedorService.patronPrefijo("Hari")).isEqualTo("hari%");
+        assertThat(ProveedorService.patronPrefijo("%")).isEqualTo("\\%%");
+        assertThat(ProveedorService.patronPrefijo("a_b")).isEqualTo("a\\_b%");
+    }
+
+    @Test
+    @DisplayName("listar rechaza campo de orden no permitido y paginación fuera de rango")
+    void listarRechazaParametrosInvalidos() {
+        assertThatThrownBy(() -> service.listar(null, null, 0, 10, "correo,asc"))
+            .isInstanceOfSatisfying(ParametroInvalidoException.class,
+                e -> assertThat(e.getCodigo()).isEqualTo("CAMPO_ORDEN_INVALIDO"));
+        assertThatThrownBy(() -> service.listar(null, null, 0, 101, null))
+            .isInstanceOfSatisfying(ParametroInvalidoException.class,
+                e -> assertThat(e.getCodigo()).isEqualTo("PARAMETRO_INVALIDO"));
+        assertThatThrownBy(() -> service.listar(null, null, -1, 10, null))
+            .isInstanceOfSatisfying(ParametroInvalidoException.class,
+                e -> assertThat(e.getCodigo()).isEqualTo("PARAMETRO_INVALIDO"));
+    }
+
+    @Test
+    @DisplayName("listar mapea el contenido, conserva el total y ordena por nombre ascendente")
+    void listarMapeaYOrdenaPorDefecto() {
+        var p = new Proveedor();
+        p.setIdProveedor(7);
+        p.setNombre("Harinas SA");
+        p.setEstado(true);
+        when(repository.buscar(isNull(), isNull(), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(p)));
+
+        var resp = service.listar(null, null, 0, 10, null);
+
+        assertThat(resp.content()).hasSize(1);
+        assertThat(resp.content().get(0).idProveedor()).isEqualTo(7);
+        assertThat(resp.totalElements()).isEqualTo(1);
+        var captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(repository).buscar(isNull(), isNull(), captor.capture());
+        assertThat(captor.getValue().getSort()).isEqualTo(Sort.by(Sort.Direction.ASC, "nombre"));
     }
 }
