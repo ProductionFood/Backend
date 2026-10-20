@@ -28,13 +28,13 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.rol.RolRepository;
 import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
 import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
-import co.edu.corposucre.productionfood.usuario.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 

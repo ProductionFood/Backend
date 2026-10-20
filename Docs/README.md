@@ -2,7 +2,7 @@
 
 Documentación operativa del backend: qué se ha terminado, cómo consumir la API desde el
 frontend y con qué se prueba. La documentación de proyecto (reglas transversales, HU en
-preparación) sigue viva en `../../docs/` — esta carpeta es del equipo de implementación.
+preparación) sigue viva en `../../PFDocs/` — esta carpeta es del equipo de implementación.
 
 ## Estructura
 
@@ -29,9 +29,9 @@ Docs/
 ## Reglas
 
 1. **Solo una HU entra en `Hechos/` cuando cierra los criterios de QA**
-   (`../../docs/00-base/05-ESTANDARES-QA.md` §9). Terminar el código no es terminar la HU.
+   (`../../PFDocs/00-base/05-ESTANDARES-QA.md` §9). Terminar el código no es terminar la HU.
 2. **Cada manual refleja el contrato real**, no el deseado. Si la implementación difiere de
-   `../../docs/00-base/04-CONTRATO-API.md`, se documenta la diferencia y se reporta el defecto.
+   `../../PFDocs/00-base/04-CONTRATO-API.md`, se documenta la diferencia y se reporta el defecto.
 3. **Los tokens nunca se pegan en la colección** ni en documentos: se obtienen del login.
 4. **Migraciones y esquema no viven aquí** — ver `plans/` para el estado de la
    reestructuración de HU-01 (Flyway + base de datos en blanco).
@@ -44,3 +44,4 @@ Docs/
 | HU-02 Gestión de usuarios | Entregada 2026-10-01 |
 | HU-03 Inicio de sesión | Entregada 2026-10-12 |
 | HU-04 Bitácora de auditoría | Entregada 2026-10-12 |
+| HU-05 Gestión de clientes | Entregada 2026-10-20 |

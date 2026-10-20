@@ -1,4 +1,4 @@
-package co.edu.corposucre.productionfood.usuario.dto;
+package co.edu.corposucre.productionfood.common.dto;
 
 import jakarta.validation.constraints.NotNull;
 
