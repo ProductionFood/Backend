@@ -66,4 +66,45 @@ class CrearProveedorRequestTest {
         assertThat(mensajesDe("nombre", excedido))
                 .containsExactly("El nombre no puede superar 100 caracteres");
     }
+
+    @Test
+    @DisplayName("Contacto y teléfono rechazan 101 y 21 caracteres y admiten 100 y 20")
+    void contactoYTelefonoLimiteDeLongitud() {
+        var excedido = new CrearProveedorRequest("Proveedor", "c".repeat(101), "1".repeat(21), null);
+        var enLimite = new CrearProveedorRequest("Proveedor", "c".repeat(100), "1".repeat(20), null);
+
+        assertThat(mensajesDe("contacto", excedido))
+                .containsExactly("El contacto no puede superar 100 caracteres");
+        assertThat(mensajesDe("telefono", excedido))
+                .containsExactly("El teléfono no puede superar 20 caracteres");
+        assertThat(validator.validate(enLimite)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Un correo con formato inválido reporta violación")
+    void correoInvalidoReportaViolacion() {
+        var req = new CrearProveedorRequest("Proveedor", null, null, "no-es-correo");
+
+        assertThat(mensajesDe("correo", req)).containsExactly("Ingrese un correo válido");
+    }
+
+    @Test
+    @DisplayName("El correo es opcional: vacío, nulo o válido no produce violación")
+    void correoOpcional() {
+        for (String correo : new String[] {"", null, "ventas@harinascaribe.com"}) {
+            var req = new CrearProveedorRequest("Proveedor", null, null, correo);
+
+            assertThat(mensajesDe("correo", req)).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("Un correo de formato válido que supera 100 caracteres reporta violación de tamaño")
+    void correoDemasiadoLargo() {
+        var correo = "ventas@" + "d".repeat(60) + "." + "e".repeat(30) + ".com";
+        var req = new CrearProveedorRequest("Proveedor", null, null, correo);
+
+        assertThat(mensajesDe("correo", req))
+                .containsExactly("El correo no puede superar 100 caracteres");
+    }
 }
