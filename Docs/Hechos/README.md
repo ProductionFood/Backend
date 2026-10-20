@@ -3,7 +3,7 @@
 Este directorio registra lo que el **Backend** hizo por cada historia de usuario, sin
 importar el estado de QA: qué se construyó, el contrato, evidencia de verificación y
 deudas. La verificación de QA es un checklist aparte (§9 de
-`../../../docs/00-base/05-ESTANDARES-QA.md`), referenciada en cada ficha.
+`../../../PFDocs/00-base/05-ESTANDARES-QA.md`), referenciada en cada ficha.
 
 ## Criterios de cierre QA (referencia, los ejecuta QA)
 
@@ -60,3 +60,4 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-02 | Gestión de usuarios | 2026-10-01 · [`HU-02-gestion-usuarios.md`](HU-02-gestion-usuarios.md) |
 | HU-03 | Inicio de sesión | 2026-10-12 · [`HU-03-inicio-sesion.md`](HU-03-inicio-sesion.md) |
 | HU-04 | Bitácora de auditoría | 2026-10-12 · [`HU-04-bitacora-auditoria.md`](HU-04-bitacora-auditoria.md) |
+| HU-05 | Gestión de clientes | 2026-10-20 · [`HU-05-gestion-clientes.md`](HU-05-gestion-clientes.md) |
