@@ -158,3 +158,64 @@ Respuesta `200 OK`: el `Proveedor` con `"activo": false`. El cambio es idempoten
 el mismo valor no falla. Desactivar **no cancela** las compras ya registradas, ni siquiera
 las pendientes. `activo` es obligatorio: sin él, `400 VALIDACION_FALLIDA` con
 `fieldErrors` sobre `activo`.
+
+## Errores
+
+Cuerpo común (`../../../PFDocs/00-base/04-CONTRATO-API.md` §5):
+
+```json
+{"timestamp":"2026-10-19T10:15:30.123","status":400,"error":"Bad Request",
+ "code":"VALIDACION_FALLIDA","message":"Los datos enviados no son válidos.",
+ "path":"/api/v1/proveedores",
+ "fieldErrors":[{"field":"nombre","message":"El nombre es obligatorio"}]}
+```
+
+| HTTP | `code` | Cuándo | Qué hace el frontend |
+|---|---|---|---|
+| 400 | `VALIDACION_FALLIDA` | Falla una regla del cuerpo (ver mensajes abajo) o el JSON es ilegible o con un tipo erróneo (entonces `fieldErrors` viene vacío) | Mostrar cada mensaje junto a su campo |
+| 400 | `PARAMETRO_INVALIDO` | `page` negativo, `size` fuera de `1..100`, `activo` no booleano o `id` de ruta no numérico | Corregir el parámetro |
+| 400 | `CAMPO_ORDEN_INVALIDO` | `sort` fuera de `nombre`/`id` | Usar `nombre,asc` |
+| 401 | `NO_AUTENTICADO` | Sin token, o token inválido o expirado | Volver al login |
+| 403 | `SIN_PERMISO` | Rol sin permiso para la operación | Bloquear la acción |
+| 403 | `USUARIO_INACTIVO` | Token válido de un usuario dado de baja | Cerrar sesión e informar |
+| 404 | `RECURSO_NO_ENCONTRADO` | `id` inexistente | Volver al listado |
+
+Mensajes de `fieldErrors` (`field` → `message`):
+
+| `field` | Mensajes |
+|---|---|
+| `nombre` | `El nombre es obligatorio` · `El nombre no puede superar 100 caracteres` |
+| `contacto` | `El contacto no puede superar 100 caracteres` |
+| `telefono` | `El teléfono no puede superar 20 caracteres` |
+| `correo` | `Ingrese un correo válido` · `El correo no puede superar 100 caracteres` |
+| `activo` (PATCH) | `El estado es obligatorio` |
+
+## Reglas que afectan a la interfaz
+
+- **El correo es opcional y no es único**: dos proveedores pueden compartirlo. Envía `null`,
+  no `""`; el backend igualmente normaliza `""` o solo espacios a `null` (y recorta espacios).
+- **PUT reemplaza todo**: precarga el formulario con los datos actuales y envía siempre los
+  cuatro campos. Omitir uno equivale a borrarlo.
+- **El estado no se envía** al crear ni en el PUT; solo cambia con el PATCH.
+- **Confirmar antes de desactivar** con el texto: «No se podrán registrar nuevas compras a
+  este proveedor.»
+- **Compras (HU-13, aún no implementada):** rechazará comprar a un proveedor inactivo con
+  `409 PROVEEDOR_INACTIVO`. Hoy ese código no existe en este módulo.
+- Un proveedor inactivo sigue apareciendo en el listado: filtra con `activo=true` para
+  selectores de compra.
+
+## Estados de pantalla
+
+- **Cargando:** indicador visible y controles deshabilitados mientras dura la petición.
+- **Vacío:** mensaje explicativo con acción sugerida (limpiar filtros o «Nuevo proveedor»).
+- **Error:** mensaje en español con opción de reintentar; los errores de campo, junto al campo.
+
+## Checklist de integración
+
+- [ ] Token Bearer en cada llamada; `401` lleva al login.
+- [ ] Acciones de escritura visibles solo para `ADMIN` y `COMPRAS`.
+- [ ] Modelo `Proveedor` con `null` (no omitidos) en contacto, teléfono y correo.
+- [ ] Paginación con `size` entre 1 y 100 y orden `nombre|id`.
+- [ ] PUT con los cuatro campos; sin `activo` en alta ni PUT.
+- [ ] Confirmación antes de desactivar; botón de envío deshabilitado en vuelo.
+- [ ] `fieldErrors` mostrados junto a cada campo.
