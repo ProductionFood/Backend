@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Fecha de entrega | 2026-10-20 |
-| Commits / PR | PRs #47–#53 (cadena `HU-07/pr*` sobre la rama `HU-07/gestion-unidades`); ver «Entregado en» |
-| Colección Postman | `Docs/Postman/ProductionFood-HU07.postman_collection.json` (pendiente de publicar en el PR siguiente) |
+| Commits / PR | PRs #47–#56 (cadena `HU-07/pr*` sobre la rama `HU-07/gestion-unidades`); ver «Entregado en» |
+| Colección Postman | `Docs/Postman/ProductionFood-HU07.postman_collection.json` (`Preparación`, `CRUD (CP-01…CP-17)`, `Roles (matriz)`, `Seguridad (SEC-01…05)`) — 50 peticiones |
 | Estado QA | pendiente con el equipo de QA |
 
 ## Qué se construyó
@@ -197,8 +197,12 @@ como campo del cuerpo.
   SEC-04 se aplica solo a los endpoints de escritura: los cinco roles leen el catálogo, así
   que en los de lectura no existe un rol al que se le pueda negar el permiso. Es el caso
   crítico de la batería: si devolviera 200, la autorización por método estaría desactivada.
-- **Colección de Postman:** **no se ha ejecutado.** Se publica en el PR siguiente y aún no se
-  ha corrido contra la aplicación.
+- **Colección de Postman:** publicada en `Docs/Postman/ProductionFood-HU07.postman_collection.json`
+  (50 peticiones). **No se ha ejecutado** contra la aplicación: la corrida en caliente la
+  hace el equipo de QA. Tres casos necesitan preparación manual y lo documentan en la
+  propia petición: CP-11, CP-12 y CP-12b (una unidad en uso, hoy imposible porque
+  `materias_primas`, `productos` y `recetas` están vacías), SEC-03 (token caducado) y
+  SEC-05 (token de usuario desactivado).
 
 ## Desviaciones vs especificación
 
@@ -222,13 +226,16 @@ como campo del cuerpo.
 | #51 | Controlador | `UnidadMedidaController` + Swagger + `@PreAuthorize` |
 | #52 | Pruebas HTTP | 16 pruebas funcionales del controlador |
 | #53 | Batería de seguridad | 18 ejecuciones de SEC-01..SEC-05 sobre los cuatro endpoints |
+| #54 | Ficha de entrega | Esta ficha y las filas de HU-07 en los índices de `Docs/` |
+| #55 | Manual de consumo | Contrato para el frontend + fila en el índice de manuales |
+| #56 | Postman | Colección con 50 peticiones: preparación, CP-01…CP-17, matriz de roles y SEC-01…SEC-05 |
 
 ## Pendientes / deuda
 
 - **Frontend de HU-07 pendiente** (sprint siguiente): catálogo, formulario de alta y edición
   y advertencia de unidad en uso.
-- **La colección de Postman se publica en el PR siguiente y aún no se ha ejecutado** contra la
-  aplicación.
+- **La colección de Postman está publicada (50 peticiones) y aún no se ha ejecutado** contra la
+  aplicación: la verificación en caliente es de QA.
 - **La verificación de QA (CP-01..CP-17 y la batería SEC) la ejecuta QA**: esta ficha es la
   entrega del backend.
 - **Deuda ajena a esta HU, ya registrada:** `patronPrefijo` está duplicado entre
