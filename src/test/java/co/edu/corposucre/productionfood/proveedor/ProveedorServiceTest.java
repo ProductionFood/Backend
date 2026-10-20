@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,7 +21,10 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
+import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
+import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.proveedor.dto.ActualizarProveedorRequest;
 import co.edu.corposucre.productionfood.proveedor.dto.CrearProveedorRequest;
 
 class ProveedorServiceTest {
@@ -117,5 +123,87 @@ class ProveedorServiceTest {
         var captor = ArgumentCaptor.forClass(Pageable.class);
         verify(repository).buscar(isNull(), isNull(), captor.capture());
         assertThat(captor.getValue().getSort()).isEqualTo(Sort.by(Sort.Direction.ASC, "nombre"));
+    }
+
+    private Proveedor existente(boolean activo) {
+        var p = new Proveedor();
+        p.setIdProveedor(5);
+        p.setNombre("Viejo");
+        p.setContacto("Luis");
+        p.setTelefono("300");
+        p.setCorreo("v@v.co");
+        p.setEstado(activo);
+        when(repository.findById(5)).thenReturn(Optional.of(p));
+        return p;
+    }
+
+    @Test
+    @DisplayName("obtener y actualizar lanzan RecursoNoEncontradoException si no existe")
+    void obtenerYActualizarInexistente() {
+        when(repository.findById(9)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.obtener(9))
+            .isInstanceOf(RecursoNoEncontradoException.class);
+        assertThatThrownBy(() -> service.actualizar(9,
+                new ActualizarProveedorRequest("X", null, null, null)))
+            .isInstanceOf(RecursoNoEncontradoException.class);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("actualizar reemplaza los datos, borra opcionales nulos y no cambia el estado")
+    void actualizarReemplazaSinTocarEstado() {
+        existente(false);
+
+        var resp = service.actualizar(5,
+            new ActualizarProveedorRequest(" Nuevo ", "Ana", null, null));
+
+        var guardado = capturarGuardado();
+        assertThat(guardado.getNombre()).isEqualTo("Nuevo");
+        assertThat(guardado.getContacto()).isEqualTo("Ana");
+        assertThat(guardado.getTelefono()).isNull();
+        assertThat(guardado.getCorreo()).isNull();
+        assertThat(resp.activo()).isFalse();
+    }
+
+    @Test
+    @DisplayName("cambiarEstado desactiva, reactiva y es idempotente")
+    void cambiarEstadoDesactivaReactivaEIdempotente() {
+        existente(true);
+
+        assertThat(service.cambiarEstado(5, new CambiarEstadoRequest(false)).activo()).isFalse();
+        assertThat(service.cambiarEstado(5, new CambiarEstadoRequest(false)).activo()).isFalse();
+        assertThat(service.cambiarEstado(5, new CambiarEstadoRequest(true)).activo()).isTrue();
+    }
+
+    @Test
+    @DisplayName("cambiarEstado de un proveedor inexistente lanza RecursoNoEncontradoException")
+    void cambiarEstadoInexistente() {
+        when(repository.findById(9)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.cambiarEstado(9, new CambiarEstadoRequest(false)))
+            .isInstanceOf(RecursoNoEncontradoException.class);
+    }
+
+    @Test
+    @DisplayName("cambiarEstado solo usa findById y saveAndFlush: no valida compras en curso (D4)")
+    void cambiarEstadoNoConsultaOtrasReglas() {
+        existente(true);
+
+        service.cambiarEstado(5, new CambiarEstadoRequest(false));
+
+        verify(repository).findById(5);
+        verify(repository).saveAndFlush(any(Proveedor.class));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("existeActivo delega en el repositorio")
+    void existeActivoDelega() {
+        when(repository.existeActivo(1)).thenReturn(true);
+        when(repository.existeActivo(2)).thenReturn(false);
+
+        assertThat(service.existeActivo(1)).isTrue();
+        assertThat(service.existeActivo(2)).isFalse();
     }
 }
