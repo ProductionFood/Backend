@@ -16,9 +16,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
-import co.edu.corposucre.productionfood.usuario.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 import io.swagger.v3.oas.annotations.Operation;

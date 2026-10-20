@@ -13,8 +13,8 @@ import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.SimpleEvaluationContext;
 
 import co.edu.corposucre.productionfood.common.audit.Auditable;
+import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.usuario.dto.ActualizarUsuarioRequest;
-import co.edu.corposucre.productionfood.usuario.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.usuario.dto.CrearUsuarioRequest;
 import co.edu.corposucre.productionfood.usuario.dto.UsuarioResponse;
 
