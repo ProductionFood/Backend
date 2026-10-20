@@ -107,3 +107,54 @@ Sin coincidencias devuelve `200` con `content: []` y `totalElements: 0`, no un e
 Respuesta `200 OK`: un `Proveedor` como el del listado. Un `id` que no existe devuelve
 `404 RECURSO_NO_ENCONTRADO` y un `id` no numérico (`/proveedores/abc`) devuelve
 `400 PARAMETRO_INVALIDO`.
+
+### POST /api/v1/proveedores — alta
+
+Solo `nombre` es obligatorio. El proveedor se crea **siempre activo**: no envíes `activo`.
+
+```http
+POST /api/v1/proveedores
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "nombre": "Agroinsumos del Caribe", "contacto": "Marta Pérez",
+  "telefono": "3001234567", "correo": null }
+```
+
+Respuesta `201 Created` con cabecera `Location: /api/v1/proveedores/3`:
+
+```json
+{ "idProveedor": 3, "nombre": "Agroinsumos del Caribe", "contacto": "Marta Pérez",
+  "telefono": "3001234567", "correo": null, "activo": true }
+```
+
+### PUT /api/v1/proveedores/{id} — edición
+
+**Reemplaza todo**: nombre, contacto, teléfono y correo se sobrescriben siempre. Envía
+**los cuatro campos** con el valor actual de lo que no cambia; un campo `null` (o ausente)
+**borra** el dato guardado. El estado no se modifica aquí.
+
+```http
+PUT /api/v1/proveedores/3
+Content-Type: application/json
+
+{ "nombre": "Agroinsumos del Caribe S.A.S.", "contacto": "Marta Pérez",
+  "telefono": "3001234567", "correo": "ventas@agrocaribe.example" }
+```
+
+Respuesta `200 OK`: el `Proveedor` actualizado. `404 RECURSO_NO_ENCONTRADO` si el id no
+existe.
+
+### PATCH /api/v1/proveedores/{id}/estado — activar o desactivar
+
+```http
+PATCH /api/v1/proveedores/3/estado
+Content-Type: application/json
+
+{ "activo": false }
+```
+
+Respuesta `200 OK`: el `Proveedor` con `"activo": false`. El cambio es idempotente: repetir
+el mismo valor no falla. Desactivar **no cancela** las compras ya registradas, ni siquiera
+las pendientes. `activo` es obligatorio: sin él, `400 VALIDACION_FALLIDA` con
+`fieldErrors` sobre `activo`.
