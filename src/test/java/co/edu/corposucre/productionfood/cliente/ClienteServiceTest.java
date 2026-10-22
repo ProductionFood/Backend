@@ -30,6 +30,7 @@ import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.common.pagination.FiltroTexto;
 
 class ClienteServiceTest {
 
@@ -158,11 +159,11 @@ class ClienteServiceTest {
     @Test
     @DisplayName("patronPrefijo devuelve null sin filtro y escapa los comodines de SQL")
     void patronPrefijoSinFiltroYConComodines() {
-        assertThat(ClienteService.patronPrefijo(null)).isNull();
-        assertThat(ClienteService.patronPrefijo("   ")).isNull();
-        assertThat(ClienteService.patronPrefijo("100%")).isEqualTo("100\\%%");
-        assertThat(ClienteService.patronPrefijo("a_b")).isEqualTo("a\\_b%");
-        assertThat(ClienteService.patronPrefijo("c\\d")).isEqualTo("c\\\\d%");
+        assertThat(FiltroTexto.patronPrefijo(null)).isNull();
+        assertThat(FiltroTexto.patronPrefijo("   ")).isNull();
+        assertThat(FiltroTexto.patronPrefijo("100%")).isEqualTo("100\\%%");
+        assertThat(FiltroTexto.patronPrefijo("a_b")).isEqualTo("a\\_b%");
+        assertThat(FiltroTexto.patronPrefijo("c\\d")).isEqualTo("c\\\\d%");
     }
 
     @Test

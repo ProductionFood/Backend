@@ -31,6 +31,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.common.pagination.FiltroTexto;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.rol.RolRepository;
 import co.edu.corposucre.productionfood.security.UsuarioAutenticado;
@@ -210,11 +211,11 @@ class UsuarioServiceTest {
     @Test
     @DisplayName("patronPrefijo devuelve null sin filtro y escapa % y _ del comodín SQL")
     void patronPrefijoSinFiltroYConComodines() {
-        assertThat(UsuarioService.patronPrefijo(null)).isNull();
-        assertThat(UsuarioService.patronPrefijo("   ")).isNull();
-        assertThat(UsuarioService.patronPrefijo("100%")).isEqualTo("100\\%%");
-        assertThat(UsuarioService.patronPrefijo("a_b")).isEqualTo("a\\_b%");
-        assertThat(UsuarioService.patronPrefijo("c\\d")).isEqualTo("c\\\\d%");
+        assertThat(FiltroTexto.patronPrefijo(null)).isNull();
+        assertThat(FiltroTexto.patronPrefijo("   ")).isNull();
+        assertThat(FiltroTexto.patronPrefijo("100%")).isEqualTo("100\\%%");
+        assertThat(FiltroTexto.patronPrefijo("a_b")).isEqualTo("a\\_b%");
+        assertThat(FiltroTexto.patronPrefijo("c\\d")).isEqualTo("c\\\\d%");
     }
 
     @Test
