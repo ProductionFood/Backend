@@ -1,6 +1,7 @@
 package co.edu.corposucre.productionfood.materiaprima.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import co.edu.corposucre.productionfood.common.dto.UnidadRefResponse;
 import java.math.BigDecimal;
 
 /**

@@ -64,3 +64,4 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-06 | Gestión de proveedores | 2026-10-19 · [`HU-06-gestion-proveedores.md`](HU-06-gestion-proveedores.md) |
 | HU-07 | Unidades de medida | 2026-10-20 · [`HU-07-unidades-medida.md`](HU-07-unidades-medida.md) |
 | HU-08 | Gestión de materias primas | 2026-10-22 · [`HU-08-materias-primas.md`](HU-08-materias-primas.md) |
+| HU-11 | Gestión de productos | 2026-10-23 · [`HU-11-productos.md`](HU-11-productos.md) |

@@ -18,7 +18,7 @@ import co.edu.corposucre.productionfood.inventario.InventarioRepository;
 import co.edu.corposucre.productionfood.materiaprima.dto.ActualizarMateriaPrimaRequest;
 import co.edu.corposucre.productionfood.materiaprima.dto.CrearMateriaPrimaRequest;
 import co.edu.corposucre.productionfood.materiaprima.dto.MateriaPrimaResponse;
-import co.edu.corposucre.productionfood.materiaprima.dto.UnidadRefResponse;
+import co.edu.corposucre.productionfood.common.dto.UnidadRefResponse;
 import co.edu.corposucre.productionfood.unidadmedida.UnidadMedida;
 import co.edu.corposucre.productionfood.unidadmedida.UnidadMedidaRepository;
 
