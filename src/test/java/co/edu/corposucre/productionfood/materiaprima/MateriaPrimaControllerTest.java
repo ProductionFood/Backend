@@ -38,7 +38,7 @@ import co.edu.corposucre.productionfood.config.SecurityConfig;
 import co.edu.corposucre.productionfood.materiaprima.dto.ActualizarMateriaPrimaRequest;
 import co.edu.corposucre.productionfood.materiaprima.dto.CrearMateriaPrimaRequest;
 import co.edu.corposucre.productionfood.materiaprima.dto.MateriaPrimaResponse;
-import co.edu.corposucre.productionfood.materiaprima.dto.UnidadRefResponse;
+import co.edu.corposucre.productionfood.common.dto.UnidadRefResponse;
 import co.edu.corposucre.productionfood.security.AccesoDenegadoHandler;
 import co.edu.corposucre.productionfood.security.EntryPointNoAutenticado;
 import co.edu.corposucre.productionfood.security.JwtAuthenticationFilter;
