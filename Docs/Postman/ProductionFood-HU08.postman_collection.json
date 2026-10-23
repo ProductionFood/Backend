@@ -1,0 +1,2533 @@
+{
+  "info": {
+    "_postman_id": "hu08-materias-primas",
+    "name": "ProductionFood - HU-08 Materias Primas",
+    "description": "Casos de la HU-08 (materias primas): GET /api/v1/materias-primas (paginado, filtros nombre y activo, orden de lista blanca), GET /api/v1/materias-primas/{id}, POST /api/v1/materias-primas, PUT /api/v1/materias-primas/{id} y PATCH /api/v1/materias-primas/{id}/estado. No existe DELETE: la baja es la desactivación (regla R-05). Corre sobre el backend arrancado con docker compose en {{baseUrl}} (por defecto http://localhost:9211). Ejecutar con el runner de arriba abajo: 'Preparación' inicia sesión como ADMIN, elige con GET /unidades-medida una unidad sembrada por HU-07 (idUnidad) y crea vía ADMIN un usuario por rol (idRol 2 PRODUCCION, 3 COMPRAS, 4 VENTAS, 5 CONSULTA) guardando sus tokens en tokenProduccion, tokenCompras, tokenVentas y tokenConsulta; 'CRUD (CP-01…CP-19)' ejecuta CP-01 y CP-03 a CP-19 (CP-02 es una consulta SQL sobre inventario, no hay request HTTP equivalente: está anotada en CP-01 y en la descripción de la carpeta), CP-01 guarda idMateriaPrima, que reutilizan CP-17, CP-18, CP-19 y 'Seguridad'; 'Roles (matriz)' recorre la matriz (lectura: ADMIN, PRODUCCION, COMPRAS y CONSULTA; VENTAS queda fuera del módulo; escritura: solo ADMIN); 'Seguridad (SEC-01…05)' repite la batería de seguridad en los cinco endpoints. Casos con preparación manual: CP-02 y la verificación de stock de CP-18 son SQL (tarea-qa.md §3); SEC-03 pide pegar un JWT vencido en tokenExpirado y SEC-05 el token de un usuario desactivado en tokenInactivo. Nota sobre CP-11: la especificación decía que un costo con 3 decimales se redondea, pero el DTO @Digits(8,2) lo rechaza con 400 VALIDACION_FALLIDA; la colección comprueba el comportamiento real (400). Esta colección no se ha ejecutado contra el backend al generarse.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9211"
+    },
+    {
+      "key": "tokenAdmin",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenProduccion",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenCompras",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenVentas",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenConsulta",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idUnidad",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "idMateriaPrima",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "correoProduccion",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "correoCompras",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "correoVentas",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "correoConsulta",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenMalformado",
+      "value": "abc.def.ghi",
+      "type": "string"
+    },
+    {
+      "key": "tokenExpirado",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tokenInactivo",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Preparación",
+      "description": "Inicia sesión como ADMIN, elige una unidad de medida sembrada por HU-07 (idUnidad) y crea un usuario por cada rol no-ADMIN con tokens guardados en variables. Ejecutar primero con el runner.",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Autentica al administrador del seed y guarda tokenAdmin.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenAdmin\", pm.response.json().token);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(pm.response.json().usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elegir unidad de medida de apoyo → idUnidad",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/unidades-medida",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "unidades-medida"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "description": "HU-07 dejó el catálogo de unidades sembrado (9 unidades), así que aquí no se crea ninguna: se elige la primera del listado y se guarda su id en la variable idUnidad, que reutilizan todos los casos de creación y edición de esta colección."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"catálogo con al menos una unidad\", () => pm.expect(pm.response.json().length).to.be.at.least(1));",
+                  "var u = pm.response.json()[0];",
+                  "pm.collectionVariables.set(\"idUnidad\", u.idUnidad);",
+                  "pm.test(\"unidad elegida con id y abreviatura\", () => { pm.expect(u).to.have.property(\"idUnidad\"); pm.expect(u).to.have.property(\"abreviatura\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Crea (como ADMIN) un usuario de rol PRODUCCION (idRol 2) con correo único por ejecución.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"PRODUCCION HU08\",\n  \"correo\": \"{{correoProduccion}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"correoProduccion\", \"produccion-hu08-\" + Date.now() + \"@productionfood.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Autentica al usuario PRODUCCION y guarda tokenProduccion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{correoProduccion}}\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenProduccion\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Crea (como ADMIN) un usuario de rol COMPRAS (idRol 3) con correo único por ejecución.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"COMPRAS HU08\",\n  \"correo\": \"{{correoCompras}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"correoCompras\", \"compras-hu08-\" + Date.now() + \"@productionfood.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Autentica al usuario COMPRAS y guarda tokenCompras.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{correoCompras}}\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenCompras\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Crea (como ADMIN) un usuario de rol VENTAS (idRol 4) con correo único por ejecución.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"VENTAS HU08\",\n  \"correo\": \"{{correoVentas}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"correoVentas\", \"ventas-hu08-\" + Date.now() + \"@productionfood.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Autentica al usuario VENTAS y guarda tokenVentas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{correoVentas}}\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenVentas\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usuarios"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Crea (como ADMIN) un usuario de rol CONSULTA (idRol 5) con correo único por ejecución.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"CONSULTA HU08\",\n  \"correo\": \"{{correoConsulta}}\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"correoConsulta\", \"consulta-hu08-\" + Date.now() + \"@productionfood.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Autentica al usuario CONSULTA y guarda tokenConsulta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{correoConsulta}}\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenConsulta\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CRUD (CP-01…CP-19)",
+      "description": "Casos funcionales CP-01 y CP-03 a CP-19 sobre /api/v1/materias-primas. CP-02 (la fila de inventario creada en la misma transacción, R-01) es una consulta SQL y no tiene request HTTP equivalente: tras CP-01 ejecutar en la base la conciliación de PFDocs/HU-08/tarea-qa.md §3, que debe devolver 0 filas. CP-18 deja la materia prima de CP-01 desactivada.",
+      "item": [
+        {
+          "name": "CP-01 · Crear materia prima válida → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Alta válida con la unidad elegida en Preparación. Guarda idMateriaPrima, que reutilizan CP-17, CP-18, CP-19 y la carpeta de seguridad. Verifica Location, activo:true y cantidadDisponible:0 (R-01). CP-02 (la fila de inventario) es una consulta SQL: ejecutar tras esta petición la conciliación de tarea-qa.md §3, que debe devolver 0 filas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Harina de trigo\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 50,\n  \"costoUnitario\": 3200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set(\"idMateriaPrima\", j.idMateriaPrima);",
+                  "pm.test(\"Location presente\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/api/v1/materias-primas/\"));",
+                  "pm.test(\"nace activa\", () => pm.expect(j.activo).to.be.true);",
+                  "pm.test(\"cantidadDisponible 0 (R-01)\", () => pm.expect(j.cantidadDisponible).to.eql(0));",
+                  "pm.test(\"unidad embebida\", () => { pm.expect(j.unidad).to.have.property(\"idUnidad\"); pm.expect(j.unidad).to.have.property(\"abreviatura\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 · Nombre vacío → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "El nombre es obligatorio (@NotBlank): VALIDACION_FALLIDA con el campo nombre en fieldErrors.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 50,\n  \"costoUnitario\": 3200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors marca nombre\", () => pm.expect(pm.response.json().fieldErrors.map(e => e.field)).to.include(\"nombre\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 · Nombre de 101 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "El nombre admite máximo 100 caracteres (@Size(max=100)): 101 letras A se rechazan con VALIDACION_FALLIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 50,\n  \"costoUnitario\": 3200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors marca nombre\", () => pm.expect(pm.response.json().fieldErrors.map(e => e.field)).to.include(\"nombre\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 · Unidad inexistente (9999) → 409",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "La unidad 9999 no existe: el servicio responde 409 UNIDAD_INEXISTENTE (CA-02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-05\",\n  \"idUnidad\": 9999,\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code UNIDAD_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"UNIDAD_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 · Unidad omitida → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Sin idUnidad el DTO lo marca con @NotNull: 400 VALIDACION_FALLIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-06\",\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors marca idUnidad\", () => pm.expect(pm.response.json().fieldErrors.map(e => e.field)).to.include(\"idUnidad\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 · Stock mínimo omitido → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Sin stockMinimo el DTO lo marca con @NotNull: 400 VALIDACION_FALLIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-07\",\n  \"idUnidad\": {{idUnidad}},\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors marca stockMinimo\", () => pm.expect(pm.response.json().fieldErrors.map(e => e.field)).to.include(\"stockMinimo\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 · Stock mínimo negativo → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "stockMinimo -5 lo rechaza el DTO con @DecimalMin(\"0.00\") → 400 VALIDACION_FALLIDA, antes de llegar al CHECK (>= 0) de la base (que en una consulta SQL directa daría el error 3819 descrito en tarea-qa.md §3).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-08\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": -5,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors marca stockMinimo\", () => pm.expect(pm.response.json().fieldErrors.map(e => e.field)).to.include(\"stockMinimo\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 · Stock mínimo cero → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Cero es válido (R-06): @DecimalMin es inclusivo y el CHECK de V2 admite exactamente 0. Significa «no alertar por esta materia prima».",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-09 stock cero\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 0,\n  \"costoUnitario\": 1500\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"stockMinimo 0\", () => pm.expect(pm.response.json().stockMinimo).to.eql(0));",
+                  "pm.test(\"nace activa\", () => pm.expect(pm.response.json().activo).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 · Costo con 2 decimales → 201",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "3200.55 cabe en decimal(10,2) y en @Digits(8,2): el alta responde 201 y el valor vuelve exacto.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-10 dos decimales\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 3200.55\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"costoUnitario 3200.55 exacto\", () => pm.expect(pm.response.json().costoUnitario).to.eql(3200.55));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 · Costo con 3 decimales → 400",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "COMPORTAMIENTO REAL: 400 VALIDACION_FALLIDA. La especificación decía «se redondea a 3200.56», pero el DTO aplica @Digits(integer=8, fraction=2), que RECHAZA 3 decimales en lugar de redondearlos: el backend no acepta el valor y el redondeo sería responsabilidad del cliente. El campo marcado en fieldErrors es costoUnitario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-11 tres decimales\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 3200.555\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors marca costoUnitario\", () => pm.expect(pm.response.json().fieldErrors.map(e => e.field)).to.include(\"costoUnitario\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 · Estado por defecto → activo:true",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "El DTO no admite el campo estado (el servicio lo fija a true, CA-04): la respuesta trae activo:true. En la base la columna queda estado = 1 (DEFAULT 1 de V2 §C-06, verificable con SHOW CREATE TABLE en tarea-qa.md §3).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-12 estado por defecto\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 5,\n  \"costoUnitario\": 2000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"nace activa\", () => pm.expect(pm.response.json().activo).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 · Listado paginado → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas?page=0&size=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "5"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "description": "page=0&size=5 devuelve el envelope PageResponse con un máximo de 5 elementos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"envelope paginado\", () => { pm.expect(j).to.have.property(\"content\"); pm.expect(j).to.have.property(\"totalElements\"); pm.expect(j).to.have.property(\"totalPages\"); });",
+                  "pm.test(\"máximo 5 elementos\", () => pm.expect(j.content.length).to.be.at.most(5));",
+                  "pm.test(\"page 0\", () => pm.expect(j.page).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 · Filtro por nombre (prefijo) → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas?nombre=Harina",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ],
+              "query": [
+                {
+                  "key": "nombre",
+                  "value": "Harina"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "description": "nombre=Harina busca por prefijo sin distinguir mayúsculas (FiltroTexto.patronPrefijo): solo devuelve las materias que empiezan por «Hari», incluida la creada en CP-01."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var items = pm.response.json().content;",
+                  "pm.test(\"incluye la creada en CP-01\", () => pm.expect(items.some(m => m.nombre === \"Harina de trigo\")).to.be.true);",
+                  "pm.test(\"todos empiezan por Hari\", () => items.forEach(m => pm.expect(m.nombre.toLowerCase().startsWith(\"hari\")).to.be.true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 · sort=costoUnitario,desc → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas?sort=costoUnitario,desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "costoUnitario,desc"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "description": "costoUnitario está en la lista blanca de orden: la página viene ordenada descendente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var vals = pm.response.json().content.map(m => m.costoUnitario);",
+                  "var desc = vals.slice().sort((a, b) => b - a);",
+                  "pm.test(\"costoUnitario ordenado descendente\", () => pm.expect(vals).to.eql(desc));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 · sort=estado,asc → 400 CAMPO_ORDEN_INVALIDO",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas?sort=estado,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "estado,asc"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "description": "estado no está en la lista blanca {nombre, stockMinimo, costoUnitario, id}: 400 CAMPO_ORDEN_INVALIDO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code CAMPO_ORDEN_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"CAMPO_ORDEN_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 · Editar materia prima → 200",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PUT de reemplazo completo sobre la materia prima creada en CP-01: nombre, stock mínimo y costo unitario se sobrescriben; el estado no cambia por este endpoint.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Harina de trigo (editada)\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 60,\n  \"costoUnitario\": 3500.75\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"nombre actualizado\", () => pm.expect(j.nombre).to.eql(\"Harina de trigo (editada)\"));",
+                  "pm.test(\"costoUnitario actualizado\", () => pm.expect(j.costoUnitario).to.eql(3500.75));",
+                  "pm.test(\"sigue activa\", () => pm.expect(j.activo).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 · Desactivar conserva el stock → 200",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "La baja es la desactivación (no existe DELETE): 200 con activo:false (R-04, R-05). La verificación de que cantidad_disponible no cambia es SQL (tarea-qa.md §3): la materia prima creada en CP-01 tiene stock 0 y esta historia no expone endpoint HTTP para mover inventario (eso es HU-10), así que la conservación del stock con cantidad > 0 se comprueba en base de datos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ahora inactiva\", () => pm.expect(pm.response.json().activo).to.be.false);",
+                  "pm.test(\"stock en la respuesta intacto\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 · No existe DELETE → 405",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "description": "R-05: el recurso no se elimina (inventario, lotes, detalle_compra, detalle_receta y consumo_materia_prima lo referencian). DELETE no está mapeado y el manejador global responde 405 METODO_NO_PERMITIDO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"code METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "description": "Matriz de roles de materias primas: lectura para ADMIN, PRODUCCION, COMPRAS y CONSULTA (CP-20 y la matriz); VENTAS no participa ni siquiera en la lectura (403); escritura exclusiva de ADMIN (CP-21, CP-22 y la matriz).",
+      "item": [
+        {
+          "name": "CP-20 · Rol COMPRAS lista → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "description": "COMPRAS tiene lectura sobre materias primas (la compra es suya)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MATRIZ · Rol PRODUCCION lista → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "description": "PRODUCCION tiene lectura sobre materias primas (el consumo de producción es suyo)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MATRIZ · Rol CONSULTA lista → 200",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "description": "CONSULTA tiene lectura sobre materias primas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MATRIZ · Rol VENTAS lista → 403",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "description": "VENTAS queda fuera de este módulo (matriz de roles 00-base/03-MATRIZ-ROLES.md): ni siquiera lee materias primas, a diferencia de HU-07 donde los cinco roles leen el catálogo. 403 SIN_PERMISO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 · Rol COMPRAS crea → 403",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "El cuerpo es válido a propósito para que el rechazo sea por permiso y no por validación: la escritura es exclusiva de ADMIN.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-21\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 · Rol PRODUCCION crea → 403",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "El cuerpo es válido a propósito para que el rechazo sea por permiso y no por validación: la escritura es exclusiva de ADMIN.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia CP-22\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MATRIZ · Rol VENTAS crea → 403",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "VENTAS no escribe en materias primas: 403 SIN_PERMISO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia matriz ventas\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MATRIZ · Rol CONSULTA crea → 403",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "CONSULTA no escribe: 403 SIN_PERMISO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia matriz consulta\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…05)",
+      "description": "Batería de seguridad sobre los cinco endpoints. SEC-03 y SEC-05 requieren preparación manual (pegar un JWT caducado en tokenExpirado y el token de un usuario desactivado en tokenInactivo), como en HU-07.",
+      "item": [
+        {
+          "name": "SEC-01 · Sin token · GET listado → 401",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [],
+            "description": "GET listado sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 · Sin token · GET detalle → 401",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [],
+            "description": "GET detalle sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 · Sin token · POST alta → 401",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "POST alta sin cabecera Authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 · Sin token · PUT edición → 401",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PUT edición sin cabecera Authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad (editada)\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 · Sin token · PATCH estado → 401",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PATCH estado sin cabecera Authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 · Token malformado · GET listado → 401",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenMalformado}}"
+              }
+            ],
+            "description": "GET listado con token abc.def.ghi."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 · Token malformado · GET detalle → 401",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenMalformado}}"
+              }
+            ],
+            "description": "GET detalle con token abc.def.ghi."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 · Token malformado · POST alta → 401",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenMalformado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "POST alta con token abc.def.ghi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 · Token malformado · PUT edición → 401",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenMalformado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PUT edición con token abc.def.ghi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad (editada)\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 · Token malformado · PATCH estado → 401",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenMalformado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PATCH estado con token abc.def.ghi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 · Token expirado · GET listado → 401",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "description": "GET listado. REQUIERE PREPARACIÓN MANUAL: la variable tokenExpirado está vacía a propósito. Hay que pegar en ella un JWT ya vencido (p. ej. uno guardado de una sesión antigua) antes de ejecutar."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 · Token expirado · GET detalle → 401",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "description": "GET detalle. REQUIERE PREPARACIÓN MANUAL: la variable tokenExpirado está vacía a propósito. Hay que pegar en ella un JWT ya vencido (p. ej. uno guardado de una sesión antigua) antes de ejecutar."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 · Token expirado · POST alta → 401",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "POST alta. REQUIERE PREPARACIÓN MANUAL: la variable tokenExpirado está vacía a propósito. Hay que pegar en ella un JWT ya vencido (p. ej. uno guardado de una sesión antigua) antes de ejecutar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 · Token expirado · PUT edición → 401",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PUT edición. REQUIERE PREPARACIÓN MANUAL: la variable tokenExpirado está vacía a propósito. Hay que pegar en ella un JWT ya vencido (p. ej. uno guardado de una sesión antigua) antes de ejecutar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad (editada)\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 · Token expirado · PATCH estado → 401",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PATCH estado. REQUIERE PREPARACIÓN MANUAL: la variable tokenExpirado está vacía a propósito. Hay que pegar en ella un JWT ya vencido (p. ej. uno guardado de una sesión antigua) antes de ejecutar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 · Token VENTAS · GET listado → 403",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "description": "SEC-04 es el caso crítico de la batería: si devolviera 200, la autorización por método estaría desactivada. Aquí VENTAS es el rol sin permiso también en lectura (no participa en el módulo)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 · Token VENTAS · GET detalle → 403",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "description": "VENTAS no lee materias primas: 403 SIN_PERMISO en el detalle."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 · Token PRODUCCION · POST alta → 403",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "POST con un rol sin permiso de escritura: en HU-08 solo ADMIN escribe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 · Token CONSULTA · PUT edición → 403",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PUT con un rol sin permiso de escritura: en HU-08 solo ADMIN escribe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Materia seguridad (editada)\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 10,\n  \"costoUnitario\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 · Token COMPRAS · PATCH estado → 403",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas",
+                "{{idMateriaPrima}}",
+                "estado"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "PATCH con un rol sin permiso de escritura: en HU-08 solo ADMIN escribe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 · Usuario inactivo → 403 USUARIO_INACTIVO",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "materias-primas"
+              ]
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "description": "REQUIERE PREPARACIÓN MANUAL: la variable tokenInactivo está vacía a propósito. Hay que crear un usuario, iniciar sesión, desactivarlo (PATCH /api/v1/usuarios/{id}/estado con {\"activo\": false}) y pegar en tokenInactivo el token que se le emitió, antes de ejecutar."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
