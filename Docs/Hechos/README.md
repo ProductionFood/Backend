@@ -64,9 +64,8 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-06 | Gestión de proveedores | 2026-10-19 · [`HU-06-gestion-proveedores.md`](HU-06-gestion-proveedores.md) |
 | HU-07 | Unidades de medida | 2026-10-20 · [`HU-07-unidades-medida.md`](HU-07-unidades-medida.md) |
 | HU-08 | Gestión de materias primas | 2026-10-22 · [`HU-08-materias-primas.md`](HU-08-materias-primas.md) |
-| HU-09 | Lotes de materia prima | Backend implementado 2026-10-23 · QA pendiente · [`HU-09-lotes-materia-prima.md`](HU-09-lotes-materia-prima.md) |
+| HU-09 | Lotes de materia prima | 2026-10-23 · [`HU-09-lotes-materia-prima.md`](HU-09-lotes-materia-prima.md) |
 | HU-11 | Gestión de productos | 2026-10-23 · [`HU-11-productos.md`](HU-11-productos.md) |
 
-> HU-09 figura como **backend implementado**, no como cerrada: la verificación en caliente
-> contra MySQL y el frontend están pendientes. Se incluye aquí porque esta carpeta registra lo
-> que el Backend hizo por cada historia, sin importar el estado de QA.
+> HU-09 quedó verificada en caliente contra MySQL el 2026-10-23 (CP-01…CP-20 y SEC-01…05).
+> El consumo desde el frontend sigue pendiente, igual que en las HUs anteriores.

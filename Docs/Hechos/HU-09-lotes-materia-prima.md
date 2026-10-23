@@ -1,16 +1,17 @@
-# HU-09 — Lotes de materia prima · Backend implementado (QA pendiente)
+# HU-09 — Lotes de materia prima · Backend verificado
 
 | | |
 |---|---|
 | Fecha de implementación | 2026-10-23 |
 | Commits / PR | PRs #60–#63 a `HU-09/lotes-materia-prima`; este PR añade la documentación |
 | Colección Postman | `Docs/Postman/ProductionFood-HU09.postman_collection.json` (`Preparación`, `CRUD (CP-01…CP-20)`, `Roles (matriz)`, `Seguridad (SEC-01…05)`) |
-| Estado QA | **Backend implementado 2026-10-23 · verificación en caliente (MySQL) y frontend pendientes** |
+| Estado QA | **QA backend verificado en caliente 2026-10-23 (20 CP + 15 SEC) · frontend pendiente** |
 
-> Esta ficha documenta lo que el backend deja implementado en la rama. **No es una HU
-> entregada**: falta la verificación en caliente contra MySQL y el consumo desde el frontend.
-> Los ejemplos de contrato de más abajo salen de la especificación y de los DTO reales, no de
-> una captura de ejecución.
+> Esta ficha documenta el backend de la historia. La verificación en caliente se ejecutó el
+> 2026-10-23 contra la API real en `:8085` y MySQL 8.4 con un agente ciego: los 20 casos
+> funcionales y los 15 de seguridad pasaron, sin defectos. El consumo desde el frontend sigue
+> pendiente. Los ejemplos de contrato de más abajo salen de la especificación y de los DTO
+> reales.
 
 ## Qué se construyó
 
@@ -166,12 +167,19 @@ Conteo de los tests de la rama, tomado de los fuentes:
 
 La suite completa quedó en **526 tests verdes** (`mvn test`) al cerrar el PR4.
 
-- La verificación en caliente contra MySQL 8.4 **sigue pendiente**: CP-02/CP-03 (saldo y kardex
-  conciliados), CP-04 con una fila real de `detalle_compra`, CP-17 (`CHECK` de exclusividad por
-  SQL) y CP-18 (fallo del kardex que revierte el saldo) no se pueden cerrar solo con los tests.
-- La colección de Postman cubre los casos HTTP. Los casos de integridad que no tienen endpoint
-  (CP-03, CP-17 y CP-18) quedan documentados en la descripción de la carpeta `CRUD` y se
-  verifican con las consultas SQL de `PFDocs/HU-09/tarea-qa.md`.
+- **Verificación en caliente ejecutada el 2026-10-23** contra la API real (`:8085`) y MySQL 8.4
+  con un agente ciego: CP-01…CP-20 y SEC-01…SEC-05 (en los 3 endpoints) pasaron, sin defectos
+  funcionales ni de seguridad. Evidencia destacada: el inventario subió exactamente la cantidad
+  (CP-02), el kardex `ENTRADA_LOTE` coincidió con el saldo (CP-03), un lote con
+  `idDetalleCompra` no sumó ni generó movimiento (CP-04), el `CHECK` rechazó el lote con
+  producto y materia prima a la vez (CP-17) y un fallo forzado del kardex revirtió el saldo y
+  el lote (CP-18, con un trigger temporal de prueba).
+- CP-04 necesitó un fixture SQL (`proveedor → compra RECIBIDA → detalle_compra`) porque la API
+  de compras (HU-13) todavía no existe; el lote se creó luego por el endpoint real.
+- La conciliación `inventario.cantidad_disponible` contra el último `saldo_posterior` del kardex
+  devolvió **0 filas** al cierre.
+- La colección de Postman cubre los casos HTTP; los de integridad sin endpoint (CP-03, CP-17 y
+  CP-18) se verificaron con las consultas SQL de `PFDocs/HU-09/tarea-qa.md`.
 - El estado de QA va en la fila `Estado QA`, no aquí.
 
 ## Desviaciones vs especificación

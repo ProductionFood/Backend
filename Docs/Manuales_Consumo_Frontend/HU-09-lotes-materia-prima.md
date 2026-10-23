@@ -11,9 +11,9 @@ Contrato práctico del registro y la consulta de lotes de materia prima. Complem
 - **Roles:** lectura `ADMIN`, `PRODUCCION`, `COMPRAS`, `CONSULTA`; escritura `ADMIN`,
   `PRODUCCION`, `COMPRAS`. `VENTAS` **no** participa en este módulo.
 
-> **Estado:** el backend está implementado y cuenta con tests en la rama, pero la verificación
-> en caliente contra MySQL y el consumo desde Angular siguen pendientes. Los valores de ejemplo
-> de saldos y de `diasParaVencer` dependen de la base y de la fecha de ejecución.
+> **Estado:** backend verificado en caliente contra MySQL el 2026-10-23 (20 CP + 15 SEC). El
+> consumo desde Angular sigue pendiente. Los valores de ejemplo de saldos y de `diasParaVencer`
+> dependen de la base y de la fecha de ejecución.
 
 ---
 
@@ -245,8 +245,9 @@ Formato uniforme (`ErrorResponse`):
   responde `409 CONFLICTO_INTEGRIDAD`.
 - **`diasParaVencer` usa la fecha del servidor.** El frontend puede mostrarlo tal cual o
   recalcularlo, pero no debe asumir la zona horaria del navegador.
-- **La verificación en caliente contra MySQL está pendiente.** Los ejemplos de saldos y días
-  son de contrato; confirma los valores reales al integrar.
+- **Backend verificado en caliente contra MySQL el 2026-10-23** (CP-01…CP-20 y SEC-01…05).
+  Los valores de saldos y días de los ejemplos son de contrato y cambian con la base y la fecha
+  de ejecución; confírmalos al integrar.
 - Si una materia prima se insertó por fuera de HU-08 y no tiene fila de `inventario`, el alta
   manual responde `404 RECURSO_NO_ENCONTRADO`. El alta normal de HU-08 siempre crea la fila en
   `0`, así que no debería ocurrir en el flujo de la aplicación.
