@@ -63,3 +63,4 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-05 | Gestión de clientes | 2026-10-20 · [`HU-05-gestion-clientes.md`](HU-05-gestion-clientes.md) |
 | HU-06 | Gestión de proveedores | 2026-10-19 · [`HU-06-gestion-proveedores.md`](HU-06-gestion-proveedores.md) |
 | HU-07 | Unidades de medida | 2026-10-20 · [`HU-07-unidades-medida.md`](HU-07-unidades-medida.md) |
+| HU-08 | Gestión de materias primas | 2026-10-22 · [`HU-08-materias-primas.md`](HU-08-materias-primas.md) |
