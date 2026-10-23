@@ -16,6 +16,7 @@ quien consume, complemento de `../../../PFDocs/00-base/04-CONTRATO-API.md`.
 | [HU-06 — Gestión de proveedores](HU-06-gestion-proveedores.md) | Proveedores (escritura ADMIN y COMPRAS) | Backend entregado 2026-10-19 |
 | [HU-07 — Unidades de medida](HU-07-unidades-medida.md) | Unidades de medida (catálogo, alta y edición) | Backend entregado 2026-10-20 |
 | [HU-08 — Gestión de materias primas](HU-08-materias-primas.md) | Materias primas (listado paginado, alta, edición y estado) | Backend entregado 2026-10-22 |
+| [HU-09 — Lotes de materia prima](HU-09-lotes-materia-prima.md) | Lotes (listado con filtros, detalle y alta manual o desde compra) | Backend entregado 2026-10-23 · frontend pendiente |
 | [HU-11 — Gestión de productos](HU-11-productos.md) | Productos (catálogo, alta, edición y estado) | Backend entregado 2026-10-23 |
 
 ## Qué debe tener un manual
