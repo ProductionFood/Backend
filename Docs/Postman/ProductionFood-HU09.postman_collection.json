@@ -1,0 +1,2072 @@
+{
+  "info": {
+    "_postman_id": "hu09-lotes-materia-prima",
+    "name": "ProductionFood - HU-09 Lotes de materia prima",
+    "description": "Casos de la HU-09 (lotes de materia prima): GET /api/v1/lotes-materia-prima (paginado y filtros idMateriaPrima, soloVencidos y proximosAVencer), GET /api/v1/lotes-materia-prima/{id} y POST /api/v1/lotes-materia-prima. No hay DELETE, PUT ni PATCH. Corre sobre el backend en {{baseUrl}} (por defecto http://localhost:8085). Ejecutar el runner de arriba abajo: 'Preparación' crea una materia prima de inventario 0 y guarda tokenAdmin, tokenProduccion, tokenCompras, tokenConsulta, tokenVentas, idMateriaPrima, idUnidad y sufijo; 'CRUD (CP-01…CP-20)' ejecuta los casos funcionales (CP-03, CP-17 y CP-18 son SQL y no tienen endpoint; CP-04 necesita una fila real de detalle_compra); 'Roles (matriz)' y 'Seguridad (SEC-01…05)' cubren la autorización (SEC-03 y SEC-05 necesitan variables que se rellenan a mano).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "idUnidad",
+      "value": ""
+    },
+    {
+      "key": "idMateriaPrima",
+      "value": ""
+    },
+    {
+      "key": "idLote",
+      "value": ""
+    },
+    {
+      "key": "codigoLote",
+      "value": ""
+    },
+    {
+      "key": "codigoMinus",
+      "value": ""
+    },
+    {
+      "key": "codigo31",
+      "value": ""
+    },
+    {
+      "key": "idDetalleCompra",
+      "value": "1"
+    },
+    {
+      "key": "cantidadAntesCP04",
+      "value": ""
+    },
+    {
+      "key": "saldoPosteriorCP01",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Preparación",
+      "description": "Autenticación, datos base y usuarios de rol. Ejecutar primero.",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al administrador del seed y guarda tokenAdmin y un sufijo único para los códigos de esta ejecución.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenAdmin\", pm.response.json().token);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(pm.response.json().usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET unidades-medida → 200 (elige idUnidad)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/unidades-medida?size=100"
+            },
+            "description": "Toma una unidad sembrada por HU-07 y la guarda en idUnidad. Hace falta para crear la materia prima de prueba."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"idUnidad\", pm.response.json().content[0].idUnidad);",
+                  "pm.test(\"idUnidad asignado\", () => pm.expect(pm.collectionVariables.get(\"idUnidad\")).to.not.be.undefined);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear materia prima de prueba → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "El seed V3 no trae materias primas. Crea una nueva con nombre único para que el alta de lotes sea determinista: su inventario nace en 0.00 y CP-01 puede comprobar la suma exacta. Guarda idMateriaPrima.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-09 {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 0,\n  \"costoUnitario\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set(\"idMateriaPrima\", j.idMateriaPrima);",
+                  "pm.test(\"inventario inicial 0.00\", () => pm.expect(j.cantidadDisponible).to.eql(0));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/materias-primas/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET materias-primas → 200 (confirma idMateriaPrima)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas?size=100"
+            },
+            "description": "Lista las materias primas y comprueba que la creada en el paso anterior está presente. El id queda en idMateriaPrima."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var id = Number(pm.collectionVariables.get(\"idMateriaPrima\"));",
+                  "pm.test(\"la materia prima de prueba aparece en el listado\", () => pm.expect(pm.response.json().content.some(m => m.idMateriaPrima === id)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET lotes-materia-prima → 200 (listado inicial)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima?size=1"
+            },
+            "description": "Comprobación de que el endpoint de la historia responde. No guarda idLote: el id real lo fija CP-01."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"content es array\", () => pm.expect(pm.response.json().content).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Produccion → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza si ya existe) el usuario con idRol 2.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-09 Produccion\",\n  \"correo\": \"hu09-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Produccion → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenProduccion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu09-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenProduccion\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Compras → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza si ya existe) el usuario con idRol 3.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-09 Compras\",\n  \"correo\": \"hu09-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Compras → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenCompras.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu09-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenCompras\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Consulta → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza si ya existe) el usuario con idRol 5.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-09 Consulta\",\n  \"correo\": \"hu09-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Consulta → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenConsulta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu09-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenConsulta\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Ventas → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza si ya existe) el usuario con idRol 4.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-09 Ventas\",\n  \"correo\": \"hu09-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Ventas → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenVentas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu09-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenVentas\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CRUD (CP-01…CP-20)",
+      "description": "Casos funcionales de PFDocs/HU-09/tarea-qa.md. Ejecutar la colección completa desde 'Preparación': varios casos usan idMateriaPrima, idLote, codigoLote y codigoMinus que se guardan allí. CP-02 verifica el saldo con un GET; CP-03 (kardex), CP-17 (CHECK de exclusividad) y CP-18 (transacción con fallo del kardex) no tienen endpoint y se verifican con las consultas SQL de la tarea de QA. CP-04 requiere una fila real en detalle_compra: si no existe, la FK responde 409 CONFLICTO_INTEGRIDAD y el test lo acepta como comportamiento real.",
+      "item": [
+        {
+          "name": "CP-01 Crear lote válido (manual) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-01 (CA-01..CA-04): alta manual sin idDetalleCompra. Debe sumar la cantidad al inventario y devolver inventarioActualizado. Guarda idLote, codigoLote, codigoMinus y el saldo posterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set(\"idLote\", j.idLote);",
+                  "pm.collectionVariables.set(\"codigoLote\", j.codigoLote);",
+                  "pm.collectionVariables.set(\"codigoMinus\", j.codigoLote.toLowerCase());",
+                  "pm.collectionVariables.set(\"saldoPosteriorCP01\", j.inventarioActualizado.posterior);",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/lotes-materia-prima/\"));",
+                  "pm.test(\"codigoLote en mayúsculas\", () => pm.expect(j.codigoLote).to.eql(j.codigoLote.toUpperCase()));",
+                  "pm.test(\"materiaPrima.unidad es abreviatura\", () => pm.expect(j.materiaPrima.unidad).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"inventarioActualizado presente\", () => pm.expect(j).to.have.property(\"inventarioActualizado\"));",
+                  "pm.test(\"suma exactamente 100\", () => pm.expect(j.inventarioActualizado.posterior - j.inventarioActualizado.anterior).to.eql(100));",
+                  "pm.test(\"diasParaVencer numérico\", () => pm.expect(j.diasParaVencer).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Verificar saldo del inventario → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}"
+            },
+            "description": "CP-02 (R-01): el saldo de la materia prima debe coincidir con el inventarioActualizado.posterior del alta manual de CP-01."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var esperado = Number(pm.collectionVariables.get(\"saldoPosteriorCP01\"));",
+                  "pm.test(\"saldo = posterior del alta\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(esperado));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04a Capturar saldo antes del lote con compra → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}"
+            },
+            "description": "Guarda cantidadAntesCP04 para comprobar después que un lote con idDetalleCompra no mueve el inventario (R-02)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"cantidadAntesCP04\", pm.response.json().cantidadDisponible);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 Lote con idDetalleCompra NO suma → 201 (o 409 sin fila)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-04 (R-02), el caso más importante de la historia. Requiere que idDetalleCompra apunte a una fila real de detalle_compra. La variable se puede rellenar a mano; por defecto apunta a 1. Si la fila no existe, la FK responde 409 CONFLICTO_INTEGRIDAD (comportamiento real, no del contrato ideal). Para probar el 201 sin suma, crear por SQL una fila en detalle_compra y ajustar la variable. El saldo se compara en CP-04b.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-C\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"idDetalleCompra\": {{idDetalleCompra}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 50\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201 o 409 si falta la fila de detalle_compra\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) {",
+                  "  var j = pm.response.json();",
+                  "  pm.test(\"sin inventarioActualizado (R-02)\", () => pm.expect(j).to.not.have.property(\"inventarioActualizado\"));",
+                  "} else {",
+                  "  pm.test(\"CONFLICTO_INTEGRIDAD por FK\", () => pm.expect(pm.response.json().code).to.eql(\"CONFLICTO_INTEGRIDAD\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04b El inventario no cambió → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas/{{idMateriaPrima}}"
+            },
+            "description": "CP-04 (R-02): compara el saldo con el capturado en CP-04a. Es la prueba de que el lote con idDetalleCompra no sumó."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var antes = Number(pm.collectionVariables.get(\"cantidadAntesCP04\"));",
+                  "pm.test(\"saldo sin cambios\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(antes));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 Código duplicado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-05 (CA-01): repite el código creado en CP-01.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{codigoLote}}\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"CODIGO_LOTE_DUPLICADO\", () => pm.expect(pm.response.json().code).to.eql(\"CODIGO_LOTE_DUPLICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 Código duplicado en minúsculas → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-06 (CA-01, R-06): el mismo código en minúsculas colisiona porque se normaliza a mayúsculas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{codigoMinus}}\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"CODIGO_LOTE_DUPLICADO\", () => pm.expect(pm.response.json().code).to.eql(\"CODIGO_LOTE_DUPLICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Código de 31 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-07 (CA-01): el código supera el máximo de 30.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{codigo31}}\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('codigo31', 'A'.repeat(31));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors.codigoLote\", () => pm.expect(pm.response.json().fieldErrors.some(e => e.field === \"codigoLote\")).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 Materia prima inexistente → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-08 (CA-02): idMateriaPrima 9999 no existe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-X\",\n  \"idMateriaPrima\": 9999,\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"MATERIA_PRIMA_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"MATERIA_PRIMA_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 Vencimiento anterior a producción → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-09 (CA-03): vencimiento 2026-09-01 y producción 2026-09-10.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-F1\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2026-09-01\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"FECHAS_INVALIDAS\", () => pm.expect(pm.response.json().code).to.eql(\"FECHAS_INVALIDAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 Vencimiento igual a producción → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-10 (CA-03, R-04): fechas iguales son válidas. Crea otro lote y suma 5.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-EQ\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2026-09-10\",\n  \"cantidad\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"fechas iguales aceptadas\", () => pm.expect(pm.response.json().fechaProduccion).to.eql(pm.response.json().fechaVencimiento));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 Fecha de vencimiento omitida → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-11 (CA-03): falta fechaVencimiento.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-F2\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors.fechaVencimiento\", () => pm.expect(pm.response.json().fieldErrors.some(e => e.field === \"fechaVencimiento\")).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 Cantidad cero → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-12 (CA-04): cantidad 0. Debe responder CANTIDAD_INVALIDA, no VALIDACION_FALLIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-Q0\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"CANTIDAD_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Cantidad negativa → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-13 (CA-04): cantidad -10.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-QN\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": -10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"CANTIDAD_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Listar por materia prima → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima?idMateriaPrima={{idMateriaPrima}}&size=100"
+            },
+            "description": "CP-14 (CA-05): todos los lotes devueltos deben ser de la materia prima indicada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var id = Number(pm.collectionVariables.get(\"idMateriaPrima\"));",
+                  "var content = pm.response.json().content;",
+                  "pm.test(\"solo lotes de esa materia prima\", () => pm.expect(content.every(l => l.materiaPrima.idMateriaPrima === id)).to.eql(true));",
+                  "pm.test(\"al menos un lote\", () => pm.expect(content.length).to.be.at.least(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 Lote ya vencido → 201, vencido true y suma",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-15 (R-05): vencimiento en el pasado. El lote se registra, se marca vencido, diasParaVencer es negativo y sí suma al inventario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-V\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2025-01-01\",\n  \"fechaVencimiento\": \"2025-01-02\",\n  \"cantidad\": 7.50\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"vencido true\", () => pm.expect(j.vencido).to.eql(true));",
+                  "pm.test(\"diasParaVencer negativo\", () => pm.expect(j.diasParaVencer).to.be.below(0));",
+                  "pm.test(\"inventarioActualizado presente\", () => pm.expect(j).to.have.property(\"inventarioActualizado\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Próximos a vencer (7 días) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima?proximosAVencer=7&size=100"
+            },
+            "description": "CP-16: los lotes devueltos deben vencer entre hoy y hoy + 7 días, ambos extremos incluidos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var hoy = new Date(); hoy.setHours(0,0,0,0);",
+                  "var limite = new Date(hoy); limite.setDate(limite.getDate() + 7);",
+                  "var ok = pm.response.json().content.every(function (l) {",
+                  "  var d = new Date(l.fechaVencimiento + \"T00:00:00\");",
+                  "  return d >= hoy && d <= limite;",
+                  "});",
+                  "pm.test(\"todos dentro de la ventana de 7 días\", () => pm.expect(ok).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16b proximosAVencer=0 → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima?proximosAVencer=0"
+            },
+            "description": "Caso límite del filtro: la ventana debe ser mayor que cero."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Rol VENTAS no puede registrar → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-19: VENTAS no participa en el módulo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-VE\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-20 Rol PRODUCCION puede registrar → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "CP-20: PRODUCCION tiene permiso de escritura.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-P\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "description": "Matriz de roles de la HU: lectura para ADMIN, PRODUCCION, COMPRAS y CONSULTA; escritura para ADMIN, PRODUCCION y COMPRAS; VENTAS recibe 403 en todo el módulo. Los GET/{id} usan el idLote que guarda CP-01: ejecutar 'Preparación' y 'CRUD' antes.",
+      "item": [
+        {
+          "name": "ADMIN GET /lotes-materia-prima → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /lotes-materia-prima → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /lotes-materia-prima → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /lotes-materia-prima → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /lotes-materia-prima → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN GET /lotes-materia-prima/{{idLote}} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /lotes-materia-prima/{{idLote}} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /lotes-materia-prima/{{idLote}} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /lotes-materia-prima/{{idLote}} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /lotes-materia-prima/{{idLote}} → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN POST /lotes-materia-prima → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-RA\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION POST /lotes-materia-prima → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-RP\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS POST /lotes-materia-prima → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-RC\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS POST /lotes-materia-prima → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-RV\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…05)",
+      "description": "Batería SEC-01…SEC-05 en los tres endpoints. SEC-03 y SEC-05 necesitan que se peguen a mano un JWT caducado en tokenExpirado y un token emitido para un usuario después desactivado en tokenInactivo; el runner no puede firmarlos sin el secreto.",
+      "item": [
+        {
+          "name": "SEC-01 GET /lotes-materia-prima sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-01: sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET /lotes-materia-prima/{{idLote}} sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            },
+            "description": "SEC-01: sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 POST /lotes-materia-prima sin token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-01: sin cabecera Authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-S1\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /lotes-materia-prima token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-02: token que no es un JWT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /lotes-materia-prima/{{idLote}} token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            },
+            "description": "SEC-02: token que no es un JWT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 POST /lotes-materia-prima token malformado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-02: token que no es un JWT.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-S2\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /lotes-materia-prima token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-03: pegar en tokenExpirado un JWT caducado. Sin valor, el header queda 'Bearer ' y también responde 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /lotes-materia-prima/{{idLote}} token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            },
+            "description": "SEC-03: pegar en tokenExpirado un JWT caducado. Sin valor, el header queda 'Bearer ' y también responde 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 POST /lotes-materia-prima token expirado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-03: pegar en tokenExpirado un JWT caducado. Sin valor, el header queda 'Bearer ' y también responde 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-S3\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /lotes-materia-prima con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /lotes-materia-prima/{{idLote}} con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 POST /lotes-materia-prima con CONSULTA → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-S4\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /lotes-materia-prima con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-05: pegar en tokenInactivo un token emitido para un usuario que después se desactivó; el login de un usuario inactivo ya falla con 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /lotes-materia-prima/{{idLote}} con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima/{{idLote}}"
+            },
+            "description": "SEC-05: pegar en tokenInactivo un token emitido para un usuario que después se desactivó."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 POST /lotes-materia-prima con usuario inactivo → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima"
+            },
+            "description": "SEC-05: pegar en tokenInactivo un token emitido para un usuario que después se desactivó.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"H-2026-{{sufijo}}-S5\",\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"fechaProduccion\": \"2026-09-10\",\n  \"fechaVencimiento\": \"2027-03-10\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
