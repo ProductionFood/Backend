@@ -1,5 +1,7 @@
 package co.edu.corposucre.productionfood.materiaprima;
 
+import java.util.Optional;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -113,4 +115,33 @@ public interface MateriaPrimaRepository extends JpaRepository<MateriaPrima, Inte
     Page<MateriaPrimaConDetalle> listarConDetalle(@Param("nombre") String nombre,
                                                   @Param("activo") Boolean activo,
                                                   Pageable pageable);
+
+    /**
+     * Devuelve una materia prima con su unidad de medida y su cantidad disponible, por id.
+     *
+     * <p>Repite los mismos {@code join}, {@code COALESCE} y alias que
+     * {@link #listarConDetalle(String, Boolean, Pageable)} para que el detalle de una sola
+     * materia prima coincida fila a fila con lo que muestra el listado. Al no paginarse no
+     * necesita {@code countQuery}: si el id no existe, el {@code join} a
+     * {@code unidades_medida} no produce ninguna fila y el {@code Optional} llega vacío.
+     *
+     * @param id identificador de la materia prima
+     * @return la materia prima con su unidad y su stock, o vacío si no existe
+     */
+    @Query(value = """
+        select mp.id_materia_prima as idMateriaPrima,
+               mp.nombre as nombre,
+               mp.id_unidad as idUnidad,
+               u.nombre as unidadNombre,
+               u.abreviatura as unidadAbreviatura,
+               mp.stock_minimo as stockMinimo,
+               mp.costo_unitario as costoUnitario,
+               mp.estado as estado,
+               coalesce(i.cantidad_disponible, 0) as cantidadDisponible
+        from materias_primas mp
+        join unidades_medida u on u.id_unidad = mp.id_unidad
+        left join inventario i on i.id_materia_prima = mp.id_materia_prima
+        where mp.id_materia_prima = :id
+        """, nativeQuery = true)
+    Optional<MateriaPrimaConDetalle> buscarConDetalle(@Param("id") Integer id);
 }
