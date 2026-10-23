@@ -1,6 +1,5 @@
 package co.edu.corposucre.productionfood.proveedor;
 
-import java.util.Locale;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
@@ -9,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import co.edu.corposucre.productionfood.common.audit.Auditable;
 import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.common.pagination.FiltroTexto;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.proveedor.dto.ActualizarProveedorRequest;
@@ -50,23 +50,10 @@ public class ProveedorService {
                                                   int page, int size, String sort) {
         var orden = PageRequest.of(page, size, sort, ORDEN, "nombre,asc");
         var proveedores = proveedorRepository.buscar(
-                patronPrefijo(nombre), activo, orden.toPageable());
+                FiltroTexto.patronPrefijo(nombre), activo, orden.toPageable());
         return PageResponse.of(
                 proveedores.getContent().stream().map(ProveedorService::aResponse).toList(),
                 orden.page(), orden.size(), proveedores.getTotalElements());
-    }
-
-    // Duplica ClienteService.patronPrefijo; candidata a extraerse a un helper común.
-    static String patronPrefijo(String texto) {
-        if (texto == null || texto.isBlank()) {
-            return null;
-        }
-        // Los comodines de SQL se escapan porque el texto va a un LIKE, y la minúscula usa
-        // Locale.ROOT para no depender del locale del sistema.
-        return texto.trim().toLowerCase(Locale.ROOT)
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_") + "%";
     }
 
     @Transactional(readOnly = true)

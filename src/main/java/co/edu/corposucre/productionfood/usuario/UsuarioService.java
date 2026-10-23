@@ -12,6 +12,7 @@ import co.edu.corposucre.productionfood.common.audit.Auditable;
 import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.common.pagination.FiltroTexto;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.rol.Rol;
@@ -86,20 +87,10 @@ public class UsuarioService {
                                                 int page, int size, String sort) {
         var orden = PageRequest.of(page, size, sort, ORDEN, "nombre,asc");
         var usuarios = usuarioRepository.buscar(
-                patronPrefijo(busqueda), idRol, activo, orden.toPageable());
+                FiltroTexto.patronPrefijo(busqueda), idRol, activo, orden.toPageable());
         return PageResponse.of(
                 usuarios.getContent().stream().map(UsuarioService::aResponse).toList(),
                 orden.page(), orden.size(), usuarios.getTotalElements());
-    }
-
-    static String patronPrefijo(String texto) {
-        if (texto == null || texto.isBlank()) {
-            return null;
-        }
-        return texto.trim().toLowerCase()
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_") + "%";
     }
 
     @Transactional(readOnly = true)
