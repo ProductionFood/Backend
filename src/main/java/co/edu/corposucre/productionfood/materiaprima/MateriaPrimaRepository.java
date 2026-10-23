@@ -87,6 +87,12 @@ public interface MateriaPrimaRepository extends JpaRepository<MateriaPrima, Inte
      * @param activo  estado buscado o {@code null} para no filtrar
      * @param pageable paginación y orden ya validados por el llamador contra su lista blanca
      * @return página de materias primas con su unidad y su stock
+     *
+     * <p>El {@code escape} lleva cuatro barras en Java (dos en la SQL final): siendo una consulta
+     * NATIVA, el literal va crudo al driver y con {@code escape '\'} el conector MySQL emulado
+     * interpreta {@code \'} como comilla escapada, deja el string abierto, cuenta solo 2 de los 5
+     * marcadores {@code ?} y responde «Parameter index out of range (3 > 2)». En las JPQL esto no
+     * ocurre porque Hibernate vuelve a emitir el literal al generar el SQL.
      */
     @Query(value = """
         select mp.id_materia_prima as idMateriaPrima,
@@ -101,7 +107,7 @@ public interface MateriaPrimaRepository extends JpaRepository<MateriaPrima, Inte
         from materias_primas mp
         join unidades_medida u on u.id_unidad = mp.id_unidad
         left join inventario i on i.id_materia_prima = mp.id_materia_prima
-        where (:nombre is null or mp.nombre like :nombre escape '\\')
+        where (:nombre is null or mp.nombre like :nombre escape '\\\\')
           and (:activo is null or mp.estado = :activo)
         """,
         countQuery = """
@@ -109,7 +115,7 @@ public interface MateriaPrimaRepository extends JpaRepository<MateriaPrima, Inte
         from materias_primas mp
         join unidades_medida u on u.id_unidad = mp.id_unidad
         left join inventario i on i.id_materia_prima = mp.id_materia_prima
-        where (:nombre is null or mp.nombre like :nombre escape '\\')
+        where (:nombre is null or mp.nombre like :nombre escape '\\\\')
           and (:activo is null or mp.estado = :activo)
         """, nativeQuery = true)
     Page<MateriaPrimaConDetalle> listarConDetalle(@Param("nombre") String nombre,
