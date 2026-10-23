@@ -24,6 +24,7 @@ import org.springframework.data.domain.Sort;
 import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.common.pagination.FiltroTexto;
 import co.edu.corposucre.productionfood.proveedor.dto.ActualizarProveedorRequest;
 import co.edu.corposucre.productionfood.proveedor.dto.CrearProveedorRequest;
 
@@ -84,11 +85,11 @@ class ProveedorServiceTest {
     @Test
     @DisplayName("patronPrefijo normaliza, escapa comodines y devuelve null sin texto")
     void patronPrefijoNormaliza() {
-        assertThat(ProveedorService.patronPrefijo(null)).isNull();
-        assertThat(ProveedorService.patronPrefijo("  ")).isNull();
-        assertThat(ProveedorService.patronPrefijo("Hari")).isEqualTo("hari%");
-        assertThat(ProveedorService.patronPrefijo("%")).isEqualTo("\\%%");
-        assertThat(ProveedorService.patronPrefijo("a_b")).isEqualTo("a\\_b%");
+        assertThat(FiltroTexto.patronPrefijo(null)).isNull();
+        assertThat(FiltroTexto.patronPrefijo("  ")).isNull();
+        assertThat(FiltroTexto.patronPrefijo("Hari")).isEqualTo("hari%");
+        assertThat(FiltroTexto.patronPrefijo("%")).isEqualTo("\\%%");
+        assertThat(FiltroTexto.patronPrefijo("a_b")).isEqualTo("a\\_b%");
     }
 
     @Test
