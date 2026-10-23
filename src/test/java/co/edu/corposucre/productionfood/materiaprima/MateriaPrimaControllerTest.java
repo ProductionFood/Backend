@@ -123,6 +123,56 @@ class MateriaPrimaControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("El listado paginado con page=0 y size=5 los pasa al servicio (CP-13)")
+    void listadoPaginaCeroConTamañoCincoLoPasaAlServicio() throws Exception {
+        when(materiaPrimaService.listar(any(), any(), anyInt(), anyInt(), any()))
+                .thenReturn(PageResponse.of(List.of(), 0, 5, 0));
+
+        mockMvc.perform(get("/api/v1/materias-primas")
+                        .param("page", "0")
+                        .param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.size").value(5));
+
+        verify(materiaPrimaService).listar(null, null, 0, 5, null);
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("El orden por costo descendente se traspasa al servicio tal cual (CP-15)")
+    void ordenPorCostoDescendenteLoPasaAlServicio() throws Exception {
+        when(materiaPrimaService.listar(any(), any(), anyInt(), anyInt(),
+                eq("costoUnitario,desc")))
+                .thenReturn(PageResponse.of(List.of(harina(7)), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/materias-primas")
+                        .param("sort", "costoUnitario,desc"))
+                .andExpect(status().isOk());
+
+        verify(materiaPrimaService).listar(null, null, 0, 20, "costoUnitario,desc");
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("El orden por estado se traspasa al servicio: el 400 CAMPO_ORDEN_INVALIDO "
+            + "lo produce el servicio real, no el controlador (CP-16)")
+    void ordenPorEstadoLoPasaAlServicio() throws Exception {
+        // Con el servicio mockeado el 400 no salta: el rechazo real lo hace el servicio al
+        // construir el PageRequest con su lista blanca de campos y está cubierto en
+        // MateriaPrimaServiceTest.listarConCampoDeOrdenNoPermitidoResponde400.
+        when(materiaPrimaService.listar(any(), any(), anyInt(), anyInt(), eq("estado,asc")))
+                .thenReturn(PageResponse.of(List.of(), 0, 20, 0));
+
+        mockMvc.perform(get("/api/v1/materias-primas")
+                        .param("sort", "estado,asc"))
+                .andExpect(status().isOk());
+
+        verify(materiaPrimaService).listar(null, null, 0, 20, "estado,asc");
+    }
+
+    @Test
     @WithMockUser(roles = "CONSULTA")
     @DisplayName("Pedir una materia prima por id devuelve sus datos con la unidad")
     void obtenerPorIdDevuelveLosDatos() throws Exception {
@@ -173,6 +223,121 @@ class MateriaPrimaControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
                 .andExpect(jsonPath("$.fieldErrors[0].field").value("nombre"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Un nombre de 101 caracteres se rechaza con 400 VALIDACION_FALLIDA (CP-04)")
+    void nombreDeCientoUnCaracteresSeRechazaCon400() throws Exception {
+        mockMvc.perform(post("/api/v1/materias-primas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "nombre", "A".repeat(101), "idUnidad", 1,
+                                "stockMinimo", 5.00, "costoUnitario", 3.50))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("nombre"));
+
+        verify(materiaPrimaService, never()).crear(any());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Crear sin unidad de medida se rechaza con 400 VALIDACION_FALLIDA (CP-06)")
+    void sinUnidadDeMedidaSeRechazaCon400() throws Exception {
+        mockMvc.perform(post("/api/v1/materias-primas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "nombre", "Harina de trigo",
+                                "stockMinimo", 5.00, "costoUnitario", 3.50))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("idUnidad"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Crear sin stock mínimo se rechaza con 400 VALIDACION_FALLIDA (CP-07)")
+    void sinStockMinimoSeRechazaCon400() throws Exception {
+        mockMvc.perform(post("/api/v1/materias-primas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "nombre", "Harina de trigo", "idUnidad", 1,
+                                "costoUnitario", 3.50))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("stockMinimo"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Un stock mínimo negativo se rechaza con 400 VALIDACION_FALLIDA (CP-08)")
+    void stockMinimoNegativoSeRechazaCon400() throws Exception {
+        // El CHECK >= 0 de la base es la última barrera; la validación de beans del DTO
+        // rechaza el valor antes y responde 400 sin tocar el servicio.
+        mockMvc.perform(post("/api/v1/materias-primas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "nombre", "Harina de trigo", "idUnidad", 1,
+                                "stockMinimo", -5.00, "costoUnitario", 3.50))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("stockMinimo"));
+
+        verify(materiaPrimaService, never()).crear(any());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Un costo unitario negativo se rechaza con 400 VALIDACION_FALLIDA")
+    void costoUnitarioNegativoSeRechazaCon400() throws Exception {
+        mockMvc.perform(post("/api/v1/materias-primas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "nombre", "Harina de trigo", "idUnidad", 1,
+                                "stockMinimo", 5.00, "costoUnitario", -3.50))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("costoUnitario"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Un stock mínimo de cero es válido y llega al servicio (CP-09)")
+    void stockMinimoCeroPasaLaValidacion() throws Exception {
+        when(materiaPrimaService.crear(any(CrearMateriaPrimaRequest.class)))
+                .thenReturn(harina(7));
+
+        mockMvc.perform(post("/api/v1/materias-primas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "nombre", "Harina de trigo", "idUnidad", 1,
+                                "stockMinimo", 0.00, "costoUnitario", 3.50))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.idMateriaPrima").value(7));
+
+        verify(materiaPrimaService).crear(any(CrearMateriaPrimaRequest.class));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Un 400 de validación responde el shape ErrorResponse del contrato")
+    void errorDeValidacionSigueElShapeDelContrato() throws Exception {
+        mockMvc.perform(post("/api/v1/materias-primas")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "nombre", "", "idUnidad", 1,
+                                "stockMinimo", 5.00, "costoUnitario", 3.50))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.message").value("Los datos enviados no son válidos."))
+                .andExpect(jsonPath("$.path").value("/api/v1/materias-primas"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("nombre"))
+                .andExpect(jsonPath("$.fieldErrors[0].message")
+                        .value("El nombre es obligatorio"));
     }
 
     @Test
