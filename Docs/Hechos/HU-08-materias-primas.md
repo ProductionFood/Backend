@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Fecha de entrega | 2026-10-22 |
-| Commits / PR | PRs `pr0`–`pr6` de la cadena `HU-08/pr*` sobre la rama `HU-08/gestion-materias-primas`; ver «Entregado en» |
-| Colección Postman | `Docs/Postman/ProductionFood-HU08.postman_collection.json` (pendiente de publicar en el PR siguiente) |
+| Commits / PR | PRs `pr0`–`pr9` de la cadena `HU-08/pr*` sobre la rama `HU-08/gestion-materias-primas`; ver «Entregado en» |
+| Colección Postman | `Docs/Postman/ProductionFood-HU08.postman_collection.json` (`Preparación`, `CRUD (CP-01…CP-19)`, `Roles (matriz)`, `Seguridad (SEC-01…05)`) — 57 peticiones |
 | Estado QA | pendiente con el equipo de QA |
 
 ## Qué se construyó
@@ -177,8 +177,13 @@ caliente contra el MySQL local es de QA):
   `spring.jpa.hibernate.ddl-auto=validate` y la verificación de CP-01 y CP-02 contra la base
   real son de QA — los `@Query` nativos solo se parsean al arrancar, las pruebas unitarias no
   los validan. El SQL de conciliación está en «Pendientes / deuda».
-- **Colección de Postman: pendiente de publicar** en el PR siguiente (mismo punto de la cadena
-  que HU-07 en su ficha de entrega).
+- **Colección de Postman:** publicada en `Docs/Postman/ProductionFood-HU08.postman_collection.json`
+  (57 peticiones). **No se ha ejecutado** contra la aplicación: la corrida en caliente la
+  hace el equipo de QA. CP-02 (la fila de inventario, R-01) y la verificación de stock de
+  CP-18 son consultas SQL, sin request HTTP equivalente, y quedan anotadas en la propia
+  colección; SEC-03 y SEC-05 piden pegar en variables un JWT caducado y el token de un
+  usuario desactivado. CP-11 se modela como 400 porque el DTO `@Digits(8,2)` rechaza los
+  3 decimales que la especificación describía como «se redondea».
 
 ## Desviaciones vs especificación
 
@@ -205,7 +210,9 @@ añade ningún fichero bajo `db/migration`.
 | `pr4` | Controlador | `MateriaPrimaController` + Swagger con los 409 + `@PreAuthorize` |
 | `pr5` | Pruebas HTTP | 25 pruebas funcionales del controlador |
 | `pr6` | Batería de seguridad | 34 ejecuciones de SEC-01..SEC-05 sobre los cinco endpoints |
-| — | Ficha de entrega | Esta ficha y las filas de HU-08 en los índices de `Docs/` |
+| `pr7` | Ficha de entrega | Esta ficha y las filas de HU-08 en los índices de `Docs/` |
+| `pr8` | Manual de consumo | Catálogo de materias primas para el frontend + fila en el índice de manuales |
+| `pr9` | Postman | Colección con 57 peticiones: preparación, CP-01 y CP-03…CP-19, matriz de roles y SEC-01…SEC-05 |
 
 ## Pendientes / deuda
 
@@ -240,7 +247,8 @@ añade ningún fichero bajo `db/migration`.
 - **Los `@Query` nativos solo se validan al arrancar contra MySQL real** (las pruebas
   unitarias no los parsean): verificar el arranque de la aplicación y los casos CP-01 y CP-02
   con la app local antes de dar la HU por cerrada.
-- **La colección de Postman está pendiente de publicar** en el PR siguiente.
+- **La colección de Postman está publicada (57 peticiones) y aún no se ha ejecutado** contra la
+  aplicación: la verificación en caliente es de QA.
 - **La verificación de QA (CP-01..CP-22 y la batería SEC) la ejecuta QA**: esta ficha es la
   entrega del backend.
 - **Frontend de HU-08 pendiente** (sprint siguiente): catálogo paginado con filtros, alta,
