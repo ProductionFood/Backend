@@ -49,4 +49,5 @@ Docs/
 | HU-07 Unidades de medida | Entregada 2026-10-20 (backend; frontend pendiente) |
 | HU-08 Gestión de materias primas | Entregada 2026-10-22 (backend; frontend pendiente) |
 | HU-09 Lotes de materia prima | Entregada 2026-10-23 (backend verificado en caliente; frontend pendiente) |
+| HU-10 Consulta de inventario | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
 | HU-11 Gestión de productos | Entregada 2026-10-23 (backend; frontend pendiente) |

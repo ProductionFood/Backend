@@ -2,12 +2,19 @@ package co.edu.corposucre.productionfood.inventario;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.common.pagination.PageRequest;
+import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.inventario.dto.InventarioResponse;
+import co.edu.corposucre.productionfood.inventario.dto.MovimientoResponse;
 
 /**
  * Único componente del sistema autorizado a modificar {@code inventario}.
@@ -23,24 +30,48 @@ import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoExceptio
  * dos operaciones concurrentes pueden leer el mismo saldo anterior y perder una suma, o el
  * saldo puede quedar actualizado sin su movimiento si el kardex falla.
  *
- * <p>Por eso esta clase <strong>no lleva {@code @Transactional}</strong>: la transacción la abre
- * el servicio llamador, que es quien conoce las demás escrituras de su operación (por ejemplo,
- * el {@code INSERT} en {@code lotes}). Así el {@code FOR UPDATE} y el kardex comparten el
- * contexto transaccional y un fallo en cualquiera de los pasos revierte todos. Llamar a estos
- * métodos fuera de una transacción deja el bloqueo sin efecto.
+ * <p>Por eso los métodos de escritura <strong>no llevan {@code @Transactional}</strong>: la
+ * transacción la abre el servicio llamador, que es quien conoce las demás escrituras de su
+ * operación (por ejemplo, el {@code INSERT} en {@code lotes}). Así el {@code FOR UPDATE} y el
+ * kardex comparten el contexto transaccional y un fallo en cualquiera de los pasos revierte
+ * todos. Llamar a estos métodos fuera de una transacción deja el bloqueo sin efecto.
+ *
+ * <p>Las consultas de HU-10, en cambio, sí llevan {@code @Transactional(readOnly = true)}: leen
+ * la vista {@code v_inventario_materia_prima} y la tabla de kardex, y no participan del bloqueo
+ * de escritura.
  */
 @Service
 public class InventarioService {
 
     private static final BigDecimal CERO = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
+    /**
+     * Lista blanca de ordenamiento de la consulta: traduce el campo que pide el cliente al nombre
+     * de columna SQL. {@code PageRequest.of} rechaza cualquier campo que no esté aquí, y la
+     * columna resuelta es la única que llega al repositorio, de modo que el orden nunca es SQL
+     * arbitrario.
+     */
+    private static final Map<String, String> ORDEN = Map.of(
+            "nombre", "nombre",
+            "cantidadDisponible", "cantidad_disponible",
+            "faltante", "faltante",
+            "fechaActualizacion", "fecha_actualizacion");
+
+    private static final String ORDEN_POR_DEFECTO = "nombre,asc";
+
     private final InventarioRepository inventarioRepository;
     private final MovimientoInventarioRepository movimientoRepository;
+    private final InventarioConsultaRepository inventarioConsultaRepository;
+    private final KardexConsultaRepository kardexRepository;
 
     public InventarioService(InventarioRepository inventarioRepository,
-                             MovimientoInventarioRepository movimientoRepository) {
+                             MovimientoInventarioRepository movimientoRepository,
+                             InventarioConsultaRepository inventarioConsultaRepository,
+                             KardexConsultaRepository kardexRepository) {
         this.inventarioRepository = inventarioRepository;
         this.movimientoRepository = movimientoRepository;
+        this.inventarioConsultaRepository = inventarioConsultaRepository;
+        this.kardexRepository = kardexRepository;
     }
 
     /**
@@ -85,6 +116,131 @@ public class InventarioService {
                                             Integer idOrigen, String observacion) {
         return registrar(idMateriaPrima, cantidad, tipo, tablaOrigen, idOrigen, observacion,
                 false);
+    }
+
+    /**
+     * Lista de forma paginada el inventario de materia prima (HU-10).
+     *
+     * <p>Es solo lectura (R-01) y consulta la vista {@code v_inventario_materia_prima} (R-02),
+     * que ya resuelve el {@code COALESCE} con inventario, el {@code estado_stock} y el
+     * {@code faltante}; el servicio no reconstruye esos cálculos.
+     *
+     * <p>Las materias primas inactivas se incluyen por defecto (R-04): desactivarlas no retira su
+     * stock de la bodega, y ocultarlas haría desaparecer existencias reales del sistema. El
+     * cliente puede excluirlas con {@code incluirInactivas=false}.
+     *
+     * <p>{@code estadoStock} de cada fila puede ser {@code AGOTADO}, {@code BAJO} u {@code OK}
+     * según R-05; con {@code soloStockBajo=true} solo se devuelven las dos primeras.
+     *
+     * @param idMateriaPrima   filtra por una materia prima, o {@code null} para no restringir
+     * @param soloStockBajo    true para limitar a {@code BAJO} y {@code AGOTADO}; nulo equivale a
+     *                         false
+     * @param incluirInactivas true para incluir las inactivas; nulo equivale a true (R-04)
+     * @param page             página solicitada, desde 0
+     * @param size             tamaño de página, entre 1 y 100
+     * @param sort             orden "campo,direccion"; por defecto "nombre,asc"
+     * @throws ParametroInvalidoException si la paginación o el campo de orden son inválidos
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<InventarioResponse> listar(Integer idMateriaPrima, Boolean soloStockBajo,
+                                                   Boolean incluirInactivas, int page, int size,
+                                                   String sort) {
+        var orden = PageRequest.of(page, size, sort, ORDEN, ORDEN_POR_DEFECTO);
+        boolean soloBajo = Boolean.TRUE.equals(soloStockBajo);
+        // R-04: solo se excluyen las inactivas cuando el cliente envía explícitamente false; un
+        // parámetro ausente o nulo mantiene el comportamiento por defecto de mostrarlas.
+        boolean incluirInactivasNormalizado = !Boolean.FALSE.equals(incluirInactivas);
+        // El offset se calcula en long: page no tiene cota superior, así que page * size
+        // desbordaría int a un valor negativo y el OFFSET del SQL fallaría.
+        long offset = (long) orden.page() * orden.size();
+
+        var filas = inventarioConsultaRepository.buscar(idMateriaPrima, soloBajo,
+                incluirInactivasNormalizado, orden.propiedad(), orden.ascendente(),
+                orden.size(), offset);
+        var total = inventarioConsultaRepository.contar(idMateriaPrima, soloBajo,
+                incluirInactivasNormalizado);
+
+        return PageResponse.of(filas, orden.page(), orden.size(), total);
+    }
+
+    /**
+     * Devuelve el detalle de inventario de una materia prima (HU-10).
+     *
+     * <p>Es solo lectura (R-01) y se resuelve contra la vista {@code v_inventario_materia_prima}
+     * (R-02), de modo que el detalle y el listado muestran exactamente los mismos valores
+     * calculados.
+     *
+     * @param idMateriaPrima identificador de la materia prima
+     * @return la fila de inventario de la materia prima
+     * @throws RecursoNoEncontradoException si la materia prima no existe
+     */
+    @Transactional(readOnly = true)
+    public InventarioResponse obtener(Integer idMateriaPrima) {
+        return inventarioConsultaRepository.buscarPorMateriaPrima(idMateriaPrima)
+                .orElseThrow(() -> new RecursoNoEncontradoException(
+                        "la materia prima en inventario", idMateriaPrima));
+    }
+
+    /**
+     * Devuelve el kardex paginado de una materia prima (HU-10, R-03).
+     *
+     * <p>Es solo lectura (R-01) y explica el saldo actual de la materia prima: cada fila indica
+     * qué entró o salió, cuándo, quién y por qué documento. Sin este libro no habría forma de
+     * reconstruir cómo se llegó a la {@code cantidad_disponible} que muestra el inventario.
+     *
+     * <p>El orden es fijo por {@code id_movimiento DESC}, del movimiento más reciente al más
+     * antiguo. No se acepta orden del cliente porque la consulta debe seguir aprovechando el
+     * índice {@code idx_mov_mp_materia}.
+     *
+     * <p>Un movimiento sin usuario asociado ({@code id_usuario} nulo) se muestra con el nombre
+     * {@code "Sistema"} (CP-16), no como un usuario inexistente.
+     *
+     * <p>Si la materia prima no existe se responde {@code RECURSO_NO_ENCONTRADO} (404). En cambio,
+     * una materia prima existente que todavía no tiene movimientos devuelve una página vacía,
+     * no un error (CP-15).
+     *
+     * @param idMateriaPrima identificador de la materia prima
+     * @param fechaInicio    primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin       último día incluido del rango, o {@code null} sin límite superior
+     * @param page           página solicitada, desde 0
+     * @param size           tamaño de página, entre 1 y 100
+     * @return la página de movimientos y su total
+     * @throws ParametroInvalidoException   si la paginación es inválida o el rango de fechas está
+     *                                      invertido
+     * @throws RecursoNoEncontradoException si la materia prima no existe
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<MovimientoResponse> movimientos(Integer idMateriaPrima,
+            LocalDate fechaInicio, LocalDate fechaFin, int page, int size) {
+        if (page < 0) {
+            throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
+                    "El parámetro 'page' no puede ser negativo.");
+        }
+        if (size < 1 || size > 100) {
+            throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
+                    "El parámetro 'size' debe estar entre 1 y 100.");
+        }
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            // Código del contrato transversal (04-CONTRATO-API.md §4), no el genérico
+            // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        // La existencia se comprueba contra la vista de inventario y no contra los movimientos:
+        // una materia prima recién creada existe aunque su kardex esté vacío (CP-15).
+        inventarioConsultaRepository.buscarPorMateriaPrima(idMateriaPrima)
+                .orElseThrow(() -> new RecursoNoEncontradoException(
+                        "la materia prima en inventario", idMateriaPrima));
+
+        // El offset se calcula en long: page no tiene cota superior, así que page * size
+        // desbordaría int a un valor negativo y el OFFSET del SQL fallaría.
+        long offset = (long) page * size;
+
+        var filas = kardexRepository.buscar(idMateriaPrima, fechaInicio, fechaFin, size, offset);
+        var total = kardexRepository.contar(idMateriaPrima, fechaInicio, fechaFin);
+
+        return PageResponse.of(filas, page, size, total);
     }
 
     private SaldosInventario registrar(Integer idMateriaPrima, BigDecimal cantidad,
