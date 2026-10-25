@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.inventario;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
@@ -13,6 +14,7 @@ import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoExceptio
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.inventario.dto.InventarioResponse;
+import co.edu.corposucre.productionfood.inventario.dto.MovimientoResponse;
 
 /**
  * Único componente del sistema autorizado a modificar {@code inventario}.
@@ -35,7 +37,8 @@ import co.edu.corposucre.productionfood.inventario.dto.InventarioResponse;
  * todos. Llamar a estos métodos fuera de una transacción deja el bloqueo sin efecto.
  *
  * <p>Las consultas de HU-10, en cambio, sí llevan {@code @Transactional(readOnly = true)}: leen
- * la vista {@code v_inventario_materia_prima} y no participan del bloqueo de escritura.
+ * la vista {@code v_inventario_materia_prima} y la tabla de kardex, y no participan del bloqueo
+ * de escritura.
  */
 @Service
 public class InventarioService {
@@ -59,13 +62,16 @@ public class InventarioService {
     private final InventarioRepository inventarioRepository;
     private final MovimientoInventarioRepository movimientoRepository;
     private final InventarioConsultaRepository inventarioConsultaRepository;
+    private final KardexConsultaRepository kardexRepository;
 
     public InventarioService(InventarioRepository inventarioRepository,
                              MovimientoInventarioRepository movimientoRepository,
-                             InventarioConsultaRepository inventarioConsultaRepository) {
+                             InventarioConsultaRepository inventarioConsultaRepository,
+                             KardexConsultaRepository kardexRepository) {
         this.inventarioRepository = inventarioRepository;
         this.movimientoRepository = movimientoRepository;
         this.inventarioConsultaRepository = inventarioConsultaRepository;
+        this.kardexRepository = kardexRepository;
     }
 
     /**
@@ -173,6 +179,66 @@ public class InventarioService {
         return inventarioConsultaRepository.buscarPorMateriaPrima(idMateriaPrima)
                 .orElseThrow(() -> new RecursoNoEncontradoException(
                         "la materia prima en inventario", idMateriaPrima));
+    }
+
+    /**
+     * Devuelve el kardex paginado de una materia prima (HU-10, R-03).
+     *
+     * <p>Es solo lectura (R-01) y explica el saldo actual de la materia prima: cada fila indica
+     * qué entró o salió, cuándo, quién y por qué documento. Sin este libro no habría forma de
+     * reconstruir cómo se llegó a la {@code cantidad_disponible} que muestra el inventario.
+     *
+     * <p>El orden es fijo por {@code id_movimiento DESC}, del movimiento más reciente al más
+     * antiguo. No se acepta orden del cliente porque la consulta debe seguir aprovechando el
+     * índice {@code idx_mov_mp_materia}.
+     *
+     * <p>Un movimiento sin usuario asociado ({@code id_usuario} nulo) se muestra con el nombre
+     * {@code "Sistema"} (CP-16), no como un usuario inexistente.
+     *
+     * <p>Si la materia prima no existe se responde {@code RECURSO_NO_ENCONTRADO} (404). En cambio,
+     * una materia prima existente que todavía no tiene movimientos devuelve una página vacía,
+     * no un error (CP-15).
+     *
+     * @param idMateriaPrima identificador de la materia prima
+     * @param fechaInicio    primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin       último día incluido del rango, o {@code null} sin límite superior
+     * @param page           página solicitada, desde 0
+     * @param size           tamaño de página, entre 1 y 100
+     * @return la página de movimientos y su total
+     * @throws ParametroInvalidoException   si la paginación es inválida o el rango de fechas está
+     *                                      invertido
+     * @throws RecursoNoEncontradoException si la materia prima no existe
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<MovimientoResponse> movimientos(Integer idMateriaPrima,
+            LocalDate fechaInicio, LocalDate fechaFin, int page, int size) {
+        if (page < 0) {
+            throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
+                    "El parámetro 'page' no puede ser negativo.");
+        }
+        if (size < 1 || size > 100) {
+            throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
+                    "El parámetro 'size' debe estar entre 1 y 100.");
+        }
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        // La existencia se comprueba contra la vista de inventario y no contra los movimientos:
+        // una materia prima recién creada existe aunque su kardex esté vacío (CP-15).
+        inventarioConsultaRepository.buscarPorMateriaPrima(idMateriaPrima)
+                .orElseThrow(() -> new RecursoNoEncontradoException(
+                        "la materia prima en inventario", idMateriaPrima));
+
+        // El offset se calcula en long: page no tiene cota superior, así que page * size
+        // desbordaría int a un valor negativo y el OFFSET del SQL fallaría.
+        long offset = (long) page * size;
+
+        var filas = kardexRepository.buscar(idMateriaPrima, fechaInicio, fechaFin, size, offset);
+        var total = kardexRepository.contar(idMateriaPrima, fechaInicio, fechaFin);
+
+        return PageResponse.of(filas, page, size, total);
     }
 
     private SaldosInventario registrar(Integer idMateriaPrima, BigDecimal cantidad,
