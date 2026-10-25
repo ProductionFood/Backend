@@ -57,6 +57,26 @@ public class DetalleRecetaRepository {
     }
 
     /**
+     * Devuelve el detalle de varias recetas en una sola consulta.
+     *
+     * <p>Existe para que el listado paginado no ejecute una consulta por fila: el servicio trae
+     * todas las líneas de la página con un solo {@code IN} y las agrupa en memoria por
+     * {@code idReceta}.
+     *
+     * @param idsRecetas identificadores de las recetas de la página
+     * @return líneas de detalle de todas esas recetas; vacía si la lista viene vacía
+     */
+    public List<DetalleReceta> listarPorRecetas(List<Integer> idsRecetas) {
+        if (idsRecetas == null || idsRecetas.isEmpty()) {
+            return List.of();
+        }
+        var params = new MapSqlParameterSource().addValue("idsRecetas", idsRecetas);
+        return jdbc.query(
+                SELECT + " WHERE d.id_receta IN (:idsRecetas) ORDER BY d.id_detalle_receta",
+                params, new DetalleRecetaRowMapper());
+    }
+
+    /**
      * Devuelve una línea de detalle con los datos de su materia prima, por id.
      *
      * @param idDetalle identificador de la línea de detalle

@@ -3,6 +3,10 @@ package co.edu.corposucre.productionfood.receta;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -23,14 +27,19 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.Pageable;
 
+import co.edu.corposucre.productionfood.common.dto.CambiarEstadoRequest;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaRepository;
 import co.edu.corposucre.productionfood.producto.ProductoRepository;
+import co.edu.corposucre.productionfood.receta.dto.ActualizarDetalleRequest;
+import co.edu.corposucre.productionfood.receta.dto.ActualizarRecetaRequest;
 import co.edu.corposucre.productionfood.receta.dto.AgregarDetalleRequest;
 import co.edu.corposucre.productionfood.receta.dto.CrearRecetaRequest;
+import co.edu.corposucre.productionfood.receta.dto.DetalleRecetaResponse;
 import co.edu.corposucre.productionfood.receta.dto.RecetaResponse;
 import co.edu.corposucre.productionfood.unidadmedida.UnidadMedida;
 import co.edu.corposucre.productionfood.unidadmedida.UnidadMedidaRepository;
@@ -312,6 +321,341 @@ class RecetaServiceTest {
         verifyNoInteractions(materiaPrimaRepository, detalleRecetaRepository);
     }
 
+    @Test
+    @DisplayName("Listar arma la página con una sola consulta de detalle y orden por defecto")
+    void listarArmaLaPaginaConUnaSolaConsultaDeDetalle() {
+        when(recetaRepository.listar(isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(List.of(receta(2, 30), receta(3, 10)));
+        when(recetaRepository.contar(isNull(), isNull())).thenReturn(45L);
+        when(detalleRecetaRepository.listarPorRecetas(List.of(2, 3))).thenReturn(List.of(
+                detalle(11, 2, 5, "5.000", "Harina de trigo", "kg", "3200.00"),
+                detalle(12, 3, 7, "0.050", "Levadura", "g", "180.00"),
+                detalle(13, 2, 9, "0.050", "Sal", "g", "180.00")));
+
+        var r = servicio.listar(null, null, 0, 20, null);
+
+        assertThat(r.content()).hasSize(2);
+        assertThat(r.content().get(0).idReceta()).isEqualTo(2);
+        assertThat(r.content().get(0).detalles())
+                .extracting(DetalleRecetaResponse::idDetalleReceta)
+                .containsExactly(11, 13);
+        assertThat(r.content().get(0).costoTotalEstimado()).isEqualByComparingTo("16009.00");
+        assertThat(r.content().get(0).costoPorUnidad()).isEqualByComparingTo("533.63");
+        assertThat(r.content().get(1).idReceta()).isEqualTo(3);
+        assertThat(r.content().get(1).detalles()).hasSize(1);
+        assertThat(r.page()).isZero();
+        assertThat(r.size()).isEqualTo(20);
+        assertThat(r.totalElements()).isEqualTo(45);
+        assertThat(r.totalPages()).isEqualTo(3);
+
+        var captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(recetaRepository).listar(isNull(), isNull(), captor.capture());
+        assertThat(captor.getValue().getSort().getOrderFor("r.nombre").isAscending()).isTrue();
+        verify(detalleRecetaRepository, times(1)).listarPorRecetas(anyList());
+        verify(detalleRecetaRepository, never()).listarPorReceta(any());
+    }
+
+    @Test
+    @DisplayName("Listar cualifica con r. el orden pedido por el cliente")
+    void listarCualificaElOrdenConElAliasDeLaCabecera() {
+        when(recetaRepository.listar(any(), any(), any(Pageable.class))).thenReturn(List.of());
+        when(recetaRepository.contar(any(), any())).thenReturn(0L);
+
+        servicio.listar(null, null, 0, 20, "nombre,desc");
+
+        var captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(recetaRepository).listar(any(), any(), captor.capture());
+        assertThat(captor.getValue().getSort().getOrderFor("r.nombre").isDescending()).isTrue();
+    }
+
+    @Test
+    @DisplayName("La lista blanca de orden admite id y cantidadProducir")
+    void listarAceptaLosCamposDeLaListaBlanca() {
+        when(recetaRepository.listar(any(), any(), any(Pageable.class))).thenReturn(List.of());
+        when(recetaRepository.contar(any(), any())).thenReturn(0L);
+
+        servicio.listar(null, null, 0, 20, "id,asc");
+        servicio.listar(null, null, 0, 20, "cantidadProducir,desc");
+
+        var captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(recetaRepository, times(2)).listar(any(), any(), captor.capture());
+        var pageables = captor.getAllValues();
+        assertThat(pageables.get(0).getSort().getOrderFor("r.id_receta").isAscending()).isTrue();
+        assertThat(pageables.get(1).getSort().getOrderFor("r.cantidad_producir").isDescending())
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("Listar con un campo de orden fuera de la lista blanca responde 400")
+    void listarConCampoDeOrdenNoPermitidoResponde400() {
+        assertThatThrownBy(() -> servicio.listar(null, null, 0, 20, "estado,asc"))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verify(recetaRepository, never()).listar(any(), any(), any());
+        verify(recetaRepository, never()).contar(any(), any());
+    }
+
+    @Test
+    @DisplayName("Obtener una receta existente devuelve su detalle y sus costos")
+    void obtenerRecetaExistente() {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(detalleRecetaRepository.listarPorReceta(2)).thenReturn(List.of(
+                detalle(11, 5, "5.000", "Harina de trigo", "kg", "3200.00"),
+                detalle(12, 7, "0.050", "Levadura", "g", "180.00")));
+
+        var r = servicio.obtener(2);
+
+        assertThat(r.idReceta()).isEqualTo(2);
+        assertThat(r.completa()).isTrue();
+        assertThat(r.detalles()).hasSize(2);
+        assertThat(r.costoTotalEstimado()).isEqualByComparingTo("16009.00");
+        assertThat(r.costoPorUnidad()).isEqualByComparingTo("533.63");
+    }
+
+    @Test
+    @DisplayName("Obtener una receta inexistente responde 404 y no consulta el detalle")
+    void obtenerRecetaInexistenteResponde404() {
+        when(recetaRepository.buscarPorId(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> servicio.obtener(99))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
+                .hasMessage("No se encontró la receta con id 99.");
+
+        verifyNoInteractions(detalleRecetaRepository);
+    }
+
+    @Test
+    @DisplayName("Consultar la receta de un producto existente devuelve su detalle")
+    void porProductoExistente() {
+        when(recetaRepository.buscarPorProducto(3)).thenReturn(Optional.of(receta(30)));
+        when(detalleRecetaRepository.listarPorReceta(2)).thenReturn(List.of(
+                detalle(11, 5, "5.000", "Harina de trigo", "kg", "3200.00")));
+
+        var r = servicio.porProducto(3);
+
+        assertThat(r.idReceta()).isEqualTo(2);
+        assertThat(r.producto().idProducto()).isEqualTo(3);
+        assertThat(r.detalles()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Consultar la receta de un producto sin receta responde 404")
+    void porProductoSinRecetaResponde404() {
+        when(recetaRepository.buscarPorProducto(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> servicio.porProducto(99))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la receta del producto con id 99.");
+
+        verifyNoInteractions(detalleRecetaRepository);
+    }
+
+    @Test
+    @DisplayName("Actualizar la cabecera cambia nombre, rendimiento y unidad y recalcula costos")
+    void actualizarCabeceraRecalculaCostos() {
+        var editada = receta(2, 15);
+        editada.setNombre("Masa integral");
+        editada.setIdUnidad(6);
+        editada.setNombreUnidad("Kilogramo");
+        editada.setAbreviaturaUnidad("kg");
+        when(recetaRepository.buscarPorId(2)).thenReturn(
+                Optional.of(receta(30)), Optional.of(editada));
+        when(unidadMedidaRepository.findById(6))
+                .thenReturn(Optional.of(unidad(6, "Kilogramo", "kg")));
+        when(detalleRecetaRepository.listarPorReceta(2)).thenReturn(List.of(
+                detalle(11, 5, "5.000", "Harina de trigo", "kg", "3200.00"),
+                detalle(12, 7, "0.050", "Levadura", "g", "180.00")));
+
+        var r = servicio.actualizar(2, new ActualizarRecetaRequest(
+                "  Masa integral  ", new BigDecimal("15"), 6));
+
+        assertThat(r.nombre()).isEqualTo("Masa integral");
+        assertThat(r.cantidadProducir()).isEqualByComparingTo("15.00");
+        assertThat(r.cantidadProducir().scale()).isEqualTo(2);
+        assertThat(r.unidad().idUnidad()).isEqualTo(6);
+        assertThat(r.unidad().abreviatura()).isEqualTo("kg");
+        assertThat(r.producto().idProducto()).isEqualTo(3);
+        assertThat(r.costoTotalEstimado()).isEqualByComparingTo("16009.00");
+        assertThat(r.costoPorUnidad()).isEqualByComparingTo("1067.27");
+
+        var captor = ArgumentCaptor.forClass(Receta.class);
+        verify(recetaRepository).actualizar(captor.capture());
+        assertThat(captor.getValue().getIdReceta()).isEqualTo(2);
+        assertThat(captor.getValue().getNombre()).isEqualTo("Masa integral");
+        assertThat(captor.getValue().getCantidadProducir()).isEqualByComparingTo("15.00");
+        assertThat(captor.getValue().getCantidadProducir().scale()).isEqualTo(2);
+        assertThat(captor.getValue().getIdUnidad()).isEqualTo(6);
+        assertThat(captor.getValue().getIdProducto()).isEqualTo(3);
+    }
+
+    @ParameterizedTest
+    @MethodSource("cantidadesProducirInvalidas")
+    @DisplayName("Actualizar con cantidadProducir cero o negativa responde 400")
+    void actualizarCantidadInvalidaResponde400(BigDecimal cantidad) {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+
+        assertThatThrownBy(() -> servicio.actualizar(2,
+                new ActualizarRecetaRequest("Masa de pan francés", cantidad, 5)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CANTIDAD_PRODUCIR_INVALIDA");
+
+        verify(recetaRepository, never()).actualizar(any());
+        verifyNoInteractions(unidadMedidaRepository);
+    }
+
+    @Test
+    @DisplayName("Actualizar con unidad inexistente responde 409 sin guardar")
+    void actualizarConUnidadInexistenteResponde409() {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(unidadMedidaRepository.findById(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> servicio.actualizar(2,
+                new ActualizarRecetaRequest("Masa de pan francés", new BigDecimal("30"), 99)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "UNIDAD_INEXISTENTE");
+
+        verify(recetaRepository, never()).actualizar(any());
+    }
+
+    @Test
+    @DisplayName("Actualizar una receta inexistente responde 404")
+    void actualizarRecetaInexistenteResponde404() {
+        when(recetaRepository.buscarPorId(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> servicio.actualizar(99,
+                new ActualizarRecetaRequest("Masa de pan francés", new BigDecimal("30"), 5)))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la receta con id 99.");
+
+        verifyNoInteractions(unidadMedidaRepository);
+        verify(recetaRepository, never()).actualizar(any());
+    }
+
+    @Test
+    @DisplayName("Cambiar estado desactiva y repetir la petición es idempotente")
+    void cambiarEstadoEsIdempotente() {
+        var activa = receta(30);
+        var inactiva = receta(30);
+        inactiva.setActivo(Boolean.FALSE);
+        when(recetaRepository.buscarPorId(2)).thenReturn(
+                Optional.of(activa), Optional.of(inactiva),
+                Optional.of(inactiva), Optional.of(inactiva));
+        when(detalleRecetaRepository.listarPorReceta(2)).thenReturn(List.of());
+
+        var primera = servicio.cambiarEstado(2, new CambiarEstadoRequest(false));
+        var segunda = servicio.cambiarEstado(2, new CambiarEstadoRequest(false));
+
+        assertThat(primera.activo()).isFalse();
+        assertThat(segunda.activo()).isFalse();
+        verify(recetaRepository, times(2)).cambiarEstado(2, false);
+    }
+
+    @Test
+    @DisplayName("Cambiar estado activa una receta inactiva")
+    void cambiarEstadoActiva() {
+        var activa = receta(30);
+        when(recetaRepository.buscarPorId(2)).thenReturn(
+                Optional.of(receta(30)), Optional.of(activa));
+        when(detalleRecetaRepository.listarPorReceta(2)).thenReturn(List.of());
+
+        var r = servicio.cambiarEstado(2, new CambiarEstadoRequest(true));
+
+        assertThat(r.activo()).isTrue();
+        verify(recetaRepository).cambiarEstado(2, true);
+    }
+
+    @Test
+    @DisplayName("Cambiar estado de una receta inexistente responde 404")
+    void cambiarEstadoRecetaInexistenteResponde404() {
+        when(recetaRepository.buscarPorId(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> servicio.cambiarEstado(99, new CambiarEstadoRequest(false)))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la receta con id 99.");
+
+        verify(recetaRepository, never()).cambiarEstado(any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("Editar la cantidad del ingrediente recalcula el costo y conserva CP-21")
+    void actualizarDetalleRecalculaCosto() {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(detalleRecetaRepository.buscarPorId(11)).thenReturn(Optional.of(
+                detalle(11, 2, 5, "4.000", "Harina de trigo", "kg", "3200.00")));
+        when(detalleRecetaRepository.listarPorReceta(2)).thenReturn(List.of(
+                detalle(11, 2, 5, "5.000", "Harina de trigo", "kg", "3200.00"),
+                detalle(12, 2, 7, "0.050", "Levadura", "g", "180.00")));
+
+        var r = servicio.actualizarDetalle(2, 11,
+                new ActualizarDetalleRequest(new BigDecimal("5")));
+
+        assertThat(r.detalles().get(0).cantidad()).isEqualByComparingTo("5.000");
+        assertThat(r.costoTotalEstimado()).isEqualByComparingTo("16009.00");
+        assertThat(r.costoPorUnidad()).isEqualByComparingTo("533.63");
+
+        var captor = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(detalleRecetaRepository).actualizarCantidad(eq(11), captor.capture());
+        assertThat(captor.getValue()).isEqualByComparingTo("5.000");
+        assertThat(captor.getValue().scale()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("Editar un detalle de otra receta responde 404 y no actualiza")
+    void actualizarDetalleDeOtraRecetaResponde404() {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(detalleRecetaRepository.buscarPorId(11)).thenReturn(Optional.of(
+                detalle(11, 99, 5, "5.000", "Harina de trigo", "kg", "3200.00")));
+
+        assertThatThrownBy(() -> servicio.actualizarDetalle(2, 11,
+                new ActualizarDetalleRequest(new BigDecimal("5"))))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la línea de detalle con id 11.");
+
+        verify(detalleRecetaRepository, never()).actualizarCantidad(any(), any());
+        verify(detalleRecetaRepository, never()).listarPorReceta(any());
+    }
+
+    @Test
+    @DisplayName("Editar el detalle de una receta inexistente responde 404")
+    void actualizarDetalleDeRecetaInexistenteResponde404() {
+        when(recetaRepository.buscarPorId(99)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> servicio.actualizarDetalle(99, 11,
+                new ActualizarDetalleRequest(new BigDecimal("5"))))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la receta con id 99.");
+
+        verifyNoInteractions(detalleRecetaRepository);
+    }
+
+    @Test
+    @DisplayName("Eliminar un ingrediente de la receta lo borra del detalle")
+    void eliminarDetalleFeliz() {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(detalleRecetaRepository.buscarPorId(11)).thenReturn(Optional.of(
+                detalle(11, 2, 5, "5.000", "Harina de trigo", "kg", "3200.00")));
+
+        servicio.eliminarDetalle(2, 11);
+
+        verify(detalleRecetaRepository).eliminar(11);
+    }
+
+    @Test
+    @DisplayName("Eliminar un detalle de otra receta responde 404 y no elimina")
+    void eliminarDetalleDeOtraRecetaResponde404() {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(detalleRecetaRepository.buscarPorId(11)).thenReturn(Optional.of(
+                detalle(11, 99, 5, "5.000", "Harina de trigo", "kg", "3200.00")));
+
+        assertThatThrownBy(() -> servicio.eliminarDetalle(2, 11))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la línea de detalle con id 11.");
+
+        verify(detalleRecetaRepository, never()).eliminar(any());
+    }
+
     private void prepararAltaValida() {
         when(productoRepository.existeActivo(3)).thenReturn(true);
         when(unidadMedidaRepository.findById(5)).thenReturn(Optional.of(unidad(5, "Unidad", "und")));
@@ -341,8 +685,12 @@ class RecetaServiceTest {
     }
 
     private static Receta receta(int cantidadProducir) {
+        return receta(2, cantidadProducir);
+    }
+
+    private static Receta receta(int idReceta, int cantidadProducir) {
         var receta = new Receta();
-        receta.setIdReceta(2);
+        receta.setIdReceta(idReceta);
         receta.setIdProducto(3);
         receta.setNombreProducto("Pan francés");
         receta.setNombre("Masa de pan francés");
@@ -357,9 +705,16 @@ class RecetaServiceTest {
     private static DetalleReceta detalle(int idDetalle, int idMateriaPrima, String cantidad,
                                          String nombreMateriaPrima, String abreviaturaUnidad,
                                          String costoUnitario) {
+        return detalle(idDetalle, 2, idMateriaPrima, cantidad, nombreMateriaPrima,
+                abreviaturaUnidad, costoUnitario);
+    }
+
+    private static DetalleReceta detalle(int idDetalle, int idReceta, int idMateriaPrima,
+                                         String cantidad, String nombreMateriaPrima,
+                                         String abreviaturaUnidad, String costoUnitario) {
         var detalle = new DetalleReceta();
         detalle.setIdDetalleReceta(idDetalle);
-        detalle.setIdReceta(2);
+        detalle.setIdReceta(idReceta);
         detalle.setIdMateriaPrima(idMateriaPrima);
         detalle.setCantidad(new BigDecimal(cantidad));
         detalle.setNombreMateriaPrima(nombreMateriaPrima);
