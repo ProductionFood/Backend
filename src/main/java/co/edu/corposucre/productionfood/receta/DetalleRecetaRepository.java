@@ -113,11 +113,24 @@ public class DetalleRecetaRepository {
                 VALUES (:idReceta, :idMateriaPrima, :cantidad)
                 """, params, generadas, new String[] {"id_detalle_receta"});
 
-        Integer id = generadas.getKeyAs(Integer.class);
+        Integer id = claveGenerada(generadas);
         if (id == null) {
             throw new IllegalStateException("La base no devolvió el id de la línea insertada.");
         }
         return id;
+    }
+
+    /**
+     * Extrae la llave generada como {@link Integer}.
+     *
+     * <p>El conector de MySQL devuelve la llave como {@code BigInteger}; pedirla con
+     * {@code getKeyAs(Integer.class)} lanza {@code DataRetrievalFailureException} porque la
+     * conversión de tipos no está soportada. Se toma como {@link Number} y se reduce al tipo de la
+     * columna.
+     */
+    private static Integer claveGenerada(GeneratedKeyHolder generadas) {
+        Number clave = generadas.getKey();
+        return clave == null ? null : clave.intValue();
     }
 
     /**
