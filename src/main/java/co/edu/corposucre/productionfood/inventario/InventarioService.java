@@ -221,7 +221,9 @@ public class InventarioService {
                     "El parámetro 'size' debe estar entre 1 y 100.");
         }
         if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
-            throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
+            // Código del contrato transversal (04-CONTRATO-API.md §4), no el genérico
+            // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
                     "La fecha de inicio no puede ser posterior a la fecha de fin.");
         }
 

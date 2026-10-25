@@ -105,11 +105,11 @@ class KardexConsultaServiceTest {
     }
 
     @Test
-    @DisplayName("Un rango con la fecha de inicio posterior a la de fin responde 400 PARAMETRO_INVALIDO")
+    @DisplayName("Un rango con la fecha de inicio posterior a la de fin responde 400 RANGO_FECHAS_INVALIDO")
     void rangoDeFechasInvertidoResponde400() {
         assertThatThrownBy(() -> servicio.movimientos(5, HASTA, DESDE, 0, 20))
                 .isInstanceOf(ParametroInvalidoException.class)
-                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
 
         verifyNoInteractions(consultaRepository, kardexRepository);
     }
