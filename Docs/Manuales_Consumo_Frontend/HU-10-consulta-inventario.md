@@ -12,9 +12,9 @@ Contrato práctico de la consulta del inventario de materia prima. Complementa
   kardex lo pueden ver `ADMIN`, `PRODUCCION` y `COMPRAS`. `VENTAS` **no** participa en este
   módulo.
 
-> **Estado:** backend implementado el 2026-10-23. La verificación en caliente contra MySQL y el
-> consumo desde Angular siguen **pendientes**. Los valores de cantidad, saldo y fecha de los
-> ejemplos son de contrato y cambian con la base.
+> **Estado:** backend verificado en caliente contra MySQL el 2026-10-25 (20 CP + SEC-01…05). El
+> consumo desde Angular sigue pendiente. Los valores de cantidad, saldo y fecha de los ejemplos
+> son de contrato y cambian con la base.
 
 ---
 
@@ -252,7 +252,7 @@ vacío porque no hay cuerpos de escritura.
   `soloStockBajo` e `incluirInactivas`; el buscador por nombre, si se necesita, debe hacerse en el
   cliente sobre la página o pedirse como historia nueva.
 - **No se expone `costoUnitario`.** Si una pantalla lo necesita, no está en este contrato.
-- **Backend implementado, verificación en caliente pendiente.** El estado de QA de la historia no
-  es «verificado en caliente»; confirma los ejemplos al integrar.
+- **Backend verificado en caliente el 2026-10-25** (CP-01…CP-20 y SEC-01…05). Aun así, confirma
+  los valores de los ejemplos al integrar: cambian con la base y con la fecha de ejecución.
 - **CP-14 depende de que todos los módulos usen `InventarioService`.** Si algún módulo futuro
   actualizara `inventario` sin registrar el movimiento, el kardex dejaría de explicar el saldo.

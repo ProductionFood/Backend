@@ -1,16 +1,16 @@
-# HU-10 — Consulta de inventario de materia prima · Backend implementado
+# HU-10 — Consulta de inventario de materia prima · Backend verificado
 
 | | |
 |---|---|
 | Fecha de implementación | 2026-10-23 |
-| Commits / PR | PRs #66–#68; este PR añade la documentación |
+| Commits / PR | PRs #66–#69 a `HU-10/consulta-inventario` |
 | Colección Postman | `Docs/Postman/ProductionFood-HU10.postman_collection.json` (`Preparación`, `Consultas (CP-01…CP-20)`, `Roles (matriz)`, `Seguridad (SEC-01…05)`) |
-| Estado QA | **Backend implementado 2026-10-23 · verificación en caliente (MySQL) y frontend pendientes** |
+| Estado QA | **QA backend verificado en caliente 2026-10-25 (20 CP + SEC-01…05) · frontend pendiente** |
 
-> Esta ficha documenta el backend de la historia. La implementación está cerrada con pruebas
-> automatizadas; la verificación en caliente contra la API real y MySQL, y el consumo desde el
-> frontend, siguen **pendientes**. Los ejemplos de contrato salen de la especificación y de los
-> DTO reales, no de una ejecución pasada.
+> Esta ficha documenta el backend de la historia. Además de las pruebas automatizadas, el
+> 2026-10-25 se ejecutó la matriz completa de `tarea-qa.md` contra la API real (`:8085`) y MySQL
+> 8.4 con un agente ciego: los 20 casos funcionales y la batería SEC pasaron sin defectos. El
+> consumo desde el frontend sigue pendiente.
 
 ## Qué se construyó
 
@@ -168,12 +168,13 @@ Conteo de los tests de la rama, tomado de los fuentes:
 
 La suite completa quedó en **583 tests verdes** (`mvn test`) al cerrar el PR de la historia.
 
-- **Verificación en caliente pendiente.** No se ha ejecutado todavía la matriz de
-  `PFDocs/HU-10/tarea-qa.md` contra la API real y MySQL; por eso el estado de QA no es
-  «verificado en caliente».
-- Los casos de integridad (CP-14) y los bordes de stock (CP-07…CP-10) requieren fixtures: se
-  preparan con lotes de HU-09 (recomendado) o con SQL directo sobre `inventario`, según se
-  documenta en la colección de Postman.
+- **Verificación en caliente ejecutada el 2026-10-25** contra la API real (`:8085`) y MySQL 8.4
+  con un agente ciego: CP-01…CP-20 y SEC-01…SEC-05 (en los 3 endpoints) pasaron. Evidencia
+  destacada: CP-02 (MP nueva en cero), CP-04 (la fecha se actualiza al mover stock), CP-07/08/09/10
+  (bordes `OK`/`BAJO`/`AGOTADO` y mínimo 0), CP-12 (inactiva visible por defecto y excluible),
+  CP-14 (conciliación con **0 filas**) y CP-16 (`usuario: "Sistema"`).
+- Los bordes de stock se prepararon exclusivamente con lotes de HU-09, manteniendo la conciliación
+  saldo↔kardex; no se ajustó `inventario` por SQL.
 - El estado de QA va en la fila `Estado QA`, no aquí.
 
 ## Desviaciones vs especificación
