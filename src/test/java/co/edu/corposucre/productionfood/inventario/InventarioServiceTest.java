@@ -31,6 +31,7 @@ class InventarioServiceTest {
     private InventarioRepository inventarioRepository;
     private MovimientoInventarioRepository movimientoRepository;
     private InventarioConsultaRepository inventarioConsultaRepository;
+    private KardexConsultaRepository kardexRepository;
     private InventarioService servicio;
 
     @BeforeEach
@@ -38,8 +39,9 @@ class InventarioServiceTest {
         inventarioRepository = mock(InventarioRepository.class);
         movimientoRepository = mock(MovimientoInventarioRepository.class);
         inventarioConsultaRepository = mock(InventarioConsultaRepository.class);
+        kardexRepository = mock(KardexConsultaRepository.class);
         servicio = new InventarioService(inventarioRepository, movimientoRepository,
-                inventarioConsultaRepository);
+                inventarioConsultaRepository, kardexRepository);
     }
 
     @Test
