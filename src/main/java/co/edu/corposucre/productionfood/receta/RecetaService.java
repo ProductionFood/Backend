@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.receta;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +59,12 @@ public class RecetaService {
         "cantidadProducir", "r.cantidad_producir");
 
     private static final String ORDEN_POR_DEFECTO = "nombre,asc";
+
+    /**
+     * Cota superior exclusiva de la cantidad de un ingrediente: {@code decimal(10,3)} admite hasta
+     * siete dígitos enteros, es decir, valores menores que diez millones.
+     */
+    private static final BigDecimal MAXIMO_CANTIDAD_DETALLE = new BigDecimal("10000000");
 
     private final RecetaRepository recetaRepository;
     private final DetalleRecetaRepository detalleRecetaRepository;
@@ -147,7 +154,8 @@ public class RecetaService {
      * @throws ConflictoNegocioException si el producto, la unidad o una materia prima no existen o
      *                                   están inactivos, si el producto ya tiene receta o si hay
      *                                   materias primas repetidas
-     * @throws ParametroInvalidoException si {@code cantidadProducir} no es mayor que cero
+     * @throws ParametroInvalidoException si {@code cantidadProducir} no es mayor que cero, o si la
+     *                                    cantidad de un ingrediente no cabe en {@code decimal(10,3)}
      */
     @Transactional
     @Auditable(accion = "CREAR", tabla = "recetas",
@@ -184,6 +192,14 @@ public class RecetaService {
             }
         }
 
+        var lineas = new ArrayList<DetalleReceta>();
+        for (var linea : detalles) {
+            var detalle = new DetalleReceta();
+            detalle.setIdMateriaPrima(linea.idMateriaPrima());
+            detalle.setCantidad(cantidadTresDecimales(linea.cantidad(), "cantidad"));
+            lineas.add(detalle);
+        }
+
         var receta = new Receta();
         receta.setIdProducto(req.idProducto());
         receta.setNombre(req.nombre().trim());
@@ -191,13 +207,16 @@ public class RecetaService {
         receta.setIdUnidad(req.idUnidad());
         receta.setActivo(Boolean.TRUE);
 
-        var idReceta = recetaRepository.insertar(receta);
+        Integer idReceta;
+        try {
+            idReceta = recetaRepository.insertar(receta);
+        } catch (DuplicateKeyException ex) {
+            throw new ConflictoNegocioException("PRODUCTO_YA_TIENE_RECETA",
+                    "El producto ya tiene una receta asignada.");
+        }
 
-        for (var linea : detalles) {
-            var detalle = new DetalleReceta();
+        for (var detalle : lineas) {
             detalle.setIdReceta(idReceta);
-            detalle.setIdMateriaPrima(linea.idMateriaPrima());
-            detalle.setCantidad(linea.cantidad().setScale(3, RoundingMode.HALF_UP));
             detalleRecetaRepository.insertar(detalle);
         }
 
@@ -219,6 +238,7 @@ public class RecetaService {
      * @throws RecursoNoEncontradoException si la receta no existe
      * @throws ConflictoNegocioException    si la materia prima no existe o está inactiva, o si ya
      *                                      está en la receta
+     * @throws ParametroInvalidoException   si la cantidad no cabe en {@code decimal(10,3)}
      */
     @Transactional
     @Auditable(accion = "EDITAR", tabla = "recetas",
@@ -238,7 +258,7 @@ public class RecetaService {
         var detalle = new DetalleReceta();
         detalle.setIdReceta(idReceta);
         detalle.setIdMateriaPrima(req.idMateriaPrima());
-        detalle.setCantidad(req.cantidad().setScale(3, RoundingMode.HALF_UP));
+        detalle.setCantidad(cantidadTresDecimales(req.cantidad(), "cantidad"));
         try {
             detalleRecetaRepository.insertar(detalle);
         } catch (DuplicateKeyException ex) {
@@ -316,6 +336,7 @@ public class RecetaService {
      * @return la receta completa con los costos recalculados
      * @throws RecursoNoEncontradoException si la receta no existe, o si la línea no existe o no
      *                                      pertenece a la receta
+     * @throws ParametroInvalidoException   si la cantidad no cabe en {@code decimal(10,3)}
      */
     @Transactional
     @Auditable(accion = "EDITAR", tabla = "recetas",
@@ -325,7 +346,7 @@ public class RecetaService {
         var receta = buscarOFallar(idReceta);
         var detalle = detalleDeLaReceta(idReceta, idDetalle);
         detalleRecetaRepository.actualizarCantidad(detalle.getIdDetalleReceta(),
-                req.cantidad().setScale(3, RoundingMode.HALF_UP));
+                cantidadTresDecimales(req.cantidad(), "cantidad"));
 
         return aResponse(receta, detalleRecetaRepository.listarPorReceta(idReceta));
     }
@@ -373,6 +394,24 @@ public class RecetaService {
         unidadMedidaRepository.findById(idUnidad)
                 .orElseThrow(() -> new ConflictoNegocioException(
                         "UNIDAD_INEXISTENTE", "La unidad de medida indicada no existe."));
+    }
+
+    /**
+     * Normaliza una cantidad de detalle a escala 3 y comprueba que el valor resultante sea
+     * almacenable en {@code decimal(10,3)}.
+     *
+     * <p>Es una segunda barrera tras la validación del DTO: un valor como {@code 0.0004} pasa
+     * {@link jakarta.validation.constraints.Positive} pero al redondearse a tres decimales queda en
+     * cero, y uno como {@code 99999999.999} excede la columna. Ambos deben responderse como 400
+     * antes de tocar la base, no como un 500 o un 409 de integridad.
+     */
+    private static BigDecimal cantidadTresDecimales(BigDecimal cantidad, String campo) {
+        var normalizada = cantidad.setScale(3, RoundingMode.HALF_UP);
+        if (normalizada.signum() <= 0 || normalizada.compareTo(MAXIMO_CANTIDAD_DETALLE) >= 0) {
+            throw new ParametroInvalidoException("VALIDACION_FALLIDA",
+                    campo + " debe ser mayor que cero y menor que 10000000, con hasta 3 decimales.");
+        }
+        return normalizada;
     }
 
     private static RecetaResponse aResponse(Receta receta, List<DetalleReceta> detalles) {

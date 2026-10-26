@@ -465,6 +465,34 @@ class RecetaControllerTest {
 
     @Test
     @WithMockUser(roles = "PRODUCCION")
+    @DisplayName("Agregar un ingrediente con cuatro decimales responde 400 VALIDACION_FALLIDA")
+    void agregarIngredienteConCuatroDecimalesResponde400() throws Exception {
+        mockMvc.perform(post(DETALLES)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idMateriaPrima\":5,\"cantidad\":0.0004}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("cantidad"));
+
+        verify(recetaService, never()).agregarDetalle(any(), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "PRODUCCION")
+    @DisplayName("Agregar un ingrediente que excede decimal(10,3) responde 400 VALIDACION_FALLIDA")
+    void agregarIngredienteFueraDeRangoResponde400() throws Exception {
+        mockMvc.perform(post(DETALLES)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idMateriaPrima\":5,\"cantidad\":99999999.999}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("cantidad"));
+
+        verify(recetaService, never()).agregarDetalle(any(), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "PRODUCCION")
     @DisplayName("Un ingrediente duplicado responde 409 MATERIA_PRIMA_DUPLICADA (CP-12)")
     void agregarIngredienteDuplicadoResponde409() throws Exception {
         when(recetaService.agregarDetalle(any(), any(AgregarDetalleRequest.class)))
