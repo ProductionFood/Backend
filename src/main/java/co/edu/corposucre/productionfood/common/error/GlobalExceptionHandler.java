@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import tools.jackson.core.JacksonException;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -71,12 +73,41 @@ public class GlobalExceptionHandler {
                      req.getRequestURI(), List.of());
     }
 
+    /**
+     * Traduce un cuerpo ilegible a {@code VALIDACION_FALLIDA} e intenta señalar el campo culpable.
+     *
+     * <p>Un JSON truncado o sin estructura válida no permite identificar ningún campo y responde
+     * con {@code fieldErrors} vacío. En cambio, un tipo inválido en un campo concreto (por ejemplo
+     * {@code "cantidad":"abc"}) llega como {@link JacksonException} con la ruta del campo: sin ese
+     * dato el cliente solo sabría que «algo» está mal, no qué corregir.
+     */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ErrorResponse> cuerpoIlegible(
             HttpMessageNotReadableException ex, HttpServletRequest req) {
         return build(HttpStatus.BAD_REQUEST, "VALIDACION_FALLIDA",
                      "Los datos enviados no son válidos.",
-                     req.getRequestURI(), List.of());
+                     req.getRequestURI(), camposDelCuerpoIlegible(ex));
+    }
+
+    /**
+     * Extrae el primer campo identificable de la ruta de Jackson, si la hay.
+     *
+     * <p>Se mira la causa más específica porque la excepción de Spring solo envuelve el error del
+     * conversor; el nombre del campo únicamente aparece en el {@link JacksonException} original.
+     */
+    private static List<ErrorResponse.FieldError> camposDelCuerpoIlegible(
+            HttpMessageNotReadableException ex) {
+        if (!(ex.getMostSpecificCause() instanceof JacksonException jackson)) {
+            return List.of();
+        }
+        for (var referencia : jackson.getPath()) {
+            var campo = referencia.getPropertyName();
+            if (campo != null) {
+                return List.of(new ErrorResponse.FieldError(
+                        campo, "El valor del campo no es válido."));
+            }
+        }
+        return List.of();
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)

@@ -150,14 +150,16 @@ public class LoteProductoController {
                description = "Historial paginado de movimientos del lote (R-02): qué entró o "
                         + "salió, cuándo, quién y por qué documento, con los saldos anterior y "
                         + "posterior. Explica cómo se llegó a la cantidad disponible actual y es "
-                        + "la base de la trazabilidad ante un retiro sanitario. Se ordena siempre "
-                        + "del movimiento más reciente al más antiguo y no acepta sort. Un lote "
-                        + "existente sin movimientos devuelve una página vacía; si el lote no "
-                        + "existe o es de materia prima, responde 404.")
+                        + "la base de la trazabilidad ante un retiro sanitario. Se puede ordenar "
+                        + "por fecha, tipo, cantidad, saldoAnterior, saldoPosterior o id, por "
+                        + "defecto id descendente (del movimiento más reciente al más antiguo); "
+                        + "cualquier otro campo responde CAMPO_ORDEN_INVALIDO. Un lote existente "
+                        + "sin movimientos devuelve una página vacía; si el lote no existe o es de "
+                        + "materia prima, responde 404.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Kardex paginado"),
-        @ApiResponse(responseCode = "400", description = "Parámetros de paginación inválidos "
-                + "(PARAMETRO_INVALIDO)"),
+        @ApiResponse(responseCode = "400", description = "Parámetros de paginación u orden "
+                + "inválidos (PARAMETRO_INVALIDO, CAMPO_ORDEN_INVALIDO)"),
         @ApiResponse(responseCode = "401", description = "Sin token"),
         @ApiResponse(responseCode = "403", description = "Sin permisos"),
         @ApiResponse(responseCode = "404", description = "Lote inexistente o de materia prima")
@@ -165,7 +167,8 @@ public class LoteProductoController {
     public PageResponse<MovimientoResponse> movimientos(
             @PathVariable Integer id,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return loteProductoService.movimientos(id, page, size);
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sort) {
+        return loteProductoService.movimientos(id, page, size, sort);
     }
 }

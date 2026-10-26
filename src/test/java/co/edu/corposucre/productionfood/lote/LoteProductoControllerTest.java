@@ -223,6 +223,22 @@ class LoteProductoControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Una cantidad no numérica responde 400 señalando el campo 'cantidad'")
+    void crearConCantidadNoNumericaResponde400ConElCampo() throws Exception {
+        mockMvc.perform(post("/api/v1/lotes-producto")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"codigoLote\":\"PF-2026-0918\",\"idProducto\":3,"
+                                + "\"fechaProduccion\":\"2026-09-18\","
+                                + "\"fechaVencimiento\":\"2026-09-22\",\"cantidad\":\"abc\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("cantidad"));
+
+        verify(loteProductoService, never()).crearLoteProducto(any());
+    }
+
+    @Test
     @WithMockUser(roles = "PRODUCCION")
     @DisplayName("Un código de 31 caracteres responde 400 VALIDACION_FALLIDA")
     void crearConCodigoDeTreintaYUnoResponde400() throws Exception {
@@ -415,7 +431,7 @@ class LoteProductoControllerTest {
     @WithMockUser(roles = "PRODUCCION")
     @DisplayName("El kardex de un lote devuelve la página de movimientos y su total")
     void movimientosDevuelveLaPaginaYElTotal() throws Exception {
-        when(loteProductoService.movimientos(31, 1, 5))
+        when(loteProductoService.movimientos(31, 1, 5, null))
                 .thenReturn(PageResponse.of(List.of(entradaDeProduccion()), 1, 5, 6));
 
         mockMvc.perform(get("/api/v1/lotes-producto/31/movimientos")
@@ -432,14 +448,29 @@ class LoteProductoControllerTest {
                 .andExpect(jsonPath("$.size").value(5))
                 .andExpect(jsonPath("$.totalElements").value(6));
 
-        verify(loteProductoService).movimientos(31, 1, 5);
+        verify(loteProductoService).movimientos(31, 1, 5, null);
+    }
+
+    @Test
+    @WithMockUser(roles = "VENTAS")
+    @DisplayName("El kardex pasa el parámetro sort al servicio tal cual")
+    void movimientosPasaElSortAlServicio() throws Exception {
+        when(loteProductoService.movimientos(31, 0, 20, "fecha,asc"))
+                .thenReturn(PageResponse.of(List.of(entradaDeProduccion()), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/lotes-producto/31/movimientos")
+                        .param("sort", "fecha,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].tipo").value("ENTRADA_PRODUCCION"));
+
+        verify(loteProductoService).movimientos(31, 0, 20, "fecha,asc");
     }
 
     @Test
     @WithMockUser(roles = "VENTAS")
     @DisplayName("El kardex de un lote inexistente o de materia prima responde 404")
     void movimientosDeLoteInexistenteResponde404() throws Exception {
-        when(loteProductoService.movimientos(9999, 0, 20))
+        when(loteProductoService.movimientos(9999, 0, 20, null))
                 .thenThrow(new RecursoNoEncontradoException("el lote de producto", 9999));
 
         mockMvc.perform(get("/api/v1/lotes-producto/9999/movimientos"))

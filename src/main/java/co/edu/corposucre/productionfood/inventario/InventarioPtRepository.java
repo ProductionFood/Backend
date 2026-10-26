@@ -118,18 +118,26 @@ public class InventarioPtRepository {
     }
 
     /**
-     * Devuelve una página del kardex de un lote, del movimiento más reciente al más antiguo.
+     * Devuelve una página del kardex de un lote, ordenada por la columna y la dirección recibidas.
      *
-     * <p>El orden es fijo por {@code id_movimiento DESC} y no acepta el orden del cliente: el
-     * kardex se lee siempre del último movimiento al primero y así aprovecha el índice
-     * {@code idx_mov_pt_lote}.
+     * <p>{@code columnaOrden} NUNCA es entrada directa del usuario: la resuelve el servicio contra
+     * su lista blanca antes de llamar aquí, de modo que concatenarla es seguro. Cualquier otro
+     * valor sería un error de programación del llamante y produciría un SQL inválido, no un orden
+     * silenciosamente distinto.
      *
-     * @param idLote lote cuyo kardex se consulta
-     * @param size   tamaño de página
-     * @param offset desplazamiento de la página; es {@code long} porque {@code page} no tiene cota
-     *               superior y {@code page * size} desbordaría un int
+     * <p>El {@code ORDER BY} añade siempre {@code m.id_movimiento DESC} como desempate: la columna
+     * pedida puede repetirse (dos entradas con la misma fecha o la misma cantidad) y sin un
+     * criterio único la paginación podría devolver la misma fila en dos páginas y omitir otra.
+     *
+     * @param idLote       lote cuyo kardex se consulta
+     * @param columnaOrden columna SQL de orden, ya resuelta por el servicio
+     * @param ascendente   true para ASC, false para DESC
+     * @param size         tamaño de página
+     * @param offset       desplazamiento de la página; es {@code long} porque {@code page} no tiene
+     *                     cota superior y {@code page * size} desbordaría un int
      */
-    public List<MovimientoResponse> buscarMovimientos(Integer idLote, int size, long offset) {
+    public List<MovimientoResponse> buscarMovimientos(Integer idLote, String columnaOrden,
+                                                      boolean ascendente, int size, long offset) {
         var params = new MapSqlParameterSource()
                 .addValue("idLote", idLote)
                 .addValue("tamano", size)
@@ -137,7 +145,8 @@ public class InventarioPtRepository {
 
         var sql = SELECT_MOVIMIENTOS
                 + " WHERE m.id_lote = :idLote"
-                + " ORDER BY m.id_movimiento DESC"
+                + " ORDER BY " + columnaOrden + (ascendente ? " ASC" : " DESC")
+                + ", m.id_movimiento DESC"
                 + " LIMIT :tamano OFFSET :desplazamiento";
 
         return jdbc.query(sql, params, new MovimientoPtRowMapper());
