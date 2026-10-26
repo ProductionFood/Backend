@@ -220,21 +220,29 @@ public class CompraRepository {
      * <p>Solo lectura: las escrituras sobre {@code detalle_compra} son de HU-14. La cantidad y el
      * precio se fijan a escala 2, la de sus columnas {@code decimal(10,2)}.
      *
+     * <p>El {@code INNER JOIN} con {@code materias_primas} trae el nombre junto a cada línea para
+     * que la recepción de la compra (HU-13 R-01) pueda describir cada movimiento generado sin una
+     * consulta adicional por materia prima; es seguro porque {@code id_materia_prima} es llave
+     * foránea {@code NOT NULL} y no descarta ninguna línea.
+     *
      * @param idCompra identificador de la compra
-     * @return líneas de detalle; vacía si la compra no tiene líneas
+     * @return líneas de detalle, con su materia prima y nombre; vacía si la compra no tiene líneas
      */
     public List<LineaDetalleCompra> listarDetalles(Integer idCompra) {
         var params = new MapSqlParameterSource().addValue("idCompra", idCompra);
         return jdbc.query("""
-                SELECT id_detalle_compra, id_materia_prima, cantidad, precio_unitario
-                FROM detalle_compra
-                WHERE id_compra = :idCompra
-                ORDER BY id_detalle_compra
+                SELECT d.id_detalle_compra, d.id_materia_prima, d.cantidad, d.precio_unitario,
+                       mp.nombre AS nombre_materia_prima
+                FROM detalle_compra d
+                JOIN materias_primas mp ON mp.id_materia_prima = d.id_materia_prima
+                WHERE d.id_compra = :idCompra
+                ORDER BY d.id_detalle_compra
                 """, params, (rs, rowNum) -> new LineaDetalleCompra(
                         rs.getObject("id_detalle_compra", Integer.class),
                         rs.getObject("id_materia_prima", Integer.class),
                         rs.getBigDecimal("cantidad"),
-                        rs.getBigDecimal("precio_unitario")));
+                        rs.getBigDecimal("precio_unitario"),
+                        rs.getString("nombre_materia_prima")));
     }
 
     /**

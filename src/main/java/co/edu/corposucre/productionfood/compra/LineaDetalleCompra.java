@@ -14,16 +14,23 @@ import java.math.RoundingMode;
  * {@code decimal(10,2)} de {@code detalle_compra}, así toda construcción del registro cumple el
  * dominio de la base.
  *
- * @param idDetalle      identificador de la línea
- * @param idMateriaPrima materia prima comprada
- * @param cantidad       cantidad comprada
- * @param precioUnitario precio de una unidad de esa materia prima en esta compra
+ * <p>{@code nombreMateriaPrima} es una proyección de solo lectura que llega del {@code JOIN} con
+ * {@code materias_primas} en {@link CompraRepository#listarDetalles(Integer)}; no existe como
+ * columna en {@code detalle_compra}. La recepción de la compra (HU-13 R-01) la necesita para
+ * describir cada movimiento generado sin consultar la materia prima por separado.
+ *
+ * @param idDetalle          identificador de la línea
+ * @param idMateriaPrima     materia prima comprada
+ * @param cantidad           cantidad comprada
+ * @param precioUnitario     precio de una unidad de esa materia prima en esta compra
+ * @param nombreMateriaPrima nombre de la materia prima comprada, traído del {@code JOIN}
  */
 public record LineaDetalleCompra(
         Integer idDetalle,
         Integer idMateriaPrima,
         BigDecimal cantidad,
-        BigDecimal precioUnitario) {
+        BigDecimal precioUnitario,
+        String nombreMateriaPrima) {
 
     public LineaDetalleCompra {
         cantidad = cantidad == null ? null : cantidad.setScale(2, RoundingMode.HALF_UP);
