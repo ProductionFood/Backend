@@ -404,7 +404,9 @@ debe manejar los dos caminos.
 | Producto sin receta en `/productos/{id}/receta` | `404`; no es un error de la petición |
 | Receta desactivada | Se sigue leyendo con `activo: false`; el detalle no se borra |
 | `cantidad: 0.005` | Se guarda y devuelve `0.005` (R-06), no `0.01` |
-| `cantidad` con más de 3 decimales | Se redondea a escala 3 con `HALF_UP` antes de guardar |
+| `cantidad` con más de 3 decimales | Se redondea a escala 3 con `HALF_UP` (`0.0005` → `0.001`) antes de guardar |
+| `cantidad` que redondea a `0.000` | `400 VALIDACION_FALLIDA`: no se puede guardar una cantidad efectiva de cero |
+| `cantidad` ≥ `10 000 000` | `400 VALIDACION_FALLIDA`: no cabe en `decimal(10,3)` |
 | `cantidadProducir: 0` | `400 CANTIDAD_PRODUCIR_INVALIDA` (sin `fieldErrors`) |
 | `sort=activo` | `400 CAMPO_ORDEN_INVALIDO`; el estado se filtra con `activo` |
 | `DELETE /recetas/{id}` | `405 METODO_NO_PERMITIDO` |
