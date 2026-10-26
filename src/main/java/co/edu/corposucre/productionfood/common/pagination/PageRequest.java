@@ -20,15 +20,21 @@ public record PageRequest(int page, int size, String propiedad, boolean ascenden
                 "El parámetro 'size' debe estar entre 1 y 100.");
         }
 
-        var partes = (sort == null || sort.isBlank() ? porDefecto : sort).split(",");
+        // split con límite -1: sin él Java descarta las partes vacías finales y «fecha,»
+        // llegaría como un campo solo, ocultando una dirección mal formada.
+        var partes = (sort == null || sort.isBlank() ? porDefecto : sort).split(",", -1);
         var campo = partes[0].trim();
         var propiedad = camposOrden.get(campo);
         if (propiedad == null) {
             throw new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
                 "El campo de ordenamiento '" + campo + "' no es válido.");
         }
+        if (partes.length > 2) {
+            throw new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
+                "El parámetro 'sort' solo admite 'campo' o 'campo,asc|desc'.");
+        }
         var ascendente = true;
-        if (partes.length >= 2) {
+        if (partes.length == 2) {
             var direccion = partes[1].trim();
             if (!"asc".equalsIgnoreCase(direccion) && !"desc".equalsIgnoreCase(direccion)) {
                 throw new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
