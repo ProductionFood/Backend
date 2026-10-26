@@ -19,6 +19,7 @@ quien consume, complemento de `../../../PFDocs/00-base/04-CONTRATO-API.md`.
 | [HU-09 — Lotes de materia prima](HU-09-lotes-materia-prima.md) | Lotes (listado con filtros, detalle y alta manual o desde compra) | Backend entregado 2026-10-23 · frontend pendiente |
 | [HU-10 — Consulta de inventario](HU-10-consulta-inventario.md) | Inventario de materia prima (listado, detalle y kardex) | Backend entregado 2026-10-25 · frontend pendiente |
 | [HU-11 — Gestión de productos](HU-11-productos.md) | Productos (catálogo, alta, edición y estado) | Backend entregado 2026-10-23 |
+| [HU-12 — Gestión de recetas](HU-12-gestion-recetas.md) | Recetas (cabecera, ingredientes, costos y estado) | Backend verificado en caliente 2026-10-25 · frontend pendiente |
 
 ## Qué debe tener un manual
 

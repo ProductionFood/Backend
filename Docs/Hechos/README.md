@@ -67,6 +67,7 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-09 | Lotes de materia prima | 2026-10-23 · [`HU-09-lotes-materia-prima.md`](HU-09-lotes-materia-prima.md) |
 | HU-10 | Consulta de inventario de materia prima | 2026-10-25 · [`HU-10-consulta-inventario.md`](HU-10-consulta-inventario.md) |
 | HU-11 | Gestión de productos | 2026-10-23 · [`HU-11-productos.md`](HU-11-productos.md) |
+| HU-12 | Gestión de recetas | 2026-10-25 · [`HU-12-gestion-recetas.md`](HU-12-gestion-recetas.md) |
 
 > HU-09 quedó verificada en caliente contra MySQL el 2026-10-23 (CP-01…CP-20 y SEC-01…05).
 > El consumo desde el frontend sigue pendiente, igual que en las HUs anteriores.
