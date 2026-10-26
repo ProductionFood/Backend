@@ -73,6 +73,25 @@ class PageRequestTest {
     }
 
     @Test
+    @DisplayName("Dirección fuera de asc/desc responde 400 CAMPO_ORDEN_INVALIDO")
+    void direccionFueraDeAscDescResponde400() {
+        var ex = assertThrows(ParametroInvalidoException.class,
+            () -> of(0, 20, "nombre,xyz"));
+
+        assertThat(ex.getCodigo()).isEqualTo("CAMPO_ORDEN_INVALIDO");
+        assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(ex.getMessage()).contains("xyz");
+    }
+
+    @Test
+    @DisplayName("La dirección admite mayúsculas: nombre,ASC y nombre,DESC siguen valiendo")
+    void direccionEnMayusculasEsValida() {
+        assertThat(of(0, 20, "nombre,ASC").ascendente()).isTrue();
+        assertThat(of(0, 20, "nombre,DESC").ascendente()).isFalse();
+        assertThat(of(0, 20, "nombre").ascendente()).isTrue();
+    }
+
+    @Test
     @DisplayName("size=0 responde 400 PARAMETRO_INVALIDO")
     void sizeCeroResponde400() {
         var ex = assertThrows(ParametroInvalidoException.class,

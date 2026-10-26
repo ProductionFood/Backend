@@ -118,12 +118,14 @@ public class CompraController {
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN','COMPRAS')")
     @Operation(summary = "Registrar una compra",
-               description = "Crea la compra siempre en estado PENDIENTE: el estado no se elige "
-                        + "en el alta, porque RECIBIDA y CANCELADA se alcanzan solo por "
-                        + "transición (R-02). El proveedor debe existir (CA-01) y estar activo "
+               description = "El estado es obligatorio y solo admite PENDIENTE: la compra nace "
+                        + "en ese estado y RECIBIDA y CANCELADA se alcanzan solo por transición "
+                        + "(R-02), así que un estado canónico distinto de PENDIENTE responde 400 "
+                        + "VALIDACION_FALLIDA. El proveedor debe existir (CA-01) y estar activo "
                         + "(CA-02); una compra con un proveedor inactivo responde 409 "
-                        + "PROVEEDOR_INACTIVO. La fecha es opcional (hoy si se omite) y no puede "
-                        + "ser futura (CA-03, FECHA_FUTURA). Los totales nacen en cero: se "
+                        + "PROVEEDOR_INACTIVO. La fecha es opcional (hoy si se omite; un null "
+                        + "explícito responde 400 VALIDACION_FALLIDA en el campo fecha) y no "
+                        + "puede ser futura (CA-03, FECHA_FUTURA). Los totales nacen en cero: se "
                         + "derivan del detalle, que agrega HU-14. Devuelve 201 con la cabecera "
                         + "Location apuntando a la compra creada.")
     @ApiResponses({

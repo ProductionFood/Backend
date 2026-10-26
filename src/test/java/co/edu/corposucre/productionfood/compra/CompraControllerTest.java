@@ -1,5 +1,6 @@
 package co.edu.corposucre.productionfood.compra;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
@@ -19,6 +20,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -134,12 +136,56 @@ class CompraControllerTest {
     void crearSinIdProveedorResponde400() throws Exception {
         mockMvc.perform(post("/api/v1/compras")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"fecha\":\"2026-09-18\"}"))
+                        .content("{\"fecha\":\"2026-09-18\",\"estado\":\"PENDIENTE\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
                 .andExpect(jsonPath("$.fieldErrors[0].field").value("idProveedor"));
 
         verify(compraService, never()).crear(any());
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("Sin estado responde 400 VALIDACION_FALLIDA en el campo estado")
+    void crearSinEstadoResponde400() throws Exception {
+        mockMvc.perform(post("/api/v1/compras")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idProveedor\":1,\"fecha\":\"2026-09-18\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("estado"));
+
+        verify(compraService, never()).crear(any());
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("Un null explícito en fecha responde 400 VALIDACION_FALLIDA en el campo fecha")
+    void crearConFechaNullResponde400() throws Exception {
+        mockMvc.perform(post("/api/v1/compras")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idProveedor\":1,\"fecha\":null,\"estado\":\"PENDIENTE\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDACION_FALLIDA"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("fecha"));
+
+        verify(compraService, never()).crear(any());
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("CP-04: omitir fecha llega al servicio como null para que registre la de hoy")
+    void crearSinFechaPasaLaOmisionAlServicio() throws Exception {
+        when(compraService.crear(any(CrearCompraRequest.class))).thenReturn(compra(42));
+
+        mockMvc.perform(post("/api/v1/compras")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idProveedor\":1,\"estado\":\"PENDIENTE\"}"))
+                .andExpect(status().isCreated());
+
+        var captor = ArgumentCaptor.forClass(CrearCompraRequest.class);
+        verify(compraService).crear(captor.capture());
+        assertThat(captor.getValue().fecha()).isNull();
     }
 
     @Test

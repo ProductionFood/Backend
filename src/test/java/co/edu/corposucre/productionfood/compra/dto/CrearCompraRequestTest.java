@@ -51,8 +51,9 @@ class CrearCompraRequestTest {
     @Test
     @DisplayName("La fecha es opcional: si se omite, el servicio usará hoy (CP-04)")
     void fechaOpcional() {
-        var sinFecha = new CrearCompraRequest(5, null, null);
-        var conFecha = new CrearCompraRequest(5, LocalDate.of(2026, 10, 20), null);
+        var sinFecha = new CrearCompraRequest(5, null, EstadoCompra.PENDIENTE);
+        var conFecha = new CrearCompraRequest(5, LocalDate.of(2026, 10, 20),
+                EstadoCompra.PENDIENTE);
 
         assertThat(mensajesDe("fecha", sinFecha)).isEmpty();
         assertThat(validator.validate(sinFecha)).isEmpty();
@@ -60,14 +61,22 @@ class CrearCompraRequestTest {
     }
 
     @Test
-    @DisplayName("El estado es opcional: si se omite, la compra nace PENDIENTE")
-    void estadoOpcional() {
+    @DisplayName("El estado es obligatorio: sin él hay una violación de campo")
+    void estadoObligatorio() {
         var sinEstado = new CrearCompraRequest(5, LocalDate.of(2026, 10, 20), null);
         var conEstado = new CrearCompraRequest(5, LocalDate.of(2026, 10, 20),
-                EstadoCompra.RECIBIDA);
+                EstadoCompra.PENDIENTE);
 
-        assertThat(mensajesDe("estado", sinEstado)).isEmpty();
-        assertThat(validator.validate(sinEstado)).isEmpty();
+        assertThat(mensajesDe("estado", sinEstado))
+                .containsExactly("El estado es obligatorio");
         assertThat(validator.validate(conEstado)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Un estado canónico no PENDIENTE pasa la validación de forma: lo rechaza el servicio")
+    void estadoCanonicoDistintoDePendienteNoViolaelDto() {
+        var req = new CrearCompraRequest(5, LocalDate.of(2026, 10, 20), EstadoCompra.RECIBIDA);
+
+        assertThat(validator.validate(req)).isEmpty();
     }
 }
