@@ -51,3 +51,4 @@ Docs/
 | HU-09 Lotes de materia prima | Entregada 2026-10-23 (backend verificado en caliente; frontend pendiente) |
 | HU-10 Consulta de inventario | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
 | HU-11 Gestión de productos | Entregada 2026-10-23 (backend; frontend pendiente) |
+| HU-12 Gestión de recetas | Backend implementado 2026-10-25 · verificación en caliente y frontend pendientes |
