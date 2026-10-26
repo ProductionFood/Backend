@@ -190,6 +190,21 @@ class RecetaServiceTest {
     }
 
     @Test
+    @DisplayName("Una cantidad con más de tres decimales se redondea HALF_UP: 0.0005 queda 0.001")
+    void cantidadConCuatroDecimalesSeRedondea() {
+        prepararAltaValida();
+        when(detalleRecetaRepository.listarPorReceta(2)).thenReturn(List.of());
+
+        servicio.crear(recetaRequest(new BigDecimal("30"),
+                List.of(new AgregarDetalleRequest(5, new BigDecimal("0.0005")))));
+
+        var captor = ArgumentCaptor.forClass(DetalleReceta.class);
+        verify(detalleRecetaRepository).insertar(captor.capture());
+        assertThat(captor.getValue().getCantidad()).isEqualByComparingTo("0.001");
+        assertThat(captor.getValue().getCantidad().scale()).isEqualTo(3);
+    }
+
+    @Test
     @DisplayName("Una carrera que viola el UNIQUE id_producto se traduce a 409 PRODUCTO_YA_TIENE_RECETA")
     void crearConDuplicateKeyResponde409ProductoYaTieneReceta() {
         prepararAltaValida();
