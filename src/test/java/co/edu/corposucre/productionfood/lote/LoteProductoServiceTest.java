@@ -3,6 +3,9 @@ package co.edu.corposucre.productionfood.lote;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -12,6 +15,8 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -20,14 +25,20 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.inventario.InventarioPtRepository;
 import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
+import co.edu.corposucre.productionfood.inventario.dto.MovimientoResponse;
+import co.edu.corposucre.productionfood.inventario.dto.OrigenResponse;
 import co.edu.corposucre.productionfood.lote.dto.CrearLoteProductoRequest;
 import co.edu.corposucre.productionfood.lote.dto.LoteProductoResponse;
 import co.edu.corposucre.productionfood.producto.ProductoRepository;
@@ -291,6 +302,231 @@ class LoteProductoServiceTest {
                 .hasMessage("No se encontró el lote de producto con id 14.");
     }
 
+    @Test
+    @DisplayName("CA-06: el listado por defecto no filtra y ordena por fecha de vencimiento")
+    void listarPorDefectoNoFiltraYOrdenaPorVencimiento() {
+        var hoy = LocalDate.now();
+        var f1 = fila(14, "PF-2026-0918", 3, hoy.minusDays(20), hoy.plusDays(4),
+                new BigDecimal("25.00"), new BigDecimal("10.00"), new BigDecimal("102.00"));
+        when(loteRepository.listarProductos(isNull(), isNull(), isNull(), isNull(),
+                any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(f1),
+                        org.springframework.data.domain.PageRequest.of(0, 20), 1));
+
+        var r = servicio.listar(null, null, null, null, 0, 20, null);
+
+        assertThat(r.content()).hasSize(1);
+        assertThat(r.content().get(0).idLote()).isEqualTo(14);
+        assertThat(r.content().get(0).codigoLote()).isEqualTo("PF-2026-0918");
+        assertThat(r.content().get(0).producto().nombre()).isEqualTo("Pan francés");
+        assertThat(r.content().get(0).cantidadIngresada()).isEqualByComparingTo("25.00");
+        // R-03: el listado no confunde el ingreso con el saldo.
+        assertThat(r.content().get(0).cantidadDisponible()).isEqualByComparingTo("10.00");
+        assertThat(r.content().get(0).stockTotalProducto()).isEqualByComparingTo("102.00");
+        assertThat(r.page()).isZero();
+        assertThat(r.size()).isEqualTo(20);
+        assertThat(r.totalElements()).isEqualTo(1);
+
+        var captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(loteRepository).listarProductos(isNull(), isNull(), isNull(), isNull(),
+                captor.capture());
+        assertThat(captor.getValue().getPageNumber()).isZero();
+        assertThat(captor.getValue().getPageSize()).isEqualTo(20);
+        assertThat(captor.getValue().getSort().getOrderFor("fechaVencimiento").isAscending())
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("CA-06: los filtros true llegan al repositorio tal cual")
+    void listarTraspasaLosFiltrosActivos() {
+        when(loteRepository.listarProductos(eq(3), eq(true), eq(7), eq(true),
+                any(Pageable.class))).thenReturn(Page.empty());
+
+        servicio.listar(3, true, 7, true, 0, 20, null);
+
+        verify(loteRepository).listarProductos(eq(3), eq(true), eq(7), eq(true),
+                any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("CA-06: soloVencidos=false y conStock=false se normalizan a null")
+    void listarNormalizaLosBooleanosFalseANull() {
+        when(loteRepository.listarProductos(isNull(), isNull(), isNull(), isNull(),
+                any(Pageable.class))).thenReturn(Page.empty());
+
+        servicio.listar(null, false, null, false, 0, 20, null);
+
+        // FALSE no significa «no filtrar» sino «exigir no vencido» o «exigir sin stock»: el
+        // repositorio solo debe recibir TRUE o null.
+        verify(loteRepository).listarProductos(isNull(), isNull(), isNull(), isNull(),
+                any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("CA-06: proximosAVencer menor que uno responde 400 PARAMETRO_INVALIDO")
+    void listarConProximosAVencerInvalidoResponde400() {
+        assertThatThrownBy(() -> servicio.listar(null, null, 0, null, 0, 20, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+
+        verify(loteRepository, never()).listarProductos(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("CA-06: un campo de orden fuera de la lista blanca responde 400")
+    void listarConOrdenInvalidoResponde400() {
+        assertThatThrownBy(() -> servicio.listar(null, null, null, null, 0, 20, "cantidad,desc"))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verify(loteRepository, never()).listarProductos(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("CA-06: el orden id,desc se traduce al alias idLote descendente")
+    void listarConOrdenIdDescUsaElAliasIdLote() {
+        when(loteRepository.listarProductos(isNull(), isNull(), isNull(), isNull(),
+                any(Pageable.class))).thenReturn(Page.empty());
+
+        servicio.listar(null, null, null, null, 0, 20, "id,desc");
+
+        var captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(loteRepository).listarProductos(isNull(), isNull(), isNull(), isNull(),
+                captor.capture());
+        assertThat(captor.getValue().getSort().getOrderFor("idLote").isDescending()).isTrue();
+    }
+
+    @Test
+    @DisplayName("CA-06: page negativa o size fuera de 1..100 responde 400")
+    void listarConPaginacionInvalidaResponde400() {
+        assertThatThrownBy(() -> servicio.listar(null, null, null, null, -1, 20, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+        assertThatThrownBy(() -> servicio.listar(null, null, null, null, 0, 0, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+        assertThatThrownBy(() -> servicio.listar(null, null, null, null, 0, 101, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+
+        verify(loteRepository, never()).listarProductos(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Obtener un lote de producto existente mapea todos los campos, incluido el stock")
+    void obtenerLoteProductoMapeaTodosLosCampos() {
+        var hoy = LocalDate.now();
+        when(loteRepository.buscarProductoPorId(14)).thenReturn(Optional.of(
+                fila(14, "PF-2026-0918", 3, hoy.minusDays(20), hoy.plusDays(4),
+                        new BigDecimal("25.00"), new BigDecimal("10.00"),
+                        new BigDecimal("102.00"))));
+
+        var r = servicio.obtener(14);
+
+        assertThat(r.idLote()).isEqualTo(14);
+        assertThat(r.codigoLote()).isEqualTo("PF-2026-0918");
+        assertThat(r.producto().idProducto()).isEqualTo(3);
+        assertThat(r.producto().nombre()).isEqualTo("Pan francés");
+        assertThat(r.producto().unidad()).isEqualTo("und");
+        assertThat(r.fechaProduccion()).isEqualTo(hoy.minusDays(20));
+        assertThat(r.fechaVencimiento()).isEqualTo(hoy.plusDays(4));
+        assertThat(r.cantidadIngresada()).isEqualByComparingTo("25.00");
+        assertThat(r.cantidadDisponible()).isEqualByComparingTo("10.00");
+        assertThat(r.diasParaVencer()).isEqualTo(4);
+        assertThat(r.vencido()).isFalse();
+        assertThat(r.stockTotalProducto()).isEqualByComparingTo("102.00");
+    }
+
+    @Test
+    @DisplayName("Obtener un lote de producto inexistente responde 404")
+    void obtenerLoteProductoInexistenteResponde404() {
+        when(loteRepository.buscarProductoPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> servicio.obtener(9999))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
+                .hasMessage("No se encontró el lote de producto con id 9999.");
+    }
+
+    @Test
+    @DisplayName("Kardex: devuelve la página de movimientos del lote y su total")
+    void movimientosDevuelveLaPaginaDelKardex() {
+        var movimiento = movimiento();
+        when(loteRepository.esLoteProducto(14)).thenReturn(true);
+        when(inventarioPtRepository.buscarMovimientos(14, 20, 0L))
+                .thenReturn(List.of(movimiento));
+        when(inventarioPtRepository.contarMovimientos(14)).thenReturn(1L);
+
+        var r = servicio.movimientos(14, 0, 20);
+
+        assertThat(r.content()).containsExactly(movimiento);
+        assertThat(r.page()).isZero();
+        assertThat(r.size()).isEqualTo(20);
+        assertThat(r.totalElements()).isEqualTo(1);
+        verify(inventarioPtRepository).buscarMovimientos(14, 20, 0L);
+        verify(inventarioPtRepository).contarMovimientos(14);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {9999, 5})
+    @DisplayName("Kardex: un lote inexistente o de materia prima responde 404 sin leer el kardex")
+    void movimientosDeLoteNoProductoResponde404(int id) {
+        when(loteRepository.esLoteProducto(id)).thenReturn(false);
+
+        assertThatThrownBy(() -> servicio.movimientos(id, 0, 20))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
+                .hasMessage("No se encontró el lote de producto con id " + id + ".");
+
+        verifyNoInteractions(inventarioPtRepository);
+    }
+
+    @Test
+    @DisplayName("Kardex: un lote existente sin movimientos devuelve una página vacía, no 404")
+    void movimientosDeLoteSinMovimientosDevuelvePaginaVacia() {
+        when(loteRepository.esLoteProducto(14)).thenReturn(true);
+        when(inventarioPtRepository.buscarMovimientos(14, 20, 0L)).thenReturn(List.of());
+        when(inventarioPtRepository.contarMovimientos(14)).thenReturn(0L);
+
+        var r = servicio.movimientos(14, 0, 20);
+
+        assertThat(r.content()).isEmpty();
+        assertThat(r.totalElements()).isZero();
+        assertThat(r.totalPages()).isZero();
+    }
+
+    @Test
+    @DisplayName("Kardex: page negativa o size fuera de 1..100 responde 400 sin consultar nada")
+    void movimientosConPaginacionInvalidaResponde400() {
+        assertThatThrownBy(() -> servicio.movimientos(14, -1, 20))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+        assertThatThrownBy(() -> servicio.movimientos(14, 0, 0))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+        assertThatThrownBy(() -> servicio.movimientos(14, 0, 101))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+
+        verify(loteRepository, never()).esLoteProducto(any());
+        verifyNoInteractions(inventarioPtRepository);
+    }
+
+    @Test
+    @DisplayName("Kardex: el offset se calcula en long con page * size")
+    void movimientosCalculaElOffsetEnLong() {
+        when(loteRepository.esLoteProducto(14)).thenReturn(true);
+        when(inventarioPtRepository.buscarMovimientos(eq(14), eq(20), anyLong()))
+                .thenReturn(List.of());
+        when(inventarioPtRepository.contarMovimientos(14)).thenReturn(0L);
+
+        servicio.movimientos(14, 3, 20);
+
+        var captor = ArgumentCaptor.forClass(Long.class);
+        verify(inventarioPtRepository).buscarMovimientos(eq(14), eq(20), captor.capture());
+        assertThat(captor.getValue()).isEqualTo(60L);
+    }
+
     private static Stream<String> codigosDuplicados() {
         return Stream.of("PF-2026-0918", "  pf-2026-0918  ");
     }
@@ -324,6 +560,17 @@ class LoteProductoServiceTest {
         return new FilaProducto(idLote, codigoLote, idProducto, "Pan francés", 2, "Unidad", "und",
                 fechaProduccion, fechaVencimiento, cantidadIngresada, cantidadDisponible,
                 stockTotalProducto);
+    }
+
+    private static MovimientoResponse movimiento() {
+        return new MovimientoResponse(
+                LocalDateTime.of(2026, 9, 18, 9, 12, 44),
+                "ENTRADA_PRODUCCION",
+                new BigDecimal("25.000"),
+                new BigDecimal("0.00"),
+                new BigDecimal("25.00"),
+                new OrigenResponse("lotes", 14),
+                "Sistema");
     }
 
     /**
