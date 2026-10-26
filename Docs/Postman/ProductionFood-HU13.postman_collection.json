@@ -1,0 +1,3111 @@
+{
+  "info": {
+    "_postman_id": "hu13-registro-compras",
+    "name": "ProductionFood - HU-13 Registro de compras",
+    "description": "Casos de la HU-13 (registro de compras): GET /api/v1/compras (paginado y filtros idProveedor, estado, fechaInicio y fechaFin; sort de lista blanca fecha, estado e id), GET /api/v1/compras/{id}, POST /api/v1/compras, PUT /api/v1/compras/{id} y PATCH /api/v1/compras/{id}/estado (recibir suma stock, cancelar no lo toca). No hay DELETE: responde 405. Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles, guarda los tokens y crea los proveedores; 'Compras (CP-01…CP-22)' ejecuta los casos funcionales; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren la autorización.\n\nHU-14 (detalle de la compra) todavía no existe: las compras con líneas se preparan con el SQL de abajo y sus ids se pegan a mano en las variables idCompraRecibir, idCompraCompras, idCompraRollback e idCompraCp19. CP-10, CP-16 y CP-19 se comprueban además en base de datos: cada uno describe el SQL en su descripción. SEC-03 y SEC-05 necesitan que rellenes a mano tokenExpirado y tokenInactivo.\n\nSQL de preparación (ajusta las materias primas a las que tengan fila en inventario):\n-- 1) Compra de 2 líneas para CP-09, CP-10, CP-11, CP-12 y CP-15\nINSERT INTO compras (id_proveedor, fecha, estado)\n  SELECT id_proveedor, CURDATE(), 'PENDIENTE' FROM proveedores\n  WHERE nombre LIKE 'QA-HU13 Activo%' ORDER BY id_proveedor DESC LIMIT 1;\nSET @c1 = LAST_INSERT_ID();\nINSERT INTO detalle_compra (id_compra, id_materia_prima, cantidad, precio_unitario)\n  VALUES (@c1, 5, 100.00, 5.00), (@c1, 6, 50.00, 3.00);\nSELECT @c1 AS idCompraRecibir;\n\n-- 2) Compra de 1 línea para CP-22 (recibe el rol COMPRAS)\nINSERT INTO compras (id_proveedor, fecha, estado)\n  SELECT id_proveedor, CURDATE(), 'PENDIENTE' FROM proveedores\n  WHERE nombre LIKE 'QA-HU13 Activo%' ORDER BY id_proveedor DESC LIMIT 1;\nSET @c2 = LAST_INSERT_ID();\nINSERT INTO detalle_compra (id_compra, id_materia_prima, cantidad, precio_unitario)\n  VALUES (@c2, 5, 10.00, 2.00);\nSELECT @c2 AS idCompraCompras;\n\n-- 3) Compra de 1 línea para CP-19 (proveedor desactivado después)\nINSERT INTO compras (id_compra, id_proveedor, fecha, estado)\n  VALUES (<idCompraCp19>, <idProveedorCp19>, CURDATE(), 'PENDIENTE');\nINSERT INTO detalle_compra (id_compra, id_materia_prima, cantidad, precio_unitario)\n  VALUES (<idCompraCp19>, 5, 20.00, 4.00);\n\n-- 4) Compra de 3 líneas para CP-16: la tercera desborda decimal(10,2)\nINSERT INTO compras (id_proveedor, fecha, estado)\n  SELECT id_proveedor, CURDATE(), 'PENDIENTE' FROM proveedores\n  WHERE nombre LIKE 'QA-HU13 Activo%' ORDER BY id_proveedor DESC LIMIT 1;\nSET @c4 = LAST_INSERT_ID();\nINSERT INTO detalle_compra (id_compra, id_materia_prima, cantidad, precio_unitario)\n  VALUES (@c4, 5, 10.00, 2.00), (@c4, 6, 5.00, 3.00),\n         (@c4, 7, 99999999.99, 99999999.99);\nSELECT @c4 AS idCompraRollback;",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Preparación",
+      "description": "Usuarios de los cinco roles (idRol: 1 ADMIN, 2 PRODUCCION, 3 COMPRAS, 4 VENTAS, 5 CONSULTA), sus tokens, y los proveedores: uno activo, uno que se desactiva para CP-03 y otro dedicado a CP-19. Ejecútala entera antes de los casos.",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al administrador del seed. Guarda tokenAdmin y token, genera un sufijo único para los usuarios de esta ejecución y fija las fechas de trabajo: hoy, hoy menos 10 días y hoy más 60 días.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const hoy = new Date();",
+                  "const iso = (d) => { const c = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return c.toISOString().slice(0, 10); };",
+                  "pm.collectionVariables.set('fechaHoy', iso(hoy));",
+                  "const pasada = new Date(hoy); pasada.setDate(pasada.getDate() - 10);",
+                  "pm.collectionVariables.set('fechaPasada', iso(pasada));",
+                  "const futura = new Date(hoy); futura.setDate(futura.getDate() + 60);",
+                  "pm.collectionVariables.set('fechaFutura', iso(futura));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenAdmin\", pm.response.json().token);",
+                  "pm.collectionVariables.set(\"token\", pm.response.json().token);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(pm.response.json().usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol Compras (idRol 3).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-13 Compras\",\n  \"correo\": \"hu13-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenCompras con el usuario de rol COMPRAS creado en el paso anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu13-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenCompras\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea el usuario de rol Produccion (idRol 2), que puede leer pero no escribir compras.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-13 Produccion\",\n  \"correo\": \"hu13-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenProduccion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu13-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenProduccion\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea el usuario de rol Ventas (idRol 4), que no participa en el módulo de compras.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-13 Ventas\",\n  \"correo\": \"hu13-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenVentas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu13-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenVentas\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea el usuario de rol Consulta (idRol 5), de solo lectura.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-13 Consulta\",\n  \"correo\": \"hu13-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenConsulta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu13-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenConsulta\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear proveedor activo → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/proveedores"
+            },
+            "description": "Crea el proveedor activo con el que se registran las compras de los casos positivos y guarda idProveedor.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA-HU13 Activo {{sufijo}}\",\n  \"correo\": \"hu13-activo-{{sufijo}}@productionfood.local\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idProveedor\", pm.response.json().idProveedor);",
+                  "pm.test(\"idProveedor asignado\", () => pm.expect(pm.response.json().idProveedor).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear proveedor inactivo → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/proveedores"
+            },
+            "description": "Crea el proveedor que después se desactiva, para CP-03 (alta con proveedor desactivado). Guarda idProveedorInactivo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA-HU13 Inactivo {{sufijo}}\",\n  \"correo\": \"hu13-inactivo-{{sufijo}}@productionfood.local\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idProveedorInactivo\", pm.response.json().idProveedor);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar el proveedor inactivo → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/proveedores/{{idProveedorInactivo}}/estado"
+            },
+            "description": "Desactiva el proveedor anterior para que CP-03 reciba 409 PROVEEDOR_INACTIVO. El alta siempre crea el proveedor activo, por eso la desactivación es un paso aparte.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"activo\": false}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear proveedor CP19 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/proveedores"
+            },
+            "description": "Proveedor dedicado a CP-19 (se desactiva después de registrar la compra). Guarda idProveedorCp19.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA-HU13 CP19 {{sufijo}}\",\n  \"correo\": \"hu13-cp19-{{sufijo}}@productionfood.local\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idProveedorCp19\", pm.response.json().idProveedor);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear compra para CP-19 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "Registra la compra de CP-19 con el proveedor dedicado, mientras sigue activo, y guarda idCompraCp19. Después hay que agregarle una línea con el SQL del bloque 3 de la colección: sin línea, la recepción responde 409 COMPRA_SIN_DETALLE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedorCp19}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idCompraCp19\", pm.response.json().idCompra);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar el proveedor CP19 → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/proveedores/{{idProveedorCp19}}/estado"
+            },
+            "description": "Desactiva el proveedor de la compra ya registrada. R-06: la compra sigue su curso y su recepción (CP-19) responde 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"activo\": false}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET compras → 200 (sanity del listado)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras?size=1"
+            },
+            "description": "Comprueba que el listado responde y que sus formas son las del contrato antes de ejecutar los casos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"content es array\", () => pm.expect(pm.response.json().content).to.be.an(\"array\"));",
+                  "pm.test(\"trae totales de la página\", () => pm.expect(pm.response.json()).to.have.all.keys(\"content\",\"page\",\"size\",\"totalElements\",\"totalPages\",\"first\",\"last\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Compras (CP-01…CP-22)",
+      "description": "Casos funcionales de tarea-qa.md. CP-01…CP-08 son de altas; CP-09…CP-16 prueban la recepción y la máquina de estados; CP-17 y CP-18 la edición; CP-19 el proveedor desactivado después; CP-20…CP-22 los roles del flujo. Las compras con líneas se crean con el SQL del bloque correspondiente de la descripción de la colección: HU-14 todavía no existe.",
+      "item": [
+        {
+          "name": "CP-01 Crear compra válida → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-01 (CA-01..CA-04): alta válida con proveedor activo, fecha de hoy y estado PENDIENTE. La compra nace sin líneas (HU-14 las agrega después), así que totalCompra es 0 y cantidadItems 0. Guarda idCompra.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set(\"idCompra\", j.idCompra);",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/compras/\"));",
+                  "pm.test(\"nace PENDIENTE\", () => pm.expect(j.estado).to.eql(\"PENDIENTE\"));",
+                  "pm.test(\"editable\", () => pm.expect(j.editable).to.eql(true));",
+                  "pm.test(\"proveedor embebido\", () => pm.expect(j.proveedor.idProveedor).to.eql(Number(pm.collectionVariables.get(\"idProveedor\"))));",
+                  "pm.test(\"total 0 sin líneas\", () => pm.expect(Number(j.totalCompra)).to.eql(0));",
+                  "pm.test(\"cantidadItems 0\", () => pm.expect(j.cantidadItems).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Proveedor inexistente → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-02 (CA-01): idProveedor que no existe. Debe responder 409 PROVEEDOR_INEXISTENTE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": 9999,\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PROVEEDOR_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"PROVEEDOR_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 Proveedor desactivado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-03 (CA-01): proveedor con estado inactivo, desactivado en la Preparación. Debe responder 409 PROVEEDOR_INACTIVO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedorInactivo}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PROVEEDOR_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"PROVEEDOR_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 Fecha omitida → 201 con la fecha de hoy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-04 (CA-02): el cuerpo no lleva la propiedad fecha. La compra se registra con la fecha de hoy y responde 201. Enviar fecha: null es distinto y responde 400, porque el null explícito es un error del cliente (lo cubre la validación del deserializador).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"fecha es hoy\", () => pm.expect(pm.response.json().fecha).to.eql(pm.collectionVariables.get(\"fechaHoy\")));",
+                  "pm.test(\"estado PENDIENTE\", () => pm.expect(pm.response.json().estado).to.eql(\"PENDIENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 Fecha futura → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-05 (CA-02, R-07): fecha posterior a hoy. Debe responder 400 FECHA_FUTURA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaFutura}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"FECHA_FUTURA\", () => pm.expect(pm.response.json().code).to.eql(\"FECHA_FUTURA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 Fecha pasada → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-06 (CA-02, R-07): las compras atrasadas se registran. Debe responder 201. Guarda idCompraCancelar, que CP-13 usará para cancelar desde PENDIENTE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idCompraCancelar\", pm.response.json().idCompra);",
+                  "pm.test(\"fecha pasada guardada\", () => pm.expect(pm.response.json().fecha).to.eql(pm.collectionVariables.get(\"fechaPasada\")));",
+                  "pm.test(\"PENDIENTE\", () => pm.expect(pm.response.json().estado).to.eql(\"PENDIENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Estado inválido (ENVIADA) → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-07 (CA-03): literal fuera de los valores canónicos. Falla en la deserialización del enum y responde 400 VALIDACION_FALLIDA señalando el campo estado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"ENVIADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"señala el campo estado\", () => pm.expect(pm.response.json().fieldErrors[0].field).to.eql(\"estado\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 Estado en minúsculas (pendiente) → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-08 (CA-03): el enum es sensible a mayúsculas; nunca se guarda en minúsculas. Debe responder 400 VALIDACION_FALLIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"pendiente\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"señala el campo estado\", () => pm.expect(pm.response.json().fieldErrors[0].field).to.eql(\"estado\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 Recibir una compra suma al inventario → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraRecibir}}/estado"
+            },
+            "description": "CP-09 (R-01): recibir una compra de 2 líneas. Antes de ejecutar, crea la compra con el SQL del bloque 1 de la colección y pega su id en idCompraRecibir; anota los saldos de inventario de las dos materias primas. La respuesta debe traer movimientosGenerados con una entrada por línea y los saldos anterior y posterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"RECIBIDA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraRecibir\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "if (!id) { console.log(\"CP-09: crea la compra con el SQL del bloque 1 y asigna idCompraRecibir\"); }",
+                  "var j = pm.response.json();",
+                  "pm.test(\"recibida\", () => { if (id) pm.expect(j.estado).to.eql(\"RECIBIDA\"); });",
+                  "pm.test(\"un movimiento por línea\", () => { if (id) pm.expect(j.movimientosGenerados.length).to.eql(2); });",
+                  "pm.test(\"saldos coherentes\", () => { if (id) j.movimientosGenerados.forEach(m => pm.expect(Number(m.saldoPosterior)).to.eql(Number(m.saldoAnterior) + Number(m.cantidad))); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 Se generan los movimientos de kardex → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraRecibir}}"
+            },
+            "description": "CP-10 (R-01): tras CP-09 la compra quedó RECIBIDA. Comprueba por SQL los movimientos generados: SELECT tipo_movimiento, cantidad, saldo_anterior, saldo_posterior, tabla_origen, id_origen FROM movimientos_inventario_mp WHERE tabla_origen = 'detalle_compra' ORDER BY id_movimiento DESC LIMIT 2; deben ser 2 filas ENTRADA_COMPRA con origen detalle_compra y el id de cada línea de la compra."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraRecibir\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "pm.test(\"estado RECIBIDA\", () => { if (id) pm.expect(pm.response.json().estado).to.eql(\"RECIBIDA\"); });",
+                  "pm.test(\"no editable\", () => { if (id) pm.expect(pm.response.json().editable).to.eql(false); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 RECIBIDA no vuelve a PENDIENTE → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraRecibir}}/estado"
+            },
+            "description": "CP-11 (R-02): RECIBIDA es terminal. Debe responder 409 TRANSICION_INVALIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"PENDIENTE\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraRecibir\");",
+                  "pm.test(\"→ 409\", () => { if (id) pm.response.to.have.status(409); });",
+                  "pm.test(\"TRANSICION_INVALIDA\", () => { if (id) pm.expect(pm.response.json().code).to.eql(\"TRANSICION_INVALIDA\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 No se puede cancelar una compra recibida → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraRecibir}}/estado"
+            },
+            "description": "CP-12 (R-05): cancelar no es una salida para una compra recibida. Debe responder 409 TRANSICION_INVALIDA y el inventario no cambia (la cancelación no devuelve stock).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraRecibir\");",
+                  "pm.test(\"→ 409\", () => { if (id) pm.response.to.have.status(409); });",
+                  "pm.test(\"TRANSICION_INVALIDA\", () => { if (id) pm.expect(pm.response.json().code).to.eql(\"TRANSICION_INVALIDA\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Cancelar desde PENDIENTE → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraCancelar}}/estado"
+            },
+            "description": "CP-13: cancelar una compra PENDIENTE. Debe responder 200 con estado CANCELADA y editable false. El inventario no cambia: verifícalo con el mismo SELECT de CP-09.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"CANCELADA\", () => pm.expect(j.estado).to.eql(\"CANCELADA\"));",
+                  "pm.test(\"no editable\", () => pm.expect(j.editable).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Recibir compra sin detalle → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "CP-14 (R-03): la compra de CP-01 no tiene líneas (HU-14 aún no existe). Recibirla debe responder 409 COMPRA_SIN_DETALLE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"RECIBIDA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"COMPRA_SIN_DETALLE\", () => pm.expect(pm.response.json().code).to.eql(\"COMPRA_SIN_DETALLE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 Recibir dos veces no suma dos veces → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraRecibir}}/estado"
+            },
+            "description": "CP-15 (crítico): segundo intento de recepción sobre la compra de CP-09, ya RECIBIDA. Debe responder 409 TRANSICION_INVALIDA y el inventario no puede cambiar. Comprueba por SQL que el número de movimientos con tabla_origen = 'detalle_compra' de esa compra sigue siendo el de sus líneas, nunca el doble.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"RECIBIDA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraRecibir\");",
+                  "pm.test(\"→ 409\", () => { if (id) pm.response.to.have.status(409); });",
+                  "pm.test(\"TRANSICION_INVALIDA\", () => { if (id) pm.expect(pm.response.json().code).to.eql(\"TRANSICION_INVALIDA\"); });",
+                  "var sql = \"SELECT COUNT(*) FROM movimientos_inventario_mp WHERE tabla_origen = 'detalle_compra' AND id_origen IN (SELECT id_detalle_compra FROM detalle_compra WHERE id_compra = \" + id + \");\";",
+                  "console.log(\"CP-15: verifica por SQL que el conteo es el número de líneas, nunca el doble -> \" + sql);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Transaccionalidad de la recepción (rollback) → PENDIENTE",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraRollback}}"
+            },
+            "description": "CP-16 (crítico, R-01): crea la compra de 3 líneas del bloque 4 del SQL de la colección (la tercera desborda decimal(10,2) o usa una materia prima sin fila en inventario) y pega su id en idCompraRollback. Anota los saldos de las tres materias primas, intenta recibirla con PATCH /compras/{{idCompraRollback}}/estado {\"estado\":\"RECIBIDA\"} y comprueba aquí que la compra sigue PENDIENTE y que los tres saldos son idénticos a los previos: ninguna línea entró."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraRollback\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "pm.test(\"sigue PENDIENTE: la recepción revirtió entera\", () => { if (id) pm.expect(pm.response.json().estado).to.eql(\"PENDIENTE\"); });",
+                  "console.log(\"CP-16: compara los saldos de las 3 materias primas con los anotados antes del intento; deben ser idénticos\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 Editar compra PENDIENTE → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "CP-17 (R-04): la compra de CP-01 sigue PENDIENTE (CP-14 no cambió su estado). Edita proveedor y fecha; debe responder 200 con la compra releída de la base.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"fecha nueva\", () => pm.expect(pm.response.json().fecha).to.eql(pm.collectionVariables.get(\"fechaPasada\")));",
+                  "pm.test(\"sigue PENDIENTE\", () => pm.expect(pm.response.json().estado).to.eql(\"PENDIENTE\"));",
+                  "pm.test(\"editable\", () => pm.expect(pm.response.json().editable).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 Editar compra RECIBIDA → 409",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraRecibir}}"
+            },
+            "description": "CP-18 (R-04): la cabecera de una compra RECIBIDA está congelada. Debe responder 409 COMPRA_NO_EDITABLE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraRecibir\");",
+                  "pm.test(\"→ 409\", () => { if (id) pm.response.to.have.status(409); });",
+                  "pm.test(\"COMPRA_NO_EDITABLE\", () => { if (id) pm.expect(pm.response.json().code).to.eql(\"COMPRA_NO_EDITABLE\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Compra de proveedor desactivado después → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraCp19}}/estado"
+            },
+            "description": "CP-19 (R-06): la compra se registró en la Preparación con el proveedor dedicado, que después se desactivó. Agrega su línea con el SQL del bloque 3 y ejecuta esta recepción: debe responder 200, porque la mercancía ya fue pedida y la validación de proveedor activo es solo del alta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"RECIBIDA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraCp19\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "pm.test(\"RECIBIDA pese al proveedor inactivo\", () => { if (id) pm.expect(pm.response.json().estado).to.eql(\"RECIBIDA\"); });",
+                  "if (!id) { console.log(\"CP-19: ejecuta antes la Preparación y el SQL del bloque 3\"); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-20 Rol VENTAS no puede crear compras → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "CP-20: alta con token de VENTAS. Debe responder 403 SIN_PERMISO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 Rol PRODUCCION no puede recibir → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "CP-21: recepción con token de PRODUCCION. La autorización se aplica antes que la regla de negocio, así que responde 403 SIN_PERMISO y no un 409.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"RECIBIDA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 Rol COMPRAS puede recibir → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraCompras}}/estado"
+            },
+            "description": "CP-22: recepción con token de COMPRAS sobre la compra de 1 línea del bloque 2 del SQL, asignada a idCompraCompras. Debe responder 200 y dejar la compra RECIBIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"RECIBIDA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var id = pm.collectionVariables.get(\"idCompraCompras\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "pm.test(\"RECIBIDA\", () => { if (id) pm.expect(pm.response.json().estado).to.eql(\"RECIBIDA\"); });",
+                  "pm.test(\"un movimiento\", () => { if (id) pm.expect(pm.response.json().movimientosGenerados.length).to.eql(1); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "description": "5 endpoints × 5 roles. ADMIN y COMPRAS escriben; PRODUCCION, CONSULTA y VENTAS dependen del endpoint. Las filas de PATCH dependen de las de POST: se cancelan las compras recién creadas.",
+      "item": [
+        {
+          "name": "ADMIN GET /compras → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras?size=1"
+            },
+            "description": "Matriz de roles: el listado es de lectura para ADMIN, COMPRAS, PRODUCCION y CONSULTA; VENTAS no participa en el módulo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /compras → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras?size=1"
+            },
+            "description": "Matriz de roles: el listado es de lectura para ADMIN, COMPRAS, PRODUCCION y CONSULTA; VENTAS no participa en el módulo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /compras → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras?size=1"
+            },
+            "description": "Matriz de roles: el listado es de lectura para ADMIN, COMPRAS, PRODUCCION y CONSULTA; VENTAS no participa en el módulo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /compras → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras?size=1"
+            },
+            "description": "Matriz de roles: el listado es de lectura para ADMIN, COMPRAS, PRODUCCION y CONSULTA; VENTAS no participa en el módulo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /compras → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras?size=1"
+            },
+            "description": "Matriz de roles: el listado es de lectura para ADMIN, COMPRAS, PRODUCCION y CONSULTA; VENTAS no participa en el módulo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN GET /compras/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: el detalle se lee con los mismos cuatro roles que el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /compras/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: el detalle se lee con los mismos cuatro roles que el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /compras/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: el detalle se lee con los mismos cuatro roles que el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /compras/{id} → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: el detalle se lee con los mismos cuatro roles que el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /compras/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: el detalle se lee con los mismos cuatro roles que el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /compras con ADMIN → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "Matriz de roles: solo ADMIN y COMPRAS pueden registrar compras. Las compras creadas con ADMIN y COMPRAS se guardan en idCompraMatriz1 e idCompraMatriz2 para las filas de PATCH.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idCompraMatriz1\", pm.response.json().idCompra);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /compras con COMPRAS → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "Matriz de roles: solo ADMIN y COMPRAS pueden registrar compras. Las compras creadas con ADMIN y COMPRAS se guardan en idCompraMatriz1 e idCompraMatriz2 para las filas de PATCH.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idCompraMatriz2\", pm.response.json().idCompra);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /compras con PRODUCCION → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "Matriz de roles: solo ADMIN y COMPRAS pueden registrar compras. Las compras creadas con ADMIN y COMPRAS se guardan en idCompraMatriz1 e idCompraMatriz2 para las filas de PATCH.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /compras con VENTAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "Matriz de roles: solo ADMIN y COMPRAS pueden registrar compras. Las compras creadas con ADMIN y COMPRAS se guardan en idCompraMatriz1 e idCompraMatriz2 para las filas de PATCH.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /compras con CONSULTA → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "Matriz de roles: solo ADMIN y COMPRAS pueden registrar compras. Las compras creadas con ADMIN y COMPRAS se guardan en idCompraMatriz1 e idCompraMatriz2 para las filas de PATCH.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /compras/{id} con ADMIN → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: editar la cabecera es de escritura. La compra {{idCompra}} está PENDIENTE tras CP-17, así que ADMIN y COMPRAS obtienen 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /compras/{id} con COMPRAS → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: editar la cabecera es de escritura. La compra {{idCompra}} está PENDIENTE tras CP-17, así que ADMIN y COMPRAS obtienen 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /compras/{id} con PRODUCCION → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: editar la cabecera es de escritura. La compra {{idCompra}} está PENDIENTE tras CP-17, así que ADMIN y COMPRAS obtienen 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /compras/{id} con VENTAS → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: editar la cabecera es de escritura. La compra {{idCompra}} está PENDIENTE tras CP-17, así que ADMIN y COMPRAS obtienen 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /compras/{id} con CONSULTA → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "Matriz de roles: editar la cabecera es de escritura. La compra {{idCompra}} está PENDIENTE tras CP-17, así que ADMIN y COMPRAS obtienen 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /compras/{id}/estado con ADMIN → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraMatriz1}}/estado"
+            },
+            "description": "Matriz de roles: recibir y cancelar son de escritura. Las filas de ADMIN y COMPRAS cancelan (no exige líneas) las compras creadas en las filas de POST; por eso deben ejecutarse después. PRODUCCION, VENTAS y CONSULTA reciben 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /compras/{id}/estado con COMPRAS → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompraMatriz2}}/estado"
+            },
+            "description": "Matriz de roles: recibir y cancelar son de escritura. Las filas de ADMIN y COMPRAS cancelan (no exige líneas) las compras creadas en las filas de POST; por eso deben ejecutarse después. PRODUCCION, VENTAS y CONSULTA reciben 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /compras/{id}/estado con PRODUCCION → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "Matriz de roles: recibir y cancelar son de escritura. Las filas de ADMIN y COMPRAS cancelan (no exige líneas) las compras creadas en las filas de POST; por eso deben ejecutarse después. PRODUCCION, VENTAS y CONSULTA reciben 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /compras/{id}/estado con VENTAS → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "Matriz de roles: recibir y cancelar son de escritura. Las filas de ADMIN y COMPRAS cancelan (no exige líneas) las compras creadas en las filas de POST; por eso deben ejecutarse después. PRODUCCION, VENTAS y CONSULTA reciben 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /compras/{id}/estado con CONSULTA → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "Matriz de roles: recibir y cancelar son de escritura. Las filas de ADMIN y COMPRAS cancelan (no exige líneas) las compras creadas en las filas de POST; por eso deben ejecutarse después. PRODUCCION, VENTAS y CONSULTA reciben 403.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "description": "Batería obligatoria en los 5 endpoints: sin token, token malformado, expirado, rol sin permiso y usuario inactivo. SEC-03 y SEC-05 necesitan tokenExpirado y tokenInactivo rellenados a mano.",
+      "item": [
+        {
+          "name": "SEC-01 GET /compras sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-01: sin cabecera Authorization. Debe responder 401 NO_AUTENTICADO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /compras token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}x"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-02: token con firma alterada. Debe responder 401 NO_AUTENTICADO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /compras token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-03: token expirado. Rellena a mano la variable tokenExpirado con un JWT caducado del mismo secreto."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /compras con rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-04 (crítico): token válido de un rol sin permiso en este endpoint. Debe responder 403 SIN_PERMISO; si devuelve 200 falta @EnableMethodSecurity y la autorización del sistema completo está desactivada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /compras con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-05: token válido de un usuario con estado = 0. Debe responder 403 USUARIO_INACTIVO. Rellena a mano la variable tokenInactivo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET /compras/{id} sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-01: sin cabecera Authorization. Debe responder 401 NO_AUTENTICADO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /compras/{id} token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}x"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-02: token con firma alterada. Debe responder 401 NO_AUTENTICADO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /compras/{id} token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-03: token expirado. Rellena a mano la variable tokenExpirado con un JWT caducado del mismo secreto."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /compras/{id} con rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-04 (crítico): token válido de un rol sin permiso en este endpoint. Debe responder 403 SIN_PERMISO; si devuelve 200 falta @EnableMethodSecurity y la autorización del sistema completo está desactivada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /compras/{id} con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-05: token válido de un usuario con estado = 0. Debe responder 403 USUARIO_INACTIVO. Rellena a mano la variable tokenInactivo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 POST /compras sin token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-01: sin cabecera Authorization. Debe responder 401 NO_AUTENTICADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 POST /compras token malformado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}x"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-02: token con firma alterada. Debe responder 401 NO_AUTENTICADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 POST /compras token expirado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-03: token expirado. Rellena a mano la variable tokenExpirado con un JWT caducado del mismo secreto.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 POST /compras con rol sin permiso → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-04 (crítico): token válido de un rol sin permiso en este endpoint. Debe responder 403 SIN_PERMISO; si devuelve 200 falta @EnableMethodSecurity y la autorización del sistema completo está desactivada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 POST /compras con usuario inactivo → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "description": "SEC-05: token válido de un usuario con estado = 0. Debe responder 403 USUARIO_INACTIVO. Rellena a mano la variable tokenInactivo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 PUT /compras/{id} sin token → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-01: sin cabecera Authorization. Debe responder 401 NO_AUTENTICADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 PUT /compras/{id} token malformado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}x"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-02: token con firma alterada. Debe responder 401 NO_AUTENTICADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 PUT /compras/{id} token expirado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-03: token expirado. Rellena a mano la variable tokenExpirado con un JWT caducado del mismo secreto.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 PUT /compras/{id} con rol sin permiso → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-04 (crítico): token válido de un rol sin permiso en este endpoint. Debe responder 403 SIN_PERMISO; si devuelve 200 falta @EnableMethodSecurity y la autorización del sistema completo está desactivada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 PUT /compras/{id} con usuario inactivo → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}"
+            },
+            "description": "SEC-05: token válido de un usuario con estado = 0. Debe responder 403 USUARIO_INACTIVO. Rellena a mano la variable tokenInactivo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": \"{{idProveedor}}\",\n  \"fecha\": \"{{fechaPasada}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 PATCH /compras/{id}/estado sin token → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "SEC-01: sin cabecera Authorization. Debe responder 401 NO_AUTENTICADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 PATCH /compras/{id}/estado token malformado → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}x"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "SEC-02: token con firma alterada. Debe responder 401 NO_AUTENTICADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 PATCH /compras/{id}/estado token expirado → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "SEC-03: token expirado. Rellena a mano la variable tokenExpirado con un JWT caducado del mismo secreto.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 PATCH /compras/{id}/estado con rol sin permiso → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "SEC-04 (crítico): token válido de un rol sin permiso en este endpoint. Debe responder 403 SIN_PERMISO; si devuelve 200 falta @EnableMethodSecurity y la autorización del sistema completo está desactivada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 PATCH /compras/{id}/estado con usuario inactivo → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "SEC-05: token válido de un usuario con estado = 0. Debe responder 403 USUARIO_INACTIVO. Rellena a mano la variable tokenInactivo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"estado\": \"CANCELADA\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "fechaHoy",
+      "value": ""
+    },
+    {
+      "key": "fechaPasada",
+      "value": ""
+    },
+    {
+      "key": "fechaFutura",
+      "value": ""
+    },
+    {
+      "key": "idProveedor",
+      "value": ""
+    },
+    {
+      "key": "idProveedorInactivo",
+      "value": ""
+    },
+    {
+      "key": "idProveedorCp19",
+      "value": ""
+    },
+    {
+      "key": "idCompra",
+      "value": ""
+    },
+    {
+      "key": "idCompraCancelar",
+      "value": ""
+    },
+    {
+      "key": "idCompraCp19",
+      "value": ""
+    },
+    {
+      "key": "idCompraMatriz1",
+      "value": ""
+    },
+    {
+      "key": "idCompraMatriz2",
+      "value": ""
+    },
+    {
+      "key": "idCompraRecibir",
+      "value": ""
+    },
+    {
+      "key": "idCompraCompras",
+      "value": ""
+    },
+    {
+      "key": "idCompraRollback",
+      "value": ""
+    }
+  ]
+}
