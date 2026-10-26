@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -183,6 +184,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Una fecha inválida responde 400 señalando el campo de fecha")
+    void cuerpoConFechaInvalidaResponde400ConElCampo() {
+        var resp = handler.cuerpoIlegible(
+                cuerpoIlegible("{\"fechaProduccion\":\"2026-13-40\"}", CuerpoConFecha.class), req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("VALIDACION_FALLIDA");
+        assertThat(resp.getBody().fieldErrors())
+                .containsExactly(new ErrorResponse.FieldError(
+                        "fechaProduccion", "El valor del campo no es válido."));
+    }
+
+    @Test
     @DisplayName("Un JSON truncado responde 400 sin campo identificable")
     void cuerpoTruncadoResponde400SinCampo() {
         var resp = handler.cuerpoIlegible(cuerpoIlegible("{\"cantidad\":"), req);
@@ -246,8 +261,12 @@ class GlobalExceptionHandlerTest {
      * que el manejador vea la misma causa y la misma ruta que en producción.
      */
     private static HttpMessageNotReadableException cuerpoIlegible(String json) {
+        return cuerpoIlegible(json, CuerpoDePrueba.class);
+    }
+
+    private static HttpMessageNotReadableException cuerpoIlegible(String json, Class<?> tipo) {
         try {
-            new ObjectMapper().readValue(json, CuerpoDePrueba.class);
+            new ObjectMapper().readValue(json, tipo);
         } catch (JacksonException e) {
             return new HttpMessageNotReadableException("JSON ilegible", e, null);
         }
@@ -259,5 +278,12 @@ class GlobalExceptionHandlerTest {
      * truncado, el de estructura.
      */
     private record CuerpoDePrueba(BigDecimal cantidad) {
+    }
+
+    /**
+     * Cuerpo con una fecha: un valor fuera de rango dispara un error de formato cuyo campo también
+     * debe señalarse.
+     */
+    private record CuerpoConFecha(LocalDate fechaProduccion) {
     }
 }

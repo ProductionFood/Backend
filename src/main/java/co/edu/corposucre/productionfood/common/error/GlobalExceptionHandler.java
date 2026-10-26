@@ -92,12 +92,19 @@ public class GlobalExceptionHandler {
     /**
      * Extrae el primer campo identificable de la ruta de Jackson, si la hay.
      *
-     * <p>Se mira la causa más específica porque la excepción de Spring solo envuelve el error del
-     * conversor; el nombre del campo únicamente aparece en el {@link JacksonException} original.
+     * <p>Se recorre la cadena de causas y no se usa la causa más específica: en un error de tipo
+     * de un {@code BigDecimal} la excepción de Jackson es la hoja, pero en una fecha inválida
+     * Jackson envuelve un {@code DateTimeParseException} y la hoja deja de ser
+     * {@link JacksonException}. La ruta del campo solo vive en la excepción de Jackson, así que
+     * hay que encontrarla en cualquier eslabón.
      */
     private static List<ErrorResponse.FieldError> camposDelCuerpoIlegible(
             HttpMessageNotReadableException ex) {
-        if (!(ex.getMostSpecificCause() instanceof JacksonException jackson)) {
+        Throwable causa = ex;
+        while (causa != null && !(causa instanceof JacksonException)) {
+            causa = causa.getCause();
+        }
+        if (!(causa instanceof JacksonException jackson)) {
             return List.of();
         }
         for (var referencia : jackson.getPath()) {
