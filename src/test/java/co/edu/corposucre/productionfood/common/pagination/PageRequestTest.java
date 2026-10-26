@@ -92,6 +92,26 @@ class PageRequestTest {
     }
 
     @Test
+    @DisplayName("Una dirección vacía tras la coma responde 400 CAMPO_ORDEN_INVALIDO")
+    void direccionVaciaResponde400() {
+        var ex = assertThrows(ParametroInvalidoException.class,
+            () -> of(0, 20, "nombre,"));
+
+        assertThat(ex.getCodigo()).isEqualTo("CAMPO_ORDEN_INVALIDO");
+        assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    @DisplayName("Más de dos partes responde 400 CAMPO_ORDEN_INVALIDO")
+    void masDeDosPartesResponde400() {
+        var ex = assertThrows(ParametroInvalidoException.class,
+            () -> of(0, 20, "nombre,asc,extra"));
+
+        assertThat(ex.getCodigo()).isEqualTo("CAMPO_ORDEN_INVALIDO");
+        assertThat(ex.getMessage()).contains("campo,asc|desc");
+    }
+
+    @Test
     @DisplayName("size=0 responde 400 PARAMETRO_INVALIDO")
     void sizeCeroResponde400() {
         var ex = assertThrows(ParametroInvalidoException.class,
