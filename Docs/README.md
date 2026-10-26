@@ -45,11 +45,12 @@ Docs/
 | HU-03 Inicio de sesión | Entregada 2026-10-12 |
 | HU-04 Bitácora de auditoría | Entregada 2026-10-12 |
 | HU-05 Gestión de clientes | Entregada 2026-10-20 |
-| HU-06 Gestión de proveedores | Entregada 2026-10-19 (backend; frontend y HU-13 pendientes) |
+| HU-06 Gestión de proveedores | Entregada 2026-10-19 (backend; frontend pendiente) |
 | HU-07 Unidades de medida | Entregada 2026-10-20 (backend; frontend pendiente) |
 | HU-08 Gestión de materias primas | Entregada 2026-10-22 (backend; frontend pendiente) |
 | HU-09 Lotes de materia prima | Entregada 2026-10-23 (backend verificado en caliente; frontend pendiente) |
 | HU-10 Consulta de inventario | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
 | HU-11 Gestión de productos | Entregada 2026-10-23 (backend; frontend pendiente) |
 | HU-12 Gestión de recetas | Backend verificado en caliente 2026-10-25 · frontend pendiente |
+| HU-13 Registro de compras | Entregada 2026-10-26 (backend verificado en caliente; frontend pendiente) |
 | HU-19 Lotes de producto terminado | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
