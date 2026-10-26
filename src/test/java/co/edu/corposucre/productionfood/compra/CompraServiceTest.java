@@ -3,6 +3,7 @@ package co.edu.corposucre.productionfood.compra;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +27,9 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.inventario.InventarioService;
+import co.edu.corposucre.productionfood.inventario.SaldosInventario;
+import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
 import co.edu.corposucre.productionfood.proveedor.Proveedor;
 import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
 
@@ -34,13 +39,15 @@ class CompraServiceTest {
 
     private CompraRepository compraRepository;
     private ProveedorRepository proveedorRepository;
+    private InventarioService inventarioService;
     private CompraService service;
 
     @BeforeEach
     void setUp() {
         compraRepository = mock(CompraRepository.class);
         proveedorRepository = mock(ProveedorRepository.class);
-        service = new CompraService(compraRepository, proveedorRepository);
+        inventarioService = mock(InventarioService.class);
+        service = new CompraService(compraRepository, proveedorRepository, inventarioService);
     }
 
     private void dadoProveedor(String nombre, boolean activo) {
@@ -312,5 +319,346 @@ class CompraServiceTest {
                 .hasMessage("No se encontró la compra con id 7.");
 
         verify(compraRepository).actualizar(7, ID_PROVEEDOR, hoy);
+    }
+
+    @Test
+    @DisplayName("listar pagina con los cuatro filtros, el orden resuelto y el total del contar")
+    void listarConFiltrosUsaElRepositorioYDevuelveLaPagina() {
+        var hoy = LocalDate.now();
+        var inicio = hoy.minusDays(10);
+        var fin = hoy.minusDays(1);
+        var compra = fila(7, "Harinas SA", hoy.minusDays(5), EstadoCompra.PENDIENTE,
+                new BigDecimal("150.00"), 2);
+        when(compraRepository.buscar(eq(ID_PROVEEDOR), eq(EstadoCompra.PENDIENTE), eq(inicio),
+                eq(fin), eq("c.fecha"), eq(false), eq(10), eq(20L)))
+                .thenReturn(List.of(compra));
+        when(compraRepository.contar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin))
+                .thenReturn(21L);
+
+        var r = service.listar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin, 2, 10, null);
+
+        assertThat(r.content()).hasSize(1);
+        assertThat(r.content().get(0).idCompra()).isEqualTo(7);
+        assertThat(r.content().get(0).estado()).isEqualTo("PENDIENTE");
+        assertThat(r.page()).isEqualTo(2);
+        assertThat(r.size()).isEqualTo(10);
+        assertThat(r.totalElements()).isEqualTo(21L);
+        // Por defecto "fecha,desc": page 2 con size 10 es offset 20, calculado en long.
+        verify(compraRepository).buscar(eq(ID_PROVEEDOR), eq(EstadoCompra.PENDIENTE), eq(inicio),
+                eq(fin), eq("c.fecha"), eq(false), eq(10), eq(20L));
+        verify(compraRepository).contar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin);
+    }
+
+    @Test
+    @DisplayName("listar sin filtros ni sort usa el orden por defecto fecha,desc")
+    void listarSinFiltrosUsaElOrdenPorDefecto() {
+        when(compraRepository.buscar(any(), any(), any(), any(), eq("c.fecha"), eq(false),
+                eq(20), eq(0L))).thenReturn(List.of());
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(0L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null);
+
+        assertThat(r.content()).isEmpty();
+        assertThat(r.totalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("RANGO_FECHAS_INVALIDO: listar con el rango invertido no consulta la base")
+    void listarConRangoInvertidoResponde400() {
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("listar con un campo de orden no listado responde 400 CAMPO_ORDEN_INVALIDO")
+    void listarConCampoDeOrdenNoListadoResponde400() {
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "proveedor"))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("listar con size mayor a 100 responde 400 PARAMETRO_INVALIDO")
+    void listarConSizeGrandeResponde400() {
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 101, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("obtener devuelve la compra con su proveedor y sus totales")
+    void obtenerDevuelveLaCompra() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now().minusDays(5), EstadoCompra.RECIBIDA,
+                        new BigDecimal("150.00"), 2)));
+
+        var r = service.obtener(7);
+
+        assertThat(r.idCompra()).isEqualTo(7);
+        assertThat(r.proveedor().nombre()).isEqualTo("Harinas SA");
+        assertThat(r.estado()).isEqualTo("RECIBIDA");
+        assertThat(r.totalCompra()).isEqualByComparingTo("150.00");
+        assertThat(r.cantidadItems()).isEqualTo(2);
+        assertThat(r.editable()).isFalse();
+    }
+
+    @Test
+    @DisplayName("obtener una compra inexistente responde 404")
+    void obtenerInexistenteResponde404() {
+        when(compraRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.obtener(9999))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la compra con id 9999.");
+    }
+
+    @Test
+    @DisplayName("esEditable solo es true para una compra PENDIENTE existente")
+    void esEditableSoloParaPendiente() {
+        when(compraRepository.buscarPorId(1)).thenReturn(Optional.of(
+                fila(1, "A", LocalDate.now(), EstadoCompra.PENDIENTE, BigDecimal.ZERO, 0)));
+        when(compraRepository.buscarPorId(2)).thenReturn(Optional.of(
+                fila(2, "A", LocalDate.now(), EstadoCompra.RECIBIDA, BigDecimal.ZERO, 0)));
+        when(compraRepository.buscarPorId(3)).thenReturn(Optional.of(
+                fila(3, "A", LocalDate.now(), EstadoCompra.CANCELADA, BigDecimal.ZERO, 0)));
+        when(compraRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThat(service.esEditable(1)).isTrue();
+        assertThat(service.esEditable(2)).isFalse();
+        assertThat(service.esEditable(3)).isFalse();
+        // Una compra inexistente no es editable y no lanza: HU-14 consulta esto antes de actuar.
+        assertThat(service.esEditable(9999)).isFalse();
+    }
+
+    @Test
+    @DisplayName("R-01/CP-09: recibir suma cada línea por InventarioService y cambia el estado")
+    void recibirSumaCadaLineaYDevuelveLosMovimientos() {
+        var hoy = LocalDate.now();
+        cuandoRecibirEsPosible();
+        when(inventarioService.registrarEntrada(5, new BigDecimal("100.00"),
+                TipoMovimiento.ENTRADA_COMPRA, "detalle_compra", 1, "Compra #7"))
+                .thenReturn(new SaldosInventario(new BigDecimal("12.50"),
+                        new BigDecimal("112.50")));
+        when(inventarioService.registrarEntrada(6, new BigDecimal("50.00"),
+                TipoMovimiento.ENTRADA_COMPRA, "detalle_compra", 2, "Compra #7"))
+                .thenReturn(new SaldosInventario(new BigDecimal("45.00"),
+                        new BigDecimal("95.00")));
+
+        var r = service.recibir(7);
+
+        // R-01: las entradas pasan por InventarioService, nunca un UPDATE directo.
+        verify(inventarioService).registrarEntrada(5, new BigDecimal("100.00"),
+                TipoMovimiento.ENTRADA_COMPRA, "detalle_compra", 1, "Compra #7");
+        verify(inventarioService).registrarEntrada(6, new BigDecimal("50.00"),
+                TipoMovimiento.ENTRADA_COMPRA, "detalle_compra", 2, "Compra #7");
+        verify(compraRepository).cambiarEstado(7, EstadoCompra.RECIBIDA);
+
+        assertThat(r.idCompra()).isEqualTo(7);
+        assertThat(r.estado()).isEqualTo("RECIBIDA");
+        assertThat(r.totalCompra()).isEqualByComparingTo("1400.00");
+        assertThat(r.movimientosGenerados()).hasSize(2);
+        assertThat(r.movimientosGenerados().get(0).materiaPrima()).isEqualTo("Harina de trigo");
+        assertThat(r.movimientosGenerados().get(0).cantidad()).isEqualByComparingTo("100.00");
+        assertThat(r.movimientosGenerados().get(0).saldoAnterior()).isEqualByComparingTo("12.50");
+        assertThat(r.movimientosGenerados().get(0).saldoPosterior()).isEqualByComparingTo("112.50");
+        assertThat(r.movimientosGenerados().get(1).materiaPrima()).isEqualTo("Azúcar");
+        assertThat(r.movimientosGenerados().get(1).saldoAnterior()).isEqualByComparingTo("45.00");
+        assertThat(r.movimientosGenerados().get(1).saldoPosterior()).isEqualByComparingTo("95.00");
+    }
+
+    @Test
+    @DisplayName("CP-14/R-03: recibir sin detalle responde 409 sin tocar inventario ni estado")
+    void recibirSinDetalleNoTocaInventarioNiEstado() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.PENDIENTE,
+                        new BigDecimal("1400.00"), 2)));
+        when(compraRepository.contarDetalles(7)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.recibir(7))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "COMPRA_SIN_DETALLE");
+
+        verifyNoInteractions(inventarioService);
+        verify(compraRepository, never()).cambiarEstado(any(), any());
+    }
+
+    @Test
+    @DisplayName("CP-15: recibir una compra ya RECIBIDA responde TRANSICION_INVALIDA sin inventario")
+    void recibirDesdeRecibidaResponde409SinInventario() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.RECIBIDA,
+                        new BigDecimal("1400.00"), 2)));
+
+        assertThatThrownBy(() -> service.recibir(7))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        // CP-15: la validación va antes del inventario; una doble recepción no dobla el stock.
+        verifyNoInteractions(inventarioService);
+        verify(compraRepository, never()).cambiarEstado(any(), any());
+    }
+
+    @Test
+    @DisplayName("recibir una compra CANCELADA responde TRANSICION_INVALIDA sin inventario")
+    void recibirDesdeCanceladaResponde409() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.CANCELADA,
+                        new BigDecimal("1400.00"), 2)));
+
+        assertThatThrownBy(() -> service.recibir(7))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        verifyNoInteractions(inventarioService);
+    }
+
+    @Test
+    @DisplayName("CP-16: si una línea falla la excepción se propaga y no se cambia el estado")
+    void recibirConFalloEnUnaLineaSePropagaSinCambiarElEstado() {
+        cuandoRecibirEsPosible();
+        when(inventarioService.registrarEntrada(eq(5), any(), any(), any(), any(), any()))
+                .thenReturn(new SaldosInventario(new BigDecimal("12.50"),
+                        new BigDecimal("112.50")));
+        when(inventarioService.registrarEntrada(eq(6), any(), any(), any(), any(), any()))
+                .thenThrow(new ConflictoNegocioException("FALLO_INVENTARIO",
+                        "No se pudo registrar la entrada."));
+
+        assertThatThrownBy(() -> service.recibir(7))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "FALLO_INVENTARIO");
+
+        // El rollback lo da la transacción; el servicio no oculta el fallo ni cambia el estado.
+        verify(compraRepository, never()).cambiarEstado(any(), any());
+    }
+
+    @Test
+    @DisplayName("recibir una compra inexistente responde 404 sin tocar inventario")
+    void recibirInexistenteResponde404() {
+        when(compraRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.recibir(9999))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la compra con id 9999.");
+
+        verifyNoInteractions(inventarioService);
+    }
+
+    @Test
+    @DisplayName("CP-13: cancelar desde PENDIENTE cambia el estado y no toca el inventario")
+    void cancelarPendienteCambiaElEstadoSinInventario() {
+        when(compraRepository.buscarPorId(7)).thenReturn(
+                Optional.of(fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.PENDIENTE,
+                        new BigDecimal("150.00"), 2)),
+                Optional.of(fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.CANCELADA,
+                        new BigDecimal("150.00"), 2)));
+
+        var r = service.cancelar(7);
+
+        verify(compraRepository).cambiarEstado(7, EstadoCompra.CANCELADA);
+        // CP-13: cancelar no cambia el stock: nunca suma ni resta inventario.
+        verifyNoInteractions(inventarioService);
+        assertThat(r.idCompra()).isEqualTo(7);
+        assertThat(r.estado()).isEqualTo("CANCELADA");
+    }
+
+    @Test
+    @DisplayName("CP-12: cancelar una compra RECIBIDA responde TRANSICION_INVALIDA")
+    void cancelarDesdeRecibidaResponde409() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.RECIBIDA,
+                        new BigDecimal("150.00"), 2)));
+
+        assertThatThrownBy(() -> service.cancelar(7))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        verify(compraRepository, never()).cambiarEstado(any(), any());
+        verifyNoInteractions(inventarioService);
+    }
+
+    @Test
+    @DisplayName("cancelar una compra ya CANCELADA responde TRANSICION_INVALIDA")
+    void cancelarDesdeCanceladaResponde409() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.CANCELADA,
+                        new BigDecimal("150.00"), 2)));
+
+        assertThatThrownBy(() -> service.cancelar(7))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        verify(compraRepository, never()).cambiarEstado(any(), any());
+    }
+
+    @Test
+    @DisplayName("transicionInvalida devuelve la excepción con el estado actual y los permitidos")
+    void transicionInvalidaDevuelveLaExcepcionConstruida() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.RECIBIDA,
+                        BigDecimal.ZERO, 0)));
+
+        var excepcion = service.transicionInvalida(7, EstadoCompra.PENDIENTE);
+
+        assertThat(excepcion).isInstanceOf(ConflictoNegocioException.class);
+        assertThat(excepcion.getCodigo()).isEqualTo("TRANSICION_INVALIDA");
+        // Contrato §7: menciona el estado actual, el destino y las transiciones permitidas.
+        assertThat(excepcion.getMessage())
+                .contains("RECIBIDA", "PENDIENTE")
+                .contains("no hay transiciones disponibles");
+    }
+
+    @Test
+    @DisplayName("transicionInvalida desde un estado con destinos lista los permitidos")
+    void transicionInvalidaDesdeEstadoNoTerminalListaLosPermitidos() {
+        when(compraRepository.buscarPorId(7)).thenReturn(Optional.of(
+                fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.PENDIENTE,
+                        BigDecimal.ZERO, 0)));
+
+        var excepcion = service.transicionInvalida(7, EstadoCompra.PENDIENTE);
+
+        assertThat(excepcion.getCodigo()).isEqualTo("TRANSICION_INVALIDA");
+        assertThat(excepcion.getMessage())
+                .contains("las transiciones disponibles son")
+                .contains("CANCELADA", "RECIBIDA");
+    }
+
+    @Test
+    @DisplayName("transicionInvalida de una compra inexistente responde 404")
+    void transicionInvalidaInexistenteResponde404() {
+        when(compraRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.transicionInvalida(9999, EstadoCompra.RECIBIDA))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró la compra con id 9999.");
+    }
+
+    /**
+     * Deja una compra 7 PENDIENTE con dos líneas de detalle, lista para recibir.
+     *
+     * <p>La primera {@code buscarPorId} es la carga inicial y la segunda la relectura posterior a
+     * {@code cambiarEstado}, con la que el servicio monta el total de la respuesta.
+     */
+    private void cuandoRecibirEsPosible() {
+        var hoy = LocalDate.now();
+        when(compraRepository.buscarPorId(7)).thenReturn(
+                Optional.of(fila(7, "Harinas SA", hoy, EstadoCompra.PENDIENTE,
+                        new BigDecimal("1400.00"), 2)),
+                Optional.of(fila(7, "Harinas SA", hoy, EstadoCompra.RECIBIDA,
+                        new BigDecimal("1400.00"), 2)));
+        when(compraRepository.contarDetalles(7)).thenReturn(2);
+        when(compraRepository.listarDetalles(7)).thenReturn(List.of(
+                new LineaDetalleCompra(1, 5, new BigDecimal("100.00"),
+                        new BigDecimal("12.00"), "Harina de trigo"),
+                new LineaDetalleCompra(2, 6, new BigDecimal("50.00"),
+                        new BigDecimal("8.00"), "Azúcar")));
     }
 }
