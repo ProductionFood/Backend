@@ -27,8 +27,16 @@ public record PageRequest(int page, int size, String propiedad, boolean ascenden
             throw new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
                 "El campo de ordenamiento '" + campo + "' no es válido.");
         }
-        var ascendente = partes.length < 2
-                || !"desc".equalsIgnoreCase(partes[1].trim());
+        var ascendente = true;
+        if (partes.length >= 2) {
+            var direccion = partes[1].trim();
+            if (!"asc".equalsIgnoreCase(direccion) && !"desc".equalsIgnoreCase(direccion)) {
+                throw new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
+                    "La dirección de ordenamiento '" + direccion
+                        + "' no es válida; use 'asc' o 'desc'.");
+            }
+            ascendente = !"desc".equalsIgnoreCase(direccion);
+        }
         return new PageRequest(page, size, propiedad, ascendente);
     }
 
