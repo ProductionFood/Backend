@@ -174,6 +174,35 @@ class RecetaServiceTest {
         verify(detalleRecetaRepository, never()).insertar(any());
     }
 
+    @ParameterizedTest
+    @MethodSource("cantidadesDetalleInvalidas")
+    @DisplayName("Una cantidad de detalle que no cabe en decimal(10,3) responde 400 sin insertar nada")
+    void cantidadDeDetalleFueraDeRangoNoInserta(BigDecimal cantidad) {
+        prepararAltaValida();
+
+        assertThatThrownBy(() -> servicio.crear(recetaRequest(new BigDecimal("30"),
+                List.of(new AgregarDetalleRequest(5, cantidad)))))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "VALIDACION_FALLIDA");
+
+        verify(recetaRepository, never()).insertar(any());
+        verify(detalleRecetaRepository, never()).insertar(any());
+    }
+
+    @Test
+    @DisplayName("Una carrera que viola el UNIQUE id_producto se traduce a 409 PRODUCTO_YA_TIENE_RECETA")
+    void crearConDuplicateKeyResponde409ProductoYaTieneReceta() {
+        prepararAltaValida();
+        when(recetaRepository.insertar(any()))
+                .thenThrow(new DuplicateKeyException("uk_receta_producto"));
+
+        assertThatThrownBy(() -> servicio.crear(recetaRequest(new BigDecimal("30"), List.of())))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PRODUCTO_YA_TIENE_RECETA");
+
+        verify(detalleRecetaRepository, never()).insertar(any());
+    }
+
     @Test
     @DisplayName("Materia prima repetida en la lista responde 409 y no inserta la cabecera")
     void materiaPrimaRepetidaEnLaListaNoInsertaCabecera() {
@@ -288,6 +317,22 @@ class RecetaServiceTest {
                 new AgregarDetalleRequest(7, new BigDecimal("0.050"))))
                 .isInstanceOf(ConflictoNegocioException.class)
                 .hasFieldOrPropertyWithValue("codigo", "MATERIA_PRIMA_DUPLICADA");
+
+        verify(detalleRecetaRepository, never()).insertar(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("cantidadesDetalleInvalidas")
+    @DisplayName("Agregar un detalle con cantidad inválida responde 400 sin insertar")
+    void agregarDetalleConCantidadInvalidaResponde400SinInsertar(BigDecimal cantidad) {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(materiaPrimaRepository.existeActiva(7)).thenReturn(true);
+        when(detalleRecetaRepository.existeMateriaPrima(2, 7)).thenReturn(false);
+
+        assertThatThrownBy(() -> servicio.agregarDetalle(2,
+                new AgregarDetalleRequest(7, cantidad)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "VALIDACION_FALLIDA");
 
         verify(detalleRecetaRepository, never()).insertar(any());
     }
@@ -601,6 +646,22 @@ class RecetaServiceTest {
         assertThat(captor.getValue().scale()).isEqualTo(3);
     }
 
+    @ParameterizedTest
+    @MethodSource("cantidadesDetalleInvalidas")
+    @DisplayName("Editar un detalle con cantidad inválida responde 400 sin actualizar")
+    void actualizarDetalleConCantidadInvalidaResponde400SinActualizar(BigDecimal cantidad) {
+        when(recetaRepository.buscarPorId(2)).thenReturn(Optional.of(receta(30)));
+        when(detalleRecetaRepository.buscarPorId(11)).thenReturn(Optional.of(
+                detalle(11, 2, 5, "5.000", "Harina de trigo", "kg", "3200.00")));
+
+        assertThatThrownBy(() -> servicio.actualizarDetalle(2, 11,
+                new ActualizarDetalleRequest(cantidad)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "VALIDACION_FALLIDA");
+
+        verify(detalleRecetaRepository, never()).actualizarCantidad(any(), any());
+    }
+
     @Test
     @DisplayName("Editar un detalle de otra receta responde 404 y no actualiza")
     void actualizarDetalleDeOtraRecetaResponde404() {
@@ -674,6 +735,10 @@ class RecetaServiceTest {
 
     private static Stream<BigDecimal> cantidadesProducirInvalidas() {
         return Stream.of(BigDecimal.ZERO, new BigDecimal("-1.00"));
+    }
+
+    private static Stream<BigDecimal> cantidadesDetalleInvalidas() {
+        return Stream.of(new BigDecimal("0.0004"), new BigDecimal("99999999.999"));
     }
 
     private static UnidadMedida unidad(int id, String nombre, String abreviatura) {
