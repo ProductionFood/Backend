@@ -52,3 +52,4 @@ Docs/
 | HU-10 Consulta de inventario | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
 | HU-11 Gestión de productos | Entregada 2026-10-23 (backend; frontend pendiente) |
 | HU-12 Gestión de recetas | Backend verificado en caliente 2026-10-25 · frontend pendiente |
+| HU-19 Lotes de producto terminado | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |

@@ -1,0 +1,2526 @@
+{
+  "info": {
+    "_postman_id": "hu19-lotes-producto-terminado",
+    "name": "ProductionFood - HU-19 Lotes de producto terminado",
+    "description": "Casos de la HU-19 (lotes de producto terminado): GET /api/v1/lotes-producto (paginado y filtros idProducto, soloVencidos, proximosAVencer y conStock), GET /api/v1/lotes-producto/{id}, POST /api/v1/lotes-producto y GET /api/v1/lotes-producto/{id}/movimientos (kardex). No hay PUT, PATCH ni DELETE. Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles, guarda los tokens, elige un producto activo y un código de lote de materia prima; 'Lotes de producto (CP-01…CP-24)' ejecuta los casos funcionales; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren la autorización. CP-20 y CP-21 no tienen endpoint y se verifican solo con SQL (ver la descripción de su carpeta). CP-17, CP-18 y CP-19 necesitan la manipulación SQL descrita en cada petición. CP-04 usa GET /productos/{id} porque GET /productos/{id}/stock es de HU-17 y todavía no existe. SEC-03 y SEC-05 necesitan que rellenes a mano tokenExpirado y tokenInactivo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "idProducto",
+      "value": ""
+    },
+    {
+      "key": "idLote",
+      "value": ""
+    },
+    {
+      "key": "idLoteVencido",
+      "value": ""
+    },
+    {
+      "key": "codigoLote",
+      "value": ""
+    },
+    {
+      "key": "codigoLoteMP",
+      "value": ""
+    },
+    {
+      "key": "codigoMinus",
+      "value": ""
+    },
+    {
+      "key": "fechaProduccion",
+      "value": ""
+    },
+    {
+      "key": "fechaVencimiento",
+      "value": ""
+    },
+    {
+      "key": "stockAntesCP01",
+      "value": ""
+    },
+    {
+      "key": "ventaSimulada",
+      "value": "false"
+    }
+  ],
+  "item": [
+    {
+      "name": "Preparación",
+      "description": "Autenticación, datos base y usuarios de rol. Ejecutar primero y de arriba abajo. Genera un sufijo único, guarda los cinco tokens (ADMIN, PRODUCCION, VENTAS, CONSULTA y COMPRAS), elige un producto activo con su stock inicial y un código de lote de materia prima ya existente para CP-06.",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al administrador del seed. Guarda tokenAdmin y token, genera un sufijo único para los códigos de esta ejecución y fija las fechas por defecto (producción = hoy, vencimiento = hoy + 30 días).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const hoy = new Date();",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set(\"fechaProduccion\", iso(hoy));",
+                  "const venc = new Date(hoy);",
+                  "venc.setDate(venc.getDate() + 30);",
+                  "pm.collectionVariables.set(\"fechaVencimiento\", iso(venc));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenAdmin\", pm.response.json().token);",
+                  "pm.collectionVariables.set(\"token\", pm.response.json().token);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(pm.response.json().usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Produccion → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol Produccion (idRol 2).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-19 Produccion\",\n  \"correo\": \"hu19-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Produccion → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenProduccion con el usuario de rol PRODUCCION creado en el paso anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu19-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenProduccion\", pm.response.json().token);",
+                  "pm.test(\"token asignado\", () => pm.expect(pm.collectionVariables.get(\"tokenProduccion\")).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Ventas → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol Ventas (idRol 4).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-19 Ventas\",\n  \"correo\": \"hu19-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Ventas → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenVentas con el usuario de rol VENTAS creado en el paso anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu19-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenVentas\", pm.response.json().token);",
+                  "pm.test(\"token asignado\", () => pm.expect(pm.collectionVariables.get(\"tokenVentas\")).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Consulta → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol Consulta (idRol 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-19 Consulta\",\n  \"correo\": \"hu19-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Consulta → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenConsulta con el usuario de rol CONSULTA creado en el paso anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu19-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenConsulta\", pm.response.json().token);",
+                  "pm.test(\"token asignado\", () => pm.expect(pm.collectionVariables.get(\"tokenConsulta\")).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario Compras → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol Compras (idRol 3).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-19 Compras\",\n  \"correo\": \"hu19-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Compras → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenCompras con el usuario de rol COMPRAS creado en el paso anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu19-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Qa123456*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenCompras\", pm.response.json().token);",
+                  "pm.test(\"token asignado\", () => pm.expect(pm.collectionVariables.get(\"tokenCompras\")).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET productos → 200 (elige idProducto activo)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos?activo=true&size=100"
+            },
+            "description": "Elige el primer producto activo del catálogo y guarda idProducto y su stockDisponible inicial en stockAntesCP01. CP-04 comparará el stock después del alta de CP-01. Si no hay productos activos, revisa la semilla de HU-11."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const content = pm.response.json().content;",
+                  "const producto = content.find(p => p.activo) || content[0];",
+                  "pm.test(\"hay al menos un producto\", () => pm.expect(producto).to.not.be.undefined);",
+                  "if (producto) { pm.collectionVariables.set(\"idProducto\", producto.idProducto); pm.collectionVariables.set(\"stockAntesCP01\", producto.stockDisponible); }",
+                  "pm.test(\"idProducto asignado\", () => pm.expect(pm.collectionVariables.get(\"idProducto\")).to.not.be.undefined);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET lotes-materia-prima → 200 (elige codigoLoteMP)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-materia-prima?size=1"
+            },
+            "description": "Toma el código del primer lote de materia prima existente y lo guarda en codigoLoteMP. CP-06 lo reutiliza para comprobar que el UNIQUE de codigo_lote es compartido entre HU-09 y HU-19. Si no hay lotes de materia prima, CP-06 queda documentado pero sin efecto: ejecuta antes la colección de HU-09."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const content = pm.response.json().content;",
+                  "pm.collectionVariables.set(\"codigoLoteMP\", content.length ? content[0].codigoLote : \"\");",
+                  "pm.test(\"content es array\", () => pm.expect(content).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET lotes-producto → 200 (sanity del listado)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?size=1"
+            },
+            "description": "Comprueba que el endpoint de la historia responde y que `content` es un array."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"content es array\", () => pm.expect(pm.response.json().content).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Lotes de producto (CP-01…CP-24)",
+      "description": "Casos funcionales CP-01…CP-24. Ejecutar después de 'Preparación'. CP-01, CP-02, CP-03, CP-04, CP-05…CP-16, CP-22, CP-23 y CP-24 son peticiones HTTP reales; CP-02 y CP-03 releen el contrato y se confirman además con las consultas SQL de tarea-qa.md (fila en inventario_producto_terminado y movimiento ENTRADA_PRODUCCION). CP-17, CP-18 y CP-19 se preparan con SQL (venta simulada y cambio de fecha de vencimiento): sus peticiones solo releen el contrato; rellena idLoteVencido y marca ventaSimulada=true cuando hayas ejecutado el SQL. CP-20 y CP-21 NO tienen endpoint y se verifican solo en base: CP-20 es un INSERT directo con id_producto e id_materia_prima a la vez, que debe fallar con error 3819 (ck_lotes_exclusividad); CP-21 fuerza un fallo en el INSERT de inventario con un trigger temporal y debe dejar 0 lotes, 0 filas de inventario y 0 movimientos (la transacción revierte entera). Retira el trigger al terminar.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const hoy = new Date();",
+              "const iso = (d) => d.toISOString().slice(0, 10);",
+              "pm.collectionVariables.set(\"fechaProduccion\", iso(hoy));",
+              "const venc = new Date(hoy);",
+              "venc.setDate(venc.getDate() + 30);",
+              "pm.collectionVariables.set(\"fechaVencimiento\", iso(venc));"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "CP-01 Crear lote válido → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-01 (CA-01..CA-04): alta válida de 25 unidades. Crea el lote, su fila de inventario y el movimiento ENTRADA_PRODUCCION en una sola transacción (R-02). Guarda idLote y codigoLote para el resto de los casos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-A\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 25\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set(\"idLote\", j.idLote);",
+                  "pm.collectionVariables.set(\"codigoLote\", j.codigoLote);",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/lotes-producto/\"));",
+                  "pm.test(\"codigoLote en mayúsculas\", () => pm.expect(j.codigoLote).to.eql(j.codigoLote.toUpperCase()));",
+                  "pm.test(\"producto.unidad es abreviatura\", () => pm.expect(j.producto.unidad).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"cantidadDisponible igual a la ingresada\", () => pm.expect(j.cantidadDisponible).to.eql(j.cantidadIngresada));",
+                  "pm.test(\"diasParaVencer numérico\", () => pm.expect(j.diasParaVencer).to.be.a(\"number\"));",
+                  "pm.test(\"stockTotalProducto numérico\", () => pm.expect(j.stockTotalProducto).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Verificar el saldo del lote → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            },
+            "description": "CP-02 (CA-05/R-02): la fila de inventario no tiene endpoint propio; se confirma con la consulta SQL de tarea-qa.md. Esta lectura comprueba que el saldo del lote coincide con la cantidad ingresada en el alta."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get(\"idLote\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "const j = pm.response.json();",
+                  "pm.test(\"cantidadDisponible igual a la ingresada\", () => pm.expect(Number(j.cantidadDisponible)).to.eql(Number(j.cantidadIngresada)));",
+                  "pm.test(\"el lote ingresó con 25\", () => pm.expect(Number(j.cantidadIngresada)).to.eql(25));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 Verificar el movimiento de entrada → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos?size=100"
+            },
+            "description": "CP-03 (CA-05/R-02): el kardex debe contener el movimiento ENTRADA_PRODUCCION del alta, con saldo anterior 0 y posterior igual a la cantidad. La fila física se confirma además con la consulta SQL de tarea-qa.md."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get(\"idLote\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "const content = pm.response.json().content;",
+                  "const entrada = content.find(m => m.tipo === \"ENTRADA_PRODUCCION\");",
+                  "pm.test(\"hay ENTRADA_PRODUCCION\", () => pm.expect(entrada).to.not.be.undefined);",
+                  "pm.test(\"saldo anterior 0\", () => { if (entrada) pm.expect(Number(entrada.saldoAnterior)).to.eql(0); });",
+                  "pm.test(\"saldo posterior 25\", () => { if (entrada) pm.expect(Number(entrada.saldoPosterior)).to.eql(25); });",
+                  "pm.test(\"origen lotes\", () => { if (entrada) pm.expect(entrada.origen.tabla).to.eql(\"lotes\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 El producto ya tiene stock vendible → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}"
+            },
+            "description": "CP-04 (CA-05/R-01): NO existe GET /productos/{id}/stock (es de HU-17). Se usa GET /productos/{id} y su campo stockDisponible, que agrega los lotes vigentes de HU-19. Debe haber subido exactamente 25 respecto de stockAntesCP01."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const antes = Number(pm.collectionVariables.get(\"stockAntesCP01\"));",
+                  "pm.test(\"stockDisponible subió 25\", () => pm.expect(Number(j.stockDisponible)).to.be.closeTo(antes + 25, 0.001));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 Código duplicado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-05 (CA-01): repite el código creado en CP-01.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{codigoLote}}\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"CODIGO_LOTE_DUPLICADO\", () => pm.expect(pm.response.json().code).to.eql(\"CODIGO_LOTE_DUPLICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 Código de un lote de materia prima → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-06 (CA-01): la tabla lotes es compartida con HU-09. Si la preparación encontró un lote de materia prima, su código debe responder 409. Si codigoLoteMP está vacío, ejecuta antes la colección de HU-09 y repite la preparación.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{codigoLoteMP}}\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const code = pm.collectionVariables.get(\"codigoLoteMP\");",
+                  "pm.test(\"→ 409\", () => { if (code) pm.response.to.have.status(409); });",
+                  "pm.test(\"CODIGO_LOTE_DUPLICADO\", () => { if (code) pm.expect(pm.response.json().code).to.eql(\"CODIGO_LOTE_DUPLICADO\"); });",
+                  "if (!code) console.log(\"CP-06 sin efecto: no hay lote de materia prima en la base\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Código con otra capitalización → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-07 (CA-01/R-08): envía el código de CP-01 en minúsculas. El servicio lo normaliza a mayúsculas antes de comprobar y la collation es case-insensitive.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{codigoMinus}}\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 10\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const codigo = pm.collectionVariables.get(\"codigoLote\");",
+                  "pm.collectionVariables.set(\"codigoMinus\", codigo ? codigo.toLowerCase() : \"\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"CODIGO_LOTE_DUPLICADO\", () => pm.expect(pm.response.json().code).to.eql(\"CODIGO_LOTE_DUPLICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 Producto inexistente → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-08 (CA-02): idProducto que no existe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-8\",\n  \"idProducto\": 999999,\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PRODUCTO_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"PRODUCTO_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 Vencimiento anterior a producción → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-09 (CA-03): producción dentro de 10 días y vencimiento dentro de 5. Ambas fechas son futuras para que el error sea FECHAS_INVALIDAS y no LOTE_YA_VENCIDO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-9\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const hoy = new Date();",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "const prod = new Date(hoy); prod.setDate(prod.getDate() + 10);",
+                  "const venc = new Date(hoy); venc.setDate(venc.getDate() + 5);",
+                  "pm.collectionVariables.set(\"fechaProduccion\", iso(prod));",
+                  "pm.collectionVariables.set(\"fechaVencimiento\", iso(venc));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"FECHAS_INVALIDAS\", () => pm.expect(pm.response.json().code).to.eql(\"FECHAS_INVALIDAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 Lote ya vencido → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-10 (CA-03/R-05): producción de anteayer y vencimiento de ayer. El orden de las validaciones hace que primero pase FECHAS_INVALIDAS y luego se rechace con LOTE_YA_VENCIDO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-10\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const hoy = new Date();",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "const prod = new Date(hoy); prod.setDate(prod.getDate() - 2);",
+                  "const venc = new Date(hoy); venc.setDate(venc.getDate() - 1);",
+                  "pm.collectionVariables.set(\"fechaProduccion\", iso(prod));",
+                  "pm.collectionVariables.set(\"fechaVencimiento\", iso(venc));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"LOTE_YA_VENCIDO\", () => pm.expect(pm.response.json().code).to.eql(\"LOTE_YA_VENCIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 Vence hoy → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-11 (CA-03/R-05): un lote que vence hoy todavía es vendible y se registra con 201. diasParaVencer debe ser 0 y vencido false.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-11\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const hoy = new Date();",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set(\"fechaProduccion\", iso(hoy));",
+                  "pm.collectionVariables.set(\"fechaVencimiento\", iso(hoy));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"diasParaVencer 0\", () => pm.expect(j.diasParaVencer).to.eql(0));",
+                  "pm.test(\"vencido false\", () => pm.expect(j.vencido).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 Cantidad cero → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-12 (CA-04): cantidad cero.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-12\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"CANTIDAD_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Cantidad negativa → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-13 (CA-04): cantidad negativa.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-13\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": -5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"CANTIDAD_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Filtrar por producto → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?idProducto={{idProducto}}&size=100"
+            },
+            "description": "CP-14 (CA-06): todos los lotes devueltos deben ser del producto indicado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const id = Number(pm.collectionVariables.get(\"idProducto\"));",
+                  "const content = pm.response.json().content;",
+                  "pm.test(\"solo lotes de ese producto\", () => pm.expect(content.every(l => l.producto.idProducto === id)).to.eql(true));",
+                  "pm.test(\"al menos un lote\", () => pm.expect(content.length).to.be.at.least(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 Próximos a vencer (7 días) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?idProducto={{idProducto}}&proximosAVencer=7&size=100"
+            },
+            "description": "CP-15 (CA-06): ventana de 7 días con ambos extremos incluidos. El lote de CP-11 vence hoy, así que la lista no puede estar vacía; todos los días deben estar entre 0 y 7."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const content = pm.response.json().content;",
+                  "pm.test(\"al menos un lote en la ventana\", () => pm.expect(content.length).to.be.at.least(1));",
+                  "pm.test(\"todos dentro de 0..7 días\", () => pm.expect(content.every(l => l.diasParaVencer >= 0 && l.diasParaVencer <= 7)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Solo vencidos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?idProducto={{idProducto}}&soloVencidos=true&size=100"
+            },
+            "description": "CP-16 (CA-06): solo lotes vencidos. La API no permite crear un lote ya vencido (R-05), así que la lista puede estar vacía si la base no tiene lotes vencidos; todos los que aparezcan deben tener vencido=true."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const content = pm.response.json().content;",
+                  "pm.test(\"todos vencidos\", () => pm.expect(content.every(l => l.vencido === true)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 cantidadIngresada no cambia al vender (SQL) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            },
+            "description": "CP-17 (R-03): requiere ejecutar antes la venta simulada por SQL de tarea-qa.md (descuenta 10 de inventario_producto_terminado, no toca lotes.cantidad). Después marca ventaSimulada=true y repite esta petición. La cantidad ingresada debe seguir en 25 y el disponible bajar a 15."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get(\"idLote\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "const j = pm.response.json();",
+                  "pm.test(\"cantidadIngresada sigue en 25\", () => pm.expect(Number(j.cantidadIngresada)).to.eql(25));",
+                  "if (pm.collectionVariables.get(\"ventaSimulada\") === \"true\") { pm.test(\"el disponible bajó a 15\", () => pm.expect(Number(j.cantidadDisponible)).to.eql(15)); } else { console.log(\"CP-17: ejecuta la venta simulada por SQL y marca ventaSimulada=true\"); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 Un vencido no cuenta como stock (SQL) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLoteVencido}}"
+            },
+            "description": "CP-18 (R-04): requiere mover por SQL la fecha_vencimiento de un lote de prueba a ayer, guardar su id en idLoteVencido y consultar. El lote debe seguir existiendo con su saldo, pero v_stock_producto_terminado lo excluye: comprueba el stockTotalProducto del producto antes y después con la consulta SQL de tarea-qa.md."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get(\"idLoteVencido\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "if (id) { const j = pm.response.json(); pm.test(\"vencido true\", () => pm.expect(j.vencido).to.eql(true)); pm.test(\"conserva saldo\", () => pm.expect(Number(j.cantidadDisponible)).to.be.above(0)); }",
+                  "if (!id) console.log(\"CP-18 sin efecto: rellena idLoteVencido tras el UPDATE SQL\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 El lote vencido sigue existiendo → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLoteVencido}}"
+            },
+            "description": "CP-19: tras CP-18 la fila y su saldo permanecen; solo deja de ser vendible. Si idLoteVencido está vacío, la petición no verifica nada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = pm.collectionVariables.get(\"idLoteVencido\");",
+                  "pm.test(\"→ 200\", () => { if (id) pm.response.to.have.status(200); });",
+                  "if (id) { const j = pm.response.json(); pm.test(\"mismo lote\", () => pm.expect(Number(j.idLote)).to.eql(Number(id))); pm.test(\"cantidadDisponible definida\", () => pm.expect(j.cantidadDisponible).to.not.be.null); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 Kardex del lote → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos?page=0&size=20"
+            },
+            "description": "CP-22: el kardex explica el saldo del lote. Debe incluir al menos la entrada de producción del alta, con saldo anterior 0, saldo posterior igual a la cantidad y origen {tabla: lotes, id: idLote}. Si se ejecutó la venta simulada, aparecerá además una SALIDA_VENTA."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const content = pm.response.json().content;",
+                  "pm.test(\"content es array\", () => pm.expect(content).to.be.an(\"array\"));",
+                  "pm.test(\"hay una ENTRADA_PRODUCCION\", () => pm.expect(content.some(m => m.tipo === \"ENTRADA_PRODUCCION\")).to.eql(true));",
+                  "const entrada = content.find(m => m.tipo === \"ENTRADA_PRODUCCION\");",
+                  "pm.test(\"la entrada viene de lotes\", () => { if (entrada) pm.expect(entrada.origen.tabla).to.eql(\"lotes\"); });",
+                  "pm.test(\"saldo anterior 0\", () => { if (entrada) pm.expect(Number(entrada.saldoAnterior)).to.eql(0); });",
+                  "pm.test(\"usuario informado\", () => { if (entrada) pm.expect(entrada.usuario).to.be.a(\"string\").and.not.empty; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rol VENTAS no puede registrar → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-23: VENTAS tiene lectura y kardex, pero no alta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-23\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-24 Rol PRODUCCION puede registrar → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "CP-24: PRODUCCION es uno de los dos roles con permiso de escritura.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-24\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/lotes-producto/\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "description": "Matriz de acceso de los cuatro endpoints. ADMIN, VENTAS, PRODUCCION y CONSULTA leen listado y detalle; COMPRAS recibe 403. El alta es solo de ADMIN y PRODUCCION. El kardex es de ADMIN, PRODUCCION y VENTAS: CONSULTA y COMPRAS reciben 403. Los POST usan códigos únicos por sufijo y no alteran el lote de CP-01.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const hoy = new Date();",
+              "const iso = (d) => d.toISOString().slice(0, 10);",
+              "pm.collectionVariables.set(\"fechaProduccion\", iso(hoy));",
+              "const venc = new Date(hoy);",
+              "venc.setDate(venc.getDate() + 30);",
+              "pm.collectionVariables.set(\"fechaVencimiento\", iso(venc));"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "ADMIN GET /lotes-producto → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /lotes-producto → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /lotes-producto → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /lotes-producto → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /lotes-producto → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN GET /lotes-producto/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /lotes-producto/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /lotes-producto/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /lotes-producto/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /lotes-producto/{id} → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /lotes-producto con ADMIN → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-RA\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /lotes-producto con PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-RP\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /lotes-producto con VENTAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-RV\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /lotes-producto con CONSULTA → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-RC\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /lotes-producto con COMPRAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-RCO\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN GET /lotes-producto/{id}/movimientos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /lotes-producto/{id}/movimientos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /lotes-producto/{id}/movimientos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /lotes-producto/{id}/movimientos → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /lotes-producto/{id}/movimientos → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "description": "Batería de seguridad en los cuatro endpoints: SEC-01 sin token, SEC-02 token malformado, SEC-03 token expirado, SEC-04 rol sin permiso y SEC-05 usuario inactivo. SEC-03 y SEC-05 usan las variables tokenExpirado y tokenInactivo, que se rellenan a mano con JWTs del mismo secreto: el runner no puede fabricarlos sin la clave. Ejecutar después de 'Preparación' y de 'Lotes de producto', porque los POST necesitan idProducto y las rutas con {id} necesitan idLote.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const hoy = new Date();",
+              "const iso = (d) => d.toISOString().slice(0, 10);",
+              "pm.collectionVariables.set(\"fechaProduccion\", iso(hoy));",
+              "const venc = new Date(hoy);",
+              "venc.setDate(venc.getDate() + 30);",
+              "pm.collectionVariables.set(\"fechaVencimiento\", iso(venc));"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "SEC-01 GET /lotes-producto sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-01: sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET /lotes-producto/{id} sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            },
+            "description": "SEC-01: sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 POST /lotes-producto sin token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-01: sin cabecera Authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-S1\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET /lotes-producto/{id}/movimientos sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            },
+            "description": "SEC-01: sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /lotes-producto token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-02: el valor no es un JWT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /lotes-producto/{id} token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            },
+            "description": "SEC-02: el valor no es un JWT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /lotes-producto/{id}/movimientos token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            },
+            "description": "SEC-02: el valor no es un JWT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 POST /lotes-producto token malformado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-02: el valor no es un JWT.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-S2\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /lotes-producto token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-03: token expirado. Rellena a mano la variable tokenExpirado con un JWT caducado del mismo secreto."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /lotes-producto/{id} token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            },
+            "description": "SEC-03: token expirado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 POST /lotes-producto token expirado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-03: token expirado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-S3\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /lotes-producto/{id}/movimientos token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            },
+            "description": "SEC-03: token expirado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /lotes-producto con COMPRAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-04: COMPRAS no participa en el módulo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /lotes-producto/{id} con COMPRAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            },
+            "description": "SEC-04: COMPRAS no participa en el módulo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 POST /lotes-producto con VENTAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-04: VENTAS puede leer y ver el kardex, pero no registrar lotes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-S4\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /lotes-producto/{id}/movimientos con CONSULTA → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            },
+            "description": "SEC-04: CONSULTA no puede ver el detalle operativo del kardex."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /lotes-producto con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-05: token válido de un usuario con estado=0. Rellena a mano tokenInactivo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /lotes-producto/{id} con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}"
+            },
+            "description": "SEC-05: token válido de un usuario con estado=0."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 POST /lotes-producto con usuario inactivo → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "SEC-05: token válido de un usuario con estado=0.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"PF-{{sufijo}}-S5\",\n  \"idProducto\": {{idProducto}},\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /lotes-producto/{id}/movimientos con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto/{{idLote}}/movimientos"
+            },
+            "description": "SEC-05: token válido de un usuario con estado=0."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
