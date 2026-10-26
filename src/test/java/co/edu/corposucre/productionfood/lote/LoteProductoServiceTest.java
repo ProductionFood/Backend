@@ -453,18 +453,60 @@ class LoteProductoServiceTest {
     void movimientosDevuelveLaPaginaDelKardex() {
         var movimiento = movimiento();
         when(loteRepository.esLoteProducto(14)).thenReturn(true);
-        when(inventarioPtRepository.buscarMovimientos(14, 20, 0L))
+        when(inventarioPtRepository.buscarMovimientos(14, "m.id_movimiento", false, 20, 0L))
                 .thenReturn(List.of(movimiento));
         when(inventarioPtRepository.contarMovimientos(14)).thenReturn(1L);
 
-        var r = servicio.movimientos(14, 0, 20);
+        var r = servicio.movimientos(14, 0, 20, null);
 
         assertThat(r.content()).containsExactly(movimiento);
         assertThat(r.page()).isZero();
         assertThat(r.size()).isEqualTo(20);
         assertThat(r.totalElements()).isEqualTo(1);
-        verify(inventarioPtRepository).buscarMovimientos(14, 20, 0L);
+        verify(inventarioPtRepository)
+                .buscarMovimientos(14, "m.id_movimiento", false, 20, 0L);
         verify(inventarioPtRepository).contarMovimientos(14);
+    }
+
+    @Test
+    @DisplayName("Kardex: por defecto ordena por id descendente")
+    void movimientosPorDefectoOrdenaPorIdDesc() {
+        when(loteRepository.esLoteProducto(14)).thenReturn(true);
+        when(inventarioPtRepository.buscarMovimientos(14, "m.id_movimiento", false, 20, 0L))
+                .thenReturn(List.of());
+        when(inventarioPtRepository.contarMovimientos(14)).thenReturn(0L);
+
+        servicio.movimientos(14, 0, 20, null);
+
+        // El repositorio añade m.id_movimiento DESC como desempate sobre esta misma columna.
+        verify(inventarioPtRepository)
+                .buscarMovimientos(14, "m.id_movimiento", false, 20, 0L);
+    }
+
+    @Test
+    @DisplayName("Kardex: sort=fecha,asc se traduce a la columna fecha ascendente")
+    void movimientosConOrdenFechaAscUsaLaColumnaFecha() {
+        when(loteRepository.esLoteProducto(14)).thenReturn(true);
+        when(inventarioPtRepository.buscarMovimientos(14, "m.fecha", true, 20, 0L))
+                .thenReturn(List.of());
+        when(inventarioPtRepository.contarMovimientos(14)).thenReturn(0L);
+
+        servicio.movimientos(14, 0, 20, "fecha,asc");
+
+        // El repositorio construye "ORDER BY m.fecha ASC, m.id_movimiento DESC": el desempate por
+        // id no viaja como argumento porque es fijo.
+        verify(inventarioPtRepository).buscarMovimientos(14, "m.fecha", true, 20, 0L);
+    }
+
+    @Test
+    @DisplayName("Kardex: un campo de orden fuera de la lista blanca responde 400")
+    void movimientosConOrdenInvalidoResponde400() {
+        assertThatThrownBy(() -> servicio.movimientos(14, 0, 20, "basura,asc"))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verify(loteRepository, never()).esLoteProducto(any());
+        verifyNoInteractions(inventarioPtRepository);
     }
 
     @ParameterizedTest
@@ -473,7 +515,7 @@ class LoteProductoServiceTest {
     void movimientosDeLoteNoProductoResponde404(int id) {
         when(loteRepository.esLoteProducto(id)).thenReturn(false);
 
-        assertThatThrownBy(() -> servicio.movimientos(id, 0, 20))
+        assertThatThrownBy(() -> servicio.movimientos(id, 0, 20, null))
                 .isInstanceOf(RecursoNoEncontradoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
                 .hasMessage("No se encontró el lote de producto con id " + id + ".");
@@ -485,10 +527,11 @@ class LoteProductoServiceTest {
     @DisplayName("Kardex: un lote existente sin movimientos devuelve una página vacía, no 404")
     void movimientosDeLoteSinMovimientosDevuelvePaginaVacia() {
         when(loteRepository.esLoteProducto(14)).thenReturn(true);
-        when(inventarioPtRepository.buscarMovimientos(14, 20, 0L)).thenReturn(List.of());
+        when(inventarioPtRepository.buscarMovimientos(14, "m.id_movimiento", false, 20, 0L))
+                .thenReturn(List.of());
         when(inventarioPtRepository.contarMovimientos(14)).thenReturn(0L);
 
-        var r = servicio.movimientos(14, 0, 20);
+        var r = servicio.movimientos(14, 0, 20, null);
 
         assertThat(r.content()).isEmpty();
         assertThat(r.totalElements()).isZero();
@@ -498,13 +541,13 @@ class LoteProductoServiceTest {
     @Test
     @DisplayName("Kardex: page negativa o size fuera de 1..100 responde 400 sin consultar nada")
     void movimientosConPaginacionInvalidaResponde400() {
-        assertThatThrownBy(() -> servicio.movimientos(14, -1, 20))
+        assertThatThrownBy(() -> servicio.movimientos(14, -1, 20, null))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
-        assertThatThrownBy(() -> servicio.movimientos(14, 0, 0))
+        assertThatThrownBy(() -> servicio.movimientos(14, 0, 0, null))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
-        assertThatThrownBy(() -> servicio.movimientos(14, 0, 101))
+        assertThatThrownBy(() -> servicio.movimientos(14, 0, 101, null))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
 
@@ -516,14 +559,16 @@ class LoteProductoServiceTest {
     @DisplayName("Kardex: el offset se calcula en long con page * size")
     void movimientosCalculaElOffsetEnLong() {
         when(loteRepository.esLoteProducto(14)).thenReturn(true);
-        when(inventarioPtRepository.buscarMovimientos(eq(14), eq(20), anyLong()))
-                .thenReturn(List.of());
+        when(inventarioPtRepository.buscarMovimientos(eq(14), eq("m.id_movimiento"), eq(false),
+                eq(20), anyLong())).thenReturn(List.of());
         when(inventarioPtRepository.contarMovimientos(14)).thenReturn(0L);
 
-        servicio.movimientos(14, 3, 20);
+        servicio.movimientos(14, 3, 20, null);
 
         var captor = ArgumentCaptor.forClass(Long.class);
-        verify(inventarioPtRepository).buscarMovimientos(eq(14), eq(20), captor.capture());
+        verify(inventarioPtRepository)
+                .buscarMovimientos(eq(14), eq("m.id_movimiento"), eq(false), eq(20),
+                        captor.capture());
         assertThat(captor.getValue()).isEqualTo(60L);
     }
 

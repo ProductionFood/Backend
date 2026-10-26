@@ -67,6 +67,22 @@ public class LoteProductoService {
 
     private static final String ORDEN_POR_DEFECTO = "fechaVencimiento,asc";
 
+    /**
+     * Lista blanca del orden del kardex: traduce el campo que pide el cliente a la columna SQL con
+     * su alias de tabla. {@link PageRequest#of} rechaza cualquier campo que no esté aquí, así que
+     * la columna que llega a {@link InventarioPtRepository#buscarMovimientos} nunca es SQL
+     * arbitrario.
+     */
+    private static final Map<String, String> ORDEN_MOVIMIENTOS = Map.of(
+            "fecha", "m.fecha",
+            "tipo", "m.tipo_movimiento",
+            "cantidad", "m.cantidad",
+            "saldoAnterior", "m.saldo_anterior",
+            "saldoPosterior", "m.saldo_posterior",
+            "id", "m.id_movimiento");
+
+    private static final String ORDEN_MOVIMIENTOS_POR_DEFECTO = "id,desc";
+
     private final LoteRepository loteRepository;
     private final ProductoRepository productoRepository;
     private final InventarioPtRepository inventarioPtRepository;
@@ -246,10 +262,12 @@ public class LoteProductoService {
     /**
      * Devuelve el kardex paginado de un lote de producto terminado.
      *
-     * <p>El orden es fijo por {@code id_movimiento DESC}, del movimiento más reciente al más
-     * antiguo: el kardex se lee siempre así y no acepta orden del cliente, de modo que aprovecha el
-     * índice {@code idx_mov_pt_lote} y la trazabilidad se mantiene estable entre páginas. Sin este
-     * libro no habría forma de reconstruir cómo se llegó al saldo actual del lote.
+     * <p>El orden por defecto es {@code id,desc}, del movimiento más reciente al más antiguo. El
+     * cliente puede pedir otro criterio de la lista blanca ({@code fecha}, {@code tipo},
+     * {@code cantidad}, {@code saldoAnterior}, {@code saldoPosterior} o {@code id}); el repositorio
+     * añade siempre {@code id_movimiento DESC} como desempate para que la trazabilidad sea estable
+     * entre páginas aunque varias filas compartan fecha, tipo o cantidad. Sin este libro no habría
+     * forma de reconstruir cómo se llegó al saldo actual del lote.
      *
      * <p>Un lote que no existe o que es de materia prima responde {@code RECURSO_NO_ENCONTRADO}: el
      * kardex a consultar es el de {@code movimientos_inventario_pt}, que solo tiene filas de lotes
@@ -259,12 +277,15 @@ public class LoteProductoService {
      * @param id   identificador del lote
      * @param page página solicitada, desde 0
      * @param size tamaño de página, entre 1 y 100
+     * @param sort orden "campo,direccion"; por defecto {@code id,desc}
      * @return la página de movimientos y su total
-     * @throws ParametroInvalidoException   si la paginación es inválida
+     * @throws ParametroInvalidoException   si la paginación es inválida o el campo de orden no
+     *                                      está en la lista blanca
      * @throws RecursoNoEncontradoException si el lote no existe o es de materia prima
      */
     @Transactional(readOnly = true)
-    public PageResponse<MovimientoResponse> movimientos(Integer id, int page, int size) {
+    public PageResponse<MovimientoResponse> movimientos(Integer id, int page, int size,
+                                                        String sort) {
         if (page < 0) {
             throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
                     "El parámetro 'page' no puede ser negativo.");
@@ -273,6 +294,8 @@ public class LoteProductoService {
             throw new ParametroInvalidoException("PARAMETRO_INVALIDO",
                     "El parámetro 'size' debe estar entre 1 y 100.");
         }
+        var orden = PageRequest.of(page, size, sort, ORDEN_MOVIMIENTOS,
+                ORDEN_MOVIMIENTOS_POR_DEFECTO);
         // La existencia se comprueba contra la tabla de lotes y no contra el kardex: un lote
         // recién registrado existe aunque todavía no tenga movimientos.
         if (!loteRepository.esLoteProducto(id)) {
@@ -283,7 +306,8 @@ public class LoteProductoService {
         // desbordaría int a un valor negativo y el OFFSET del SQL fallaría.
         long offset = (long) page * size;
 
-        var filas = inventarioPtRepository.buscarMovimientos(id, size, offset);
+        var filas = inventarioPtRepository.buscarMovimientos(id, orden.propiedad(),
+                orden.ascendente(), size, offset);
         var total = inventarioPtRepository.contarMovimientos(id);
 
         return PageResponse.of(filas, page, size, total);

@@ -242,7 +242,7 @@ class LoteProductoSeguridadTest {
     @ValueSource(strings = {"ADMIN", "PRODUCCION", "VENTAS"})
     @DisplayName("Los roles con permiso consultan el kardex del lote de producto terminado")
     void getMovimientosConRolPermitidoResponde200(String rol) throws Exception {
-        when(loteProductoService.movimientos(anyInt(), anyInt(), anyInt()))
+        when(loteProductoService.movimientos(anyInt(), anyInt(), anyInt(), any()))
                 .thenReturn(PageResponse.of(List.of(entradaDeProduccion()), 0, 20, 1));
         var token = tokenDeRol(rol);
 
