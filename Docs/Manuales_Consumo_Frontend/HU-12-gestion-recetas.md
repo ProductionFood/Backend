@@ -11,7 +11,8 @@ Contrato práctico de las recetas y sus ingredientes. Complementa
 - **Roles:** lectura `ADMIN`, `PRODUCCION`, `CONSULTA`; escritura `ADMIN`, `PRODUCCION`.
   `VENTAS` y `COMPRAS` **no** participan en este módulo.
 
-> **Estado:** backend implementado 2026-10-25 · verificación en caliente formal y frontend pendientes.
+> **Estado:** backend verificado en caliente contra MySQL el 2026-10-25 (CP-01…CP-24 y
+> SEC-01…05). El consumo desde Angular sigue pendiente.
 > Los valores de los ejemplos salen de las filas que dejó el *smoke* manual en MySQL, no de una
 > captura HTTP; las cantidades y los costos cambian con la base y con
 > `materias_primas.costo_unitario`.
@@ -436,10 +437,10 @@ debe manejar los dos caminos.
 
 ## 7. Limitaciones conocidas
 
-- **Backend implementado el 2026-10-25; la verificación en caliente formal y el frontend están
-  pendientes.** El smoke manual cubrió alta, consulta, edición, estado, borrado de ingrediente,
-  duplicado y `porProducto`, pero no la matriz completa de CP-01…CP-24 ni SEC-01…SEC-05 en
-  caliente.
+- **Backend verificado en caliente el 2026-10-25; el frontend está pendiente.** Se ejecutaron
+  CP-01…CP-24 y SEC-01…05 con agentes ciegos contra la API real y MySQL 8.4, incluida la matriz
+  de cantidades (redondeo `HALF_UP`, límites de `decimal(10,3)`), la atomicidad del alta y la
+  conciliación de auditoría.
 - **No hay pantalla de recetas todavía.** Este manual es el contrato para construirla.
 - **El seed V3 no crea recetas.** Un entorno limpio arranca sin recetas; los ejemplos con
   `idReceta = 3` vienen de la base de desarrollo usada en el smoke y no existen en otra base.

@@ -1,18 +1,17 @@
-# HU-12 — Gestión de recetas · Backend implementado
+# HU-12 — Gestión de recetas · Backend verificado
 
 | | |
 |---|---|
 | Fecha de implementación | 2026-10-25 |
-| Commits / PR | PRs #71–#75 a `HU-12/gestion-recetas`: #71 persistencia, #72 alta transaccional, #73 consulta/edición/estado, #74 controlador/seguridad, #75 llaves generadas en MySQL |
+| Commits / PR | PRs #71–#78 a `HU-12/gestion-recetas`: #71 persistencia, #72 alta transaccional, #73 consulta/edición/estado, #74 controlador/seguridad, #75 llaves generadas en MySQL, #76 documentación, #77 validación de cantidades y carrera, #78 redondeo `HALF_UP` |
 | Colección Postman | `Docs/Postman/ProductionFood-HU12.postman_collection.json` (`Preparación`, `Recetas (CP-01…CP-24)`, `Roles (matriz)`, `Seguridad (SEC-01…05)`) |
-| Estado QA | **Backend implementado 2026-10-25 · verificación en caliente formal y frontend pendientes** |
+| Estado QA | **QA backend verificado en caliente 2026-10-25 (CP-01…CP-24 + SEC-01…05) · frontend pendiente** |
 
-> Esta ficha documenta el backend de la historia. La verificación en caliente **formal**
-> (matriz completa de `tarea-qa.md` con un agente ciego) todavía no se ha ejecutado. Sí se
-> hizo un *smoke* manual contra la API real y MySQL 8.4 el 2026-10-25: alta, detalle, edición,
-> cambio de estado, borrado de un ingrediente, duplicado, `porProducto` y bitácora. Ese smoke
-> dejó la receta 3 y las filas de auditoría que se citan más abajo; **no sustituye** la matriz
-> de QA. El consumo desde el frontend también sigue pendiente.
+> Esta ficha documenta el backend de la historia. Además del *smoke* manual inicial, el
+> 2026-10-25 se ejecutó la matriz de `tarea-qa.md` con agentes ciegos contra la API real (`:8085`)
+> y MySQL 8.4. Los defectos encontrados en las dos primeras pasadas se corrigieron y la tercera
+> pasada cerró **80/80 comprobaciones** sin defectos abiertos. El consumo desde el frontend sigue
+> pendiente.
 
 ## Qué se construyó
 
@@ -139,19 +138,20 @@ Cada elemento de `detalles[]` es un `DetalleRecetaResponse`:
 | Costos con `BigDecimal` | Se suman las líneas con escala 2 y se divide entre `cantidadProducir` con escala 2 y `RoundingMode.HALF_UP`. Nunca `double` |
 | Orden del detalle | `ORDER BY id_detalle_receta` fija el orden de inserción. Sin él, dos lecturas de la misma receta podrían devolver los ingredientes en distinto orden |
 | Filtro por nombre | Prefijo sin distinguir mayúsculas con `FiltroTexto.patronPrefijo`, que escapa los comodines SQL. El `ESCAPE` del `LIKE` va con cuatro barras en el literal Java para que llegue correcto al driver |
+| Cantidades del detalle | Se normalizan a escala 3 con `HALF_UP` y se rechazan con `400 VALIDACION_FALLIDA` si el valor redondeado queda en `0.000` o no cabe en `decimal(10,3)` (`>= 10 000 000`). El DTO solo exige `@Positive`; la regla vive en el servicio (PR #78) |
 | Auditoría | `@Auditable` en `CREAR` y `EDITAR` sobre `recetas`, `CAMBIAR_ESTADO` sobre `recetas` y `ELIMINAR` sobre `detalle_receta` |
 
 ## Pruebas
 
 | Clase | Casos | Cobertura |
 |---|---|---|
-| `RecetaServiceTest` | 37 | Alta con y sin detalle, validaciones de producto/unidad/materia prima, duplicados en lista y por carrera, escala 3, costos de CP-20/CP-21, listado con una sola consulta de detalle, lista blanca de orden, consulta, `porProducto`, edición, estado idempotente y borrado de línea ajena |
+| `RecetaServiceTest` | 45 | Alta con y sin detalle, validaciones de producto/unidad/materia prima, duplicados en lista y por carrera, redondeo `HALF_UP` y límites de `decimal(10,3)`, costos de CP-20/CP-21, listado con una sola consulta de detalle, lista blanca de orden, consulta, `porProducto`, edición, estado idempotente y borrado de línea ajena |
 | `RecetaControllerTest` | 27 | Los nueve endpoints, `201` con `Location`, camelCase, 400 por paginación/orden/validación, 404 y los códigos de negocio en el borde HTTP |
 | `RecetaSeguridadTest` | 81 | SEC-01…SEC-05 y la matriz de acceso: 9 endpoints × 4 casos de autenticación/autorización (36) + SEC-04 con 24 combinaciones de rol denegado + 21 combinaciones permitidas (CP-23/CP-24) |
-| **Total de la historia** | **145** | |
+| **Total de la historia** | **153** | |
 
-La suite completa quedó en **728 tests verdes** (`mvn test`) al cerrar el PR #75. El desglose
-de la historia es 37 + 27 + 81 = 145; el resto son las historias anteriores.
+La suite completa quedó en **736 tests verdes** (`mvn test`) al cerrar el PR #78. El desglose
+de la historia es 45 + 27 + 81 = 153; el resto son las historias anteriores.
 
 > Las pruebas de `RecetaSeguridadTest` levantan el contexto web real (controlador, cadena de
 > seguridad, filtro JWT y manejadores de error) y solo simulan el servicio y el repositorio de
@@ -219,25 +219,38 @@ vigente):
 | `CAMBIAR_ESTADO` | `recetas` | `Receta 3 estado true` |
 | `EDITAR` | `recetas` | `Receta editada: Receta smoke HU-12 editada` |
 
-## Verificación en caliente formal (pendiente)
+## Verificación en caliente formal (QA backend verificado)
 
-**No ejecutada.** Falta correr la matriz completa de
-`PFDocs/HU-12/tarea-qa.md` con un agente ciego contra MySQL 8.4 y la API real, y dejar aquí el
-resultado. El smoke no cubre los bordes ni los negativos sistemáticos.
+Ejecutada el **2026-10-25** con agentes ciegos contra la API real (`:8085`) y MySQL 8.4, sin leer
+la implementación y con fixtures propios. Se hicieron tres pasadas:
 
-Pendiente de ejecutar:
+1. **Primera:** CP-01…CP-24 y SEC-01…SEC-05. Resultado 158/160. Defectos: 500 al enviar
+   `cantidad: 0.0004` (redondeaba a `0.000`), 409 genérico por cantidad fuera de
+   `decimal(10,3)` y 409 genérico en la carrera de dos altas del mismo producto.
+2. **Segunda:** tras corregir esos tres defectos, 158/160. Quedó abierto que cualquier cantidad
+   con más de tres decimales se rechazaba en vez de redondearse con `HALF_UP` (`0.0005` debía
+   guardarse como `0.001`).
+3. **Tercera (focalizada):** 80/80. Matriz de 11 cantidades × 3 endpoints, 16 CP de regresión,
+   16 comprobaciones de seguridad, contrato, auditoría y tiempos.
 
-- **CP-01…CP-24.** En particular los bordes que el smoke no tocó: CP-05 (`cantidadProducir`
-  negativa), CP-13 (duplicado dentro de la lista inicial, sin receta creada), CP-14
-  (`INSERT` directo que debe fallar por `uk_detalle_receta`), CP-15 (0,005 exacto en base),
-  CP-19 (receta sin ingredientes), CP-22 (fallo en el tercer detalle sin cabecera ni líneas
-  previas) y CP-24 (PRODUCCION escribe).
-- **SEC-01…SEC-05 en los nueve endpoints.** La cobertura automatizada existe (81 casos), pero
-  la batería en caliente con tokens reales sigue pendiente. SEC-03 y SEC-05 necesitan un token
-  caducado y un token de usuario desactivado preparados a mano.
-- **Rendimiento:** ningún endpoint debe superar 2 s (RNF-02).
-- **Base:** `SHOW CREATE TABLE` de `recetas` y `detalle_receta`, y la consulta de consumo
-  teórico de R-02 con una receta real.
+Resultado final:
+
+- **CP-01…CP-24: PASAN**, incluidos CP-02, CP-12, CP-13, CP-14 y CP-22 (atomicidad por tres
+  vías: tercer detalle con MP inexistente, tercer detalle con cantidad inválida y carrera de dos
+  altas; en las tres, 0 huérfanos y sin `CREAR` en bitácora).
+- **SEC-01…SEC-05 en los nueve endpoints: PASAN**, con tokens reales fabricados desde el
+  `JWT_SECRET` del entorno. La matriz de roles también pasa (CONSULTA lee y no escribe;
+  VENTAS/COMPRAS reciben 403).
+- **Cantidades:** `0`/negativas/`0.0001`/`0.0004` → 400 `VALIDACION_FALLIDA` sin insertar;
+  `0.0005` y `0.0009` → `0.001`; `1.2345` → `1.235`; `9999999.999` → se guarda;
+  `10000000` y `99999999.999` → 400. Verificado en base en los tres endpoints de escritura.
+- **Contrato:** paginación, filtros, orden, `%` escapado, `GET /productos/{id}/receta` 200/404,
+  `DELETE /recetas/{id}` 405, detalle de otra receta 404 y MP inactiva 409.
+- **Auditoría:** `CREAR`, `EDITAR`, `CAMBIAR_ESTADO` y `ELIMINAR` presentes; las escrituras
+  fallidas no generan `CREAR`.
+- **Rendimiento:** máximo medido 43 ms en la matriz completa; todos los endpoints muy por debajo
+  de 2 s.
+- **Defectos abiertos: ninguno.**
 
 ## Códigos de error
 
@@ -362,6 +375,5 @@ smoke (3350.75 y 180.55) dan 16762.78 y 540.73 para los mismos ingredientes.
   arranca sin recetas.
 - **Los datos del smoke son de desarrollo.** La receta 3, sus líneas 2 y 3 y las filas de
   bitácora citadas existen en la base local usada el 2026-10-25; no viajan con el repositorio.
-- **Verificación en caliente formal pendiente** (CP-01…CP-24 y SEC-01…SEC-05 en los nueve
-  endpoints) y **frontend pendiente**: no existe pantalla de recetas; el manual de consumo es
-  el contrato para Angular.
+- **Frontend pendiente.** El backend está verificado en caliente (CP-01…CP-24 y SEC-01…05),
+  pero no existe pantalla de recetas; el manual de consumo es el contrato para Angular.
