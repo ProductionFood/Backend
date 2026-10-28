@@ -9,3 +9,5 @@ class/
 *.class
 .atl/
 .codegraph/
+
+.opencode/skills/hu-backend-flow/
