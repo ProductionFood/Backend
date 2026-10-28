@@ -22,7 +22,7 @@ import co.edu.corposucre.productionfood.receta.dto.MateriaPrimaRefResponse;
  * se serializa (la aplicación incluye solo propiedades no nulas).
  */
 public record DetalleCompraResponse(
-    Integer idDetalle,
+    Integer idDetalleCompra,
     MateriaPrimaRefResponse materiaPrima,
     BigDecimal cantidad,
     BigDecimal precioUnitario,

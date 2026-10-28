@@ -92,7 +92,7 @@ class DetalleCompraServiceTest {
         verify(detalleCompraRepository).calcularTotal(ID_COMPRA);
 
         var primera = r.detalles().get(0);
-        assertThat(primera.idDetalle()).isEqualTo(1);
+        assertThat(primera.idDetalleCompra()).isEqualTo(1);
         assertThat(primera.materiaPrima().nombre()).isEqualTo("Harina de trigo");
         assertThat(primera.materiaPrima().unidad()).isEqualTo("kg");
         assertThat(primera.subtotal()).isEqualByComparingTo("320000.00");
@@ -173,7 +173,7 @@ class DetalleCompraServiceTest {
         assertThat(escrita.cantidad().scale()).isEqualTo(2);
         assertThat(escrita.precioUnitario()).isEqualByComparingTo("3200.00");
 
-        assertThat(r.idDetalle()).isEqualTo(28);
+        assertThat(r.idDetalleCompra()).isEqualTo(28);
         assertThat(r.materiaPrima().idMateriaPrima()).isEqualTo(ID_MATERIA_PRIMA);
         assertThat(r.materiaPrima().nombre()).isEqualTo("Harina de trigo");
         assertThat(r.materiaPrima().unidad()).isEqualTo("kg");
@@ -329,7 +329,7 @@ class DetalleCompraServiceTest {
         // R-02: la materia prima de la línea se conserva; la edición no la reemplaza.
         assertThat(escrita.idMateriaPrima()).isEqualTo(ID_MATERIA_PRIMA);
 
-        assertThat(r.idDetalle()).isEqualTo(3);
+        assertThat(r.idDetalleCompra()).isEqualTo(3);
         assertThat(r.materiaPrima().nombre()).isEqualTo("Harina de trigo");
         assertThat(r.cantidad()).isEqualByComparingTo("150.00");
         assertThat(r.subtotal()).isEqualByComparingTo("480000.00");
