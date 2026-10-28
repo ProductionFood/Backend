@@ -14,10 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -220,6 +222,38 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getBody().code()).isEqualTo("METODO_NO_PERMITIDO");
         assertThat(resp.getBody().message())
                 .isEqualTo("El método 'DELETE' no está permitido para este recurso.");
+        assertThat(resp.getBody().fieldErrors()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Content-Type no soportado responde 415 con el tipo recibido en el mensaje")
+    void tipoContenidoNoSoportadoResponde415() {
+        var resp = handler.tipoContenidoNoSoportado(
+                new HttpMediaTypeNotSupportedException(
+                        MediaType.TEXT_PLAIN, List.of(MediaType.APPLICATION_JSON)), req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("TIPO_CONTENIDO_NO_SOPORTADO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("El tipo de contenido 'text/plain' no está soportado "
+                        + "para este recurso.");
+        assertThat(resp.getBody().path()).isEqualTo("/api/v1/usuarios");
+        assertThat(resp.getBody().fieldErrors()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Content-Type ausente responde 415 diciendo que no vino especificado")
+    void tipoContenidoNoSoportadoSinTipoResponde415() {
+        var resp = handler.tipoContenidoNoSoportado(
+                new HttpMediaTypeNotSupportedException("Sin cabecera Content-Type"), req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().code()).isEqualTo("TIPO_CONTENIDO_NO_SOPORTADO");
+        assertThat(resp.getBody().message())
+                .isEqualTo("El tipo de contenido 'no especificado' no está soportado "
+                        + "para este recurso.");
         assertThat(resp.getBody().fieldErrors()).isEmpty();
     }
 

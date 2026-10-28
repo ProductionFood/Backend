@@ -20,6 +20,13 @@ import co.edu.corposucre.productionfood.receta.dto.MateriaPrimaRefResponse;
  * tenga que pedirlo aparte; en los ítems del listado queda en {@code null}, porque ahí el total
  * agregado viaja una sola vez en {@link DetalleCompraListaResponse} y un {@code null} ni siquiera
  * se serializa (la aplicación incluye solo propiedades no nulas).
+ *
+ * <p>{@code costoReferencia} es el {@code materias_primas.costo_unitario} vigente de la materia
+ * prima de la línea y {@code diferenciaCosto} es {@code precioUnitario - costoReferencia} a
+ * escala 2 con {@code HALF_UP}: el comparativo de R-04 que hace visible si esta línea salió más
+ * cara o más barata que el costo de referencia (puede ser negativo o cero). Registrar o editar
+ * una línea nunca escribe el costo: solo se lee (R-04). Ambos campos son opcionales —si la
+ * materia prima no tiene costo viajan en {@code null} y no se serializan—.
  */
 public record DetalleCompraResponse(
     Integer idDetalleCompra,
@@ -27,4 +34,6 @@ public record DetalleCompraResponse(
     BigDecimal cantidad,
     BigDecimal precioUnitario,
     BigDecimal subtotal,
-    BigDecimal totalCompra) {}
+    BigDecimal totalCompra,
+    BigDecimal costoReferencia,
+    BigDecimal diferenciaCosto) {}

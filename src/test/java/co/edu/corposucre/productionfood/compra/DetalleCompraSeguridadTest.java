@@ -349,7 +349,7 @@ class DetalleCompraSeguridadTest {
         return new DetalleCompraResponse(9,
                 new MateriaPrimaRefResponse(5, "Harina de trigo", "kg"),
                 new BigDecimal("100.00"), new BigDecimal("3200.00"),
-                new BigDecimal("320000.00"), new BigDecimal("320000.00"));
+                new BigDecimal("320000.00"), new BigDecimal("320000.00"), null, null);
     }
 
     private static DetalleCompraListaResponse lista() {
@@ -357,7 +357,7 @@ class DetalleCompraSeguridadTest {
                 List.of(new DetalleCompraResponse(9,
                         new MateriaPrimaRefResponse(5, "Harina de trigo", "kg"),
                         new BigDecimal("100.00"), new BigDecimal("3200.00"),
-                        new BigDecimal("320000.00"), null)),
+                        new BigDecimal("320000.00"), null, null, null)),
                 new BigDecimal("320000.00"), 1);
     }
 }

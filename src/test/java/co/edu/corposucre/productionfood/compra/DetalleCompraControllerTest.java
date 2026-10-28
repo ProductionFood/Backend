@@ -90,26 +90,30 @@ class DetalleCompraControllerTest {
 
     /**
      * Línea de ejemplo de la compra 41: harina de trigo, 100 kg a 3200, con su subtotal y el
-     * total de la compra relleno, como lo devuelven el alta y la edición.
+     * total de la compra relleno, como lo devuelven el alta y la edición. El costo de referencia
+     * coincide con el precio pagado, así que el comparativo de R-04 es cero (spec §4).
      */
     private static DetalleCompraResponse linea(int id) {
         return new DetalleCompraResponse(id,
                 new MateriaPrimaRefResponse(5, "Harina de trigo", "kg"),
                 new BigDecimal("100.00"), new BigDecimal("3200.00"),
-                new BigDecimal("320000.00"), new BigDecimal("320000.00"));
+                new BigDecimal("320000.00"), new BigDecimal("320000.00"),
+                new BigDecimal("3200.00"), new BigDecimal("0.00"));
     }
 
     /**
      * Listado de ejemplo: una sola línea, con el total agregado y {@code totalCompra} de los
      * ítems en null, como lo construye el servicio (el total viaja una sola vez en la cabecera
-     * y el null ni se serializa).
+     * y el null ni se serializa). La línea pagó 3200 con un costo de referencia de 3000, para
+     * que el ítem del listado muestre un comparativo distinto del del alta.
      */
     private static DetalleCompraListaResponse lista(int idCompra) {
         return new DetalleCompraListaResponse(idCompra, "PENDIENTE", true,
                 List.of(new DetalleCompraResponse(28,
                         new MateriaPrimaRefResponse(5, "Harina de trigo", "kg"),
                         new BigDecimal("100.00"), new BigDecimal("3200.00"),
-                        new BigDecimal("320000.00"), null)),
+                        new BigDecimal("320000.00"), null,
+                        new BigDecimal("3000.00"), new BigDecimal("200.00"))),
                 new BigDecimal("320000.00"), 1);
     }
 
@@ -133,7 +137,10 @@ class DetalleCompraControllerTest {
                 .andExpect(jsonPath("$.detalles[0].materiaPrima.unidad").value("kg"))
                 .andExpect(jsonPath("$.detalles[0].cantidad").value(100.00))
                 .andExpect(jsonPath("$.detalles[0].precioUnitario").value(3200.00))
-                .andExpect(jsonPath("$.detalles[0].subtotal").value(320000.00));
+                .andExpect(jsonPath("$.detalles[0].subtotal").value(320000.00))
+                // R-04: el ítem del listado lleva su comparativo contra el costo de referencia.
+                .andExpect(jsonPath("$.detalles[0].costoReferencia").value(3000.00))
+                .andExpect(jsonPath("$.detalles[0].diferenciaCosto").value(200.00));
 
         verify(detalleCompraService).listarDetalles(41);
     }
@@ -181,7 +188,10 @@ class DetalleCompraControllerTest {
                 .andExpect(jsonPath("$.cantidad").value(100.00))
                 .andExpect(jsonPath("$.precioUnitario").value(3200.00))
                 .andExpect(jsonPath("$.subtotal").value(320000.00))
-                .andExpect(jsonPath("$.totalCompra").value(320000.00));
+                .andExpect(jsonPath("$.totalCompra").value(320000.00))
+                // Spec §4: el comparativo viaja en el 201, aquí con precio = costo (diferencia 0).
+                .andExpect(jsonPath("$.costoReferencia").value(3200.00))
+                .andExpect(jsonPath("$.diferenciaCosto").value(0.00));
     }
 
     @Test
@@ -261,6 +271,27 @@ class DetalleCompraControllerTest {
 
     @Test
     @WithMockUser(roles = "COMPRAS")
+    @DisplayName("POST con Content-Type no soportado responde 415 TIPO_CONTENIDO_NO_SOPORTADO")
+    void agregarConTipoDeContenidoNoSoportadoResponde415() throws Exception {
+        mockMvc.perform(post(COLECCION)
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("{\"idMateriaPrima\":5,\"cantidad\":100.00,"
+                                + "\"precioUnitario\":3200.00}"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("TIPO_CONTENIDO_NO_SOPORTADO"))
+                // El mensaje refleja la cabecera tal cual llegó, charset incluido: es lo que el
+                // consumidor tiene que corregir para que la petición se acepte.
+                .andExpect(jsonPath("$.message").value(
+                        "El tipo de contenido 'text/plain;charset=UTF-8' no está soportado "
+                                + "para este recurso."));
+
+        // El cuerpo ni siquiera se deserializa: el rechazo ocurre antes de invocar el servicio.
+        verify(detalleCompraService, never()).agregarDetalle(anyInt(),
+                any(AgregarDetalleCompraRequest.class));
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
     @DisplayName("Editar un ítem devuelve la línea con el total de la compra recalculado")
     void editarItemDevuelveLaLineaConTotalRecalculado() throws Exception {
         var req = new ActualizarDetalleCompraRequest(new BigDecimal("50.00"),
@@ -269,7 +300,8 @@ class DetalleCompraControllerTest {
                 .thenReturn(new DetalleCompraResponse(28,
                         new MateriaPrimaRefResponse(5, "Harina de trigo", "kg"),
                         new BigDecimal("50.00"), new BigDecimal("3100.00"),
-                        new BigDecimal("155000.00"), new BigDecimal("155000.00")));
+                        new BigDecimal("155000.00"), new BigDecimal("155000.00"),
+                        new BigDecimal("3200.00"), new BigDecimal("-100.00")));
 
         mockMvc.perform(put(RECURSO)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -279,7 +311,10 @@ class DetalleCompraControllerTest {
                 .andExpect(jsonPath("$.cantidad").value(50.00))
                 .andExpect(jsonPath("$.precioUnitario").value(3100.00))
                 .andExpect(jsonPath("$.subtotal").value(155000.00))
-                .andExpect(jsonPath("$.totalCompra").value(155000.00));
+                .andExpect(jsonPath("$.totalCompra").value(155000.00))
+                // R-04: editar también devuelve el comparativo; aquí, negativo (más barato).
+                .andExpect(jsonPath("$.costoReferencia").value(3200.00))
+                .andExpect(jsonPath("$.diferenciaCosto").value(-100.00));
 
         verify(detalleCompraService).actualizarDetalle(41, 28, req);
     }
