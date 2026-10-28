@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -115,6 +116,27 @@ public class GlobalExceptionHandler {
             }
         }
         return List.of();
+    }
+
+    /**
+     * Traduce un {@code Content-Type} que ningún convertidor acepta a {@code 415}.
+     *
+     * <p>Sin este manejador la excepción caía en el {@code Exception.class} genérico y respondía
+     * {@code 500 ERROR_INTERNO} (D1 del QA de HU-14): un cliente que envía {@code text/plain} con
+     * un cuerpo JSON veía un error de servidor para lo que es un problema de su petición. El tipo
+     * recibido viaja en el mensaje —o «no especificado», si la cabecera venía ausente— para que
+     * el consumidor sepa qué corregir.
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    ResponseEntity<ErrorResponse> tipoContenidoNoSoportado(
+            HttpMediaTypeNotSupportedException ex, HttpServletRequest req) {
+        var tipoContenido = ex.getContentType() == null
+                ? "no especificado"
+                : ex.getContentType().toString();
+        return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "TIPO_CONTENIDO_NO_SOPORTADO",
+                     "El tipo de contenido '" + tipoContenido
+                             + "' no está soportado para este recurso.",
+                     req.getRequestURI(), List.of());
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)

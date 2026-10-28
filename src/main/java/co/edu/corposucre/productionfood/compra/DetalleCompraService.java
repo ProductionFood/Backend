@@ -42,7 +42,8 @@ import co.edu.corposucre.productionfood.receta.dto.MateriaPrimaRefResponse;
  *       trae recalculado desde la base.</li>
  *   <li><strong>R-04</strong>: registrar o editar una línea <em>no</em> toca
  *       {@code materias_primas.costo_unitario}: el precio pagado es de esta compra y el costo de
- *       referencia es de HU-08.</li>
+ *       referencia es de HU-08. Ese costo solo se <em>lee</em> para exponer en cada respuesta de
+ *       línea su {@code costoReferencia} y la {@code diferenciaCosto} contra el precio pagado.</li>
  *   <li><strong>R-05/R-07</strong>: la cantidad debe ser mayor que cero una vez redondeada a
  *       escala 2 (400 {@code CANTIDAD_INVALIDA}, segunda barrera tras el {@code @Positive} del
  *       DTO, que deja pasar valores como {@code 0.001}); el precio puede ser cero.</li>
@@ -78,6 +79,9 @@ public class DetalleCompraService {
      * el array nunca pueden discrepar. Una compra sin líneas responde lista vacía y total
      * {@code 0.00}, que es el estado válido de una compra recién registrada (HU-13).
      *
+     * <p>El comparativo de R-04 ({@code costoReferencia}/{@code diferenciaCosto}) se resuelve con
+     * una sola consulta de costos para todas las materias primas del listado, nunca una por línea.
+     *
      * @param idCompra identificador de la compra
      * @return sus líneas, el total recalculado, el estado y la bandera de edición
      * @throws CompraInexistenteException si la compra no existe (404)
@@ -86,8 +90,11 @@ public class DetalleCompraService {
     public DetalleCompraListaResponse listarDetalles(Integer idCompra) {
         var compra = buscarCompra(idCompra);
 
-        var detalles = detalleCompraRepository.listarPorCompra(idCompra).stream()
-                .map(linea -> aResponse(linea, null))
+        var lineas = detalleCompraRepository.listarPorCompra(idCompra);
+        var costos = detalleCompraRepository.costosReferenciaMateriaPrima(
+                lineas.stream().map(DetalleCompra::idMateriaPrima).distinct().toList());
+        var detalles = lineas.stream()
+                .map(linea -> aResponse(linea, null, costos.get(linea.idMateriaPrima())))
                 .toList();
 
         return new DetalleCompraListaResponse(
@@ -119,11 +126,12 @@ public class DetalleCompraService {
      * <p>La respuesta se relee de la base tras el {@code INSERT} para traer nombre y unidad de la
      * materia prima, y el total de la compra vuelve a consultarse con
      * {@link DetalleCompraRepository#calcularTotal(Integer)}: la cifra que ve el cliente es
-     * siempre la del servidor.
+     * siempre la del servidor. El costo de referencia de la materia prima se lee una sola vez
+     * para exponer el comparativo de R-04, sin escribir nunca esa columna.
      *
      * @param idCompra compra a la que se agrega la línea
      * @param req      materia prima, cantidad positiva y precio no negativo (R-05)
-     * @return la línea insertada, con su subtotal y el total de la compra
+     * @return la línea insertada, con su subtotal, el total de la compra y el comparativo de costo
      * @throws CompraInexistenteException si la compra no existe (404)
      * @throws ConflictoNegocioException si la compra no es editable o la materia prima no existe
      *                                   o ya está en la compra
@@ -159,7 +167,9 @@ public class DetalleCompraService {
         var guardada = detalleCompraRepository.obtenerPorId(idDetalle)
                 .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
                         idDetalle));
-        return aResponse(guardada, totalCompra(idCompra));
+        var costo = detalleCompraRepository
+                .costoReferenciaDeMateriaPrima(guardada.idMateriaPrima()).orElse(null);
+        return aResponse(guardada, totalCompra(idCompra), costo);
     }
 
     /**
@@ -176,7 +186,8 @@ public class DetalleCompraService {
      * @param idCompra  compra de la que es la línea
      * @param idDetalle identificador de la línea
      * @param req       cantidad nueva positiva y precio no negativo, ambos a escala 2
-     * @return la línea actualizada, con su subtotal y el total de la compra recalculado
+     * @return la línea actualizada, con su subtotal, el total de la compra recalculado y el
+     *         comparativo de costo
      * @throws CompraInexistenteException si la compra no existe (404)
      * @throws ConflictoNegocioException si la compra no está {@code PENDIENTE}
      * @throws RecursoNoEncontradoException si la línea no existe o no pertenece a la compra (404)
@@ -196,7 +207,9 @@ public class DetalleCompraService {
                 linea.nombreMateriaPrima(), linea.abreviaturaUnidad());
         detalleCompraRepository.actualizar(actualizada);
 
-        return aResponse(actualizada, totalCompra(idCompra));
+        var costo = detalleCompraRepository
+                .costoReferenciaDeMateriaPrima(actualizada.idMateriaPrima()).orElse(null);
+        return aResponse(actualizada, totalCompra(idCompra), costo);
     }
 
     /**
@@ -302,8 +315,13 @@ public class DetalleCompraService {
      * <p>{@code totalCompra} va en {@code null} cuando se construye desde el listado: ahí el
      * total agregado viaja una sola vez en {@link DetalleCompraListaResponse}, y en las
      * respuestas de línea se rellena con el total recién consultado.
+     *
+     * <p>{@code costoReferencia} llega ya consultado —una línea suelta con su materia prima, el
+     * listado con el mapa resuelto en una sola llamada— y con él se calcula la
+     * {@code diferenciaCosto} del comparativo R-04.
      */
-    private static DetalleCompraResponse aResponse(DetalleCompra linea, BigDecimal totalCompra) {
+    private static DetalleCompraResponse aResponse(DetalleCompra linea, BigDecimal totalCompra,
+                                                   BigDecimal costoReferencia) {
         return new DetalleCompraResponse(
                 linea.idDetalle(),
                 new MateriaPrimaRefResponse(linea.idMateriaPrima(), linea.nombreMateriaPrima(),
@@ -311,6 +329,28 @@ public class DetalleCompraService {
                 linea.cantidad(),
                 linea.precioUnitario(),
                 linea.subtotal(),
-                totalCompra);
+                totalCompra,
+                costoReferencia,
+                diferenciaDeCosto(linea.precioUnitario(), costoReferencia));
+    }
+
+    /**
+     * Comparativo de R-04: lo pagado menos el costo de referencia, a escala 2 con {@code HALF_UP}.
+     *
+     * <p>El resultado puede ser positivo (la línea salió más cara de lo previsto), negativo (más
+     * barata) o cero. Sin costo de referencia no hay comparativo posible: se devuelve {@code
+     * null} y, como la aplicación solo serializa propiedades no nulas, el campo ni siquiera
+     * aparece en la respuesta.
+     *
+     * @param precioUnitario  precio pagado en esta línea
+     * @param costoReferencia {@code materias_primas.costo_unitario} vigente, o {@code null}
+     * @return la diferencia a escala 2, o {@code null} si no hay costo de referencia
+     */
+    private static BigDecimal diferenciaDeCosto(BigDecimal precioUnitario,
+                                                BigDecimal costoReferencia) {
+        if (costoReferencia == null) {
+            return null;
+        }
+        return precioUnitario.subtract(costoReferencia).setScale(2, RoundingMode.HALF_UP);
     }
 }

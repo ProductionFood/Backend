@@ -1,9 +1,13 @@
 package co.edu.corposucre.productionfood.compra;
 
 import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -180,6 +184,56 @@ public class DetalleCompraRepository {
                 WHERE id_compra = :idCompra AND id_materia_prima = :idMateriaPrima
                 """, params, Long.class);
         return total != null && total > 0;
+    }
+
+    /**
+     * Costo de referencia de una materia prima ({@code materias_primas.costo_unitario}), por id.
+     *
+     * <p>Es la columna que R-04 de HU-14 compara con el precio pagado para exponer
+     * {@code costoReferencia} y {@code diferenciaCosto} en la respuesta de una línea. Solo se
+     * lee: registrar o editar una línea nunca escribe este campo, que sigue siendo de HU-08.
+     *
+     * @param idMateriaPrima identificador de la materia prima
+     * @return el costo vigente, o vacío si la materia prima no existe o no tiene costo
+     */
+    public Optional<BigDecimal> costoReferenciaDeMateriaPrima(Integer idMateriaPrima) {
+        var costo = costosReferenciaMateriaPrima(List.of(idMateriaPrima)).get(idMateriaPrima);
+        return Optional.ofNullable(costo);
+    }
+
+    /**
+     * Costos de referencia de varias materias primas resueltos en una sola consulta.
+     *
+     * <p>El listado de una compra puede traer materias primas distintas por cada línea: pedir el
+     * costo una a una sería un N+1 que solo crece con el número de ítems. Aquí se resuelven todos
+     * con un {@code IN (:ids)} y el servicio reparte el mapa entre las líneas.
+     *
+     * <p>Una colección vacía se corta antes de consultar: un {@code IN ()} vacío no es SQL
+     * válida, y una compra sin líneas no tiene ningún costo que buscar.
+     *
+     * @param idsMateriaPrima identificadores de las materias primas; puede venir vacío
+     * @return mapa de materia prima a su costo vigente; las materias primas inexistentes o sin
+     *         costo no aparecen o quedan con {@code null}, y en ambos casos el servicio las trata
+     *         como «sin costo»
+     */
+    public Map<Integer, BigDecimal> costosReferenciaMateriaPrima(
+            Collection<Integer> idsMateriaPrima) {
+        if (idsMateriaPrima == null || idsMateriaPrima.isEmpty()) {
+            return Map.of();
+        }
+
+        var params = new MapSqlParameterSource().addValue("ids", idsMateriaPrima);
+        return jdbc.query("""
+                SELECT id_materia_prima, costo_unitario
+                FROM materias_primas
+                WHERE id_materia_prima IN (:ids)
+                """, params, (ResultSetExtractor<Map<Integer, BigDecimal>>) rs -> {
+            var costos = new HashMap<Integer, BigDecimal>();
+            while (rs.next()) {
+                costos.put(rs.getInt("id_materia_prima"), rs.getBigDecimal("costo_unitario"));
+            }
+            return costos;
+        });
     }
 
     /**

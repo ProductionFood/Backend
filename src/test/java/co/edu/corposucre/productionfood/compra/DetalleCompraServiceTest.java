@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -145,6 +146,37 @@ class DetalleCompraServiceTest {
         assertThat(r.estado()).isEqualTo("RECIBIDA");
         assertThat(r.editable()).isFalse();
         assertThat(r.cantidadItems()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("R-04: cada ítem del listado trae su propio costo de referencia y su diferencia")
+    void listarCadaItemTraeSuComparativoDeCosto() {
+        dadoQueExisteCompra(ID_COMPRA, EstadoCompra.PENDIENTE);
+        when(detalleCompraRepository.listarPorCompra(ID_COMPRA)).thenReturn(List.of(
+                linea(1, ID_COMPRA, 5, "100.00", "3500.00", "Harina de trigo", "kg"),
+                linea(2, ID_COMPRA, 6, "50.00", "3000.00", "Azúcar", "kg")));
+        when(detalleCompraRepository.calcularTotal(ID_COMPRA))
+                .thenReturn(new BigDecimal("500000.00"));
+        when(detalleCompraRepository.costosReferenciaMateriaPrima(List.of(5, 6)))
+                .thenReturn(Map.of(5, new BigDecimal("3200.00"),
+                        6, new BigDecimal("3400.00")));
+
+        var r = service.listarDetalles(ID_COMPRA);
+
+        // Una sola consulta resuelve los costos de todos los ítems: sin una consulta por línea.
+        verify(detalleCompraRepository).costosReferenciaMateriaPrima(List.of(5, 6));
+
+        var harina = r.detalles().get(0);
+        assertThat(harina.costoReferencia()).isEqualByComparingTo("3200.00");
+        assertThat(harina.diferenciaCosto()).isEqualByComparingTo("300.00");
+        assertThat(harina.diferenciaCosto().scale()).isEqualTo(2);
+        // Cada ítem compara contra su propia materia prima, no contra un costo compartido.
+        var azucar = r.detalles().get(1);
+        assertThat(azucar.costoReferencia()).isEqualByComparingTo("3400.00");
+        assertThat(azucar.diferenciaCosto()).isEqualByComparingTo("-400.00");
+        assertThat(azucar.diferenciaCosto().scale()).isEqualTo(2);
+        // El total agregado del listado sigue viajando una sola vez, en la cabecera.
+        assertThat(azucar.totalCompra()).isNull();
     }
 
     @Test
@@ -291,6 +323,80 @@ class DetalleCompraServiceTest {
     }
 
     @Test
+    @DisplayName("R-04: el alta informa el costo de referencia y una diferencia positiva")
+    void agregarConPrecioPorEncimaDelCostoInformaDiferenciaPositiva() {
+        dadoQueExisteCompra(ID_COMPRA, EstadoCompra.PENDIENTE);
+        when(materiaPrimaRepository.existeActiva(ID_MATERIA_PRIMA)).thenReturn(true);
+        when(detalleCompraRepository.existeMateriaPrimaEnCompra(ID_COMPRA,
+                ID_MATERIA_PRIMA)).thenReturn(false);
+        when(detalleCompraRepository.insertar(any(DetalleCompra.class))).thenReturn(28);
+        when(detalleCompraRepository.obtenerPorId(28)).thenReturn(Optional.of(
+                linea(28, ID_COMPRA, ID_MATERIA_PRIMA, "100.00", "3500.00",
+                        "Harina de trigo", "kg")));
+        when(detalleCompraRepository.calcularTotal(ID_COMPRA))
+                .thenReturn(new BigDecimal("350000.00"));
+        when(detalleCompraRepository.costoReferenciaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.of(new BigDecimal("3200.00")));
+
+        var r = service.agregarDetalle(ID_COMPRA, new AgregarDetalleCompraRequest(
+                ID_MATERIA_PRIMA, new BigDecimal("100.00"), new BigDecimal("3500.00")));
+
+        // R-04: la línea salió más cara que el costo de referencia de HU-08.
+        assertThat(r.costoReferencia()).isEqualByComparingTo("3200.00");
+        assertThat(r.diferenciaCosto()).isEqualByComparingTo("300.00");
+        assertThat(r.diferenciaCosto().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("R-04: una línea más barata que el costo de referencia informa diferencia negativa")
+    void agregarConPrecioPorDebajoDelCostoInformaDiferenciaNegativa() {
+        dadoQueExisteCompra(ID_COMPRA, EstadoCompra.PENDIENTE);
+        when(materiaPrimaRepository.existeActiva(ID_MATERIA_PRIMA)).thenReturn(true);
+        when(detalleCompraRepository.existeMateriaPrimaEnCompra(ID_COMPRA,
+                ID_MATERIA_PRIMA)).thenReturn(false);
+        when(detalleCompraRepository.insertar(any(DetalleCompra.class))).thenReturn(29);
+        when(detalleCompraRepository.obtenerPorId(29)).thenReturn(Optional.of(
+                linea(29, ID_COMPRA, ID_MATERIA_PRIMA, "100.00", "3000.00",
+                        "Harina de trigo", "kg")));
+        when(detalleCompraRepository.calcularTotal(ID_COMPRA))
+                .thenReturn(new BigDecimal("300000.00"));
+        when(detalleCompraRepository.costoReferenciaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.of(new BigDecimal("3400.00")));
+
+        var r = service.agregarDetalle(ID_COMPRA, new AgregarDetalleCompraRequest(
+                ID_MATERIA_PRIMA, new BigDecimal("100.00"), new BigDecimal("3000.00")));
+
+        // El comparativo no se recorta a cero: una compra más barata también se reporta.
+        assertThat(r.costoReferencia()).isEqualByComparingTo("3400.00");
+        assertThat(r.diferenciaCosto()).isEqualByComparingTo("-400.00");
+        assertThat(r.diferenciaCosto().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("R-04: una materia prima sin costo de referencia deja el comparativo sin informar")
+    void agregarSinCostoDeReferenciaOmiteElComparativo() {
+        dadoQueExisteCompra(ID_COMPRA, EstadoCompra.PENDIENTE);
+        when(materiaPrimaRepository.existeActiva(ID_MATERIA_PRIMA)).thenReturn(true);
+        when(detalleCompraRepository.existeMateriaPrimaEnCompra(ID_COMPRA,
+                ID_MATERIA_PRIMA)).thenReturn(false);
+        when(detalleCompraRepository.insertar(any(DetalleCompra.class))).thenReturn(28);
+        when(detalleCompraRepository.obtenerPorId(28)).thenReturn(Optional.of(
+                linea(28, ID_COMPRA, ID_MATERIA_PRIMA, "100.00", "3200.00",
+                        "Harina de trigo", "kg")));
+        when(detalleCompraRepository.calcularTotal(ID_COMPRA))
+                .thenReturn(new BigDecimal("320000.00"));
+        when(detalleCompraRepository.costoReferenciaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.empty());
+
+        var r = service.agregarDetalle(ID_COMPRA, new AgregarDetalleCompraRequest(
+                ID_MATERIA_PRIMA, new BigDecimal("100.00"), new BigDecimal("3200.00")));
+
+        // Sin costo no hay comparativo posible: los dos campos quedan en null y no se serializan.
+        assertThat(r.costoReferencia()).isNull();
+        assertThat(r.diferenciaCosto()).isNull();
+    }
+
+    @Test
     @DisplayName("R-05: una cantidad que redondea a cero responde 400 CANTIDAD_INVALIDA")
     void agregarConCantidadQueRedondeaACeroResponde400() {
         dadoQueExisteCompra(ID_COMPRA, EstadoCompra.PENDIENTE);
@@ -316,6 +422,8 @@ class DetalleCompraServiceTest {
                         "Harina de trigo", "kg")));
         when(detalleCompraRepository.calcularTotal(ID_COMPRA))
                 .thenReturn(new BigDecimal("480000.00"));
+        when(detalleCompraRepository.costoReferenciaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.of(new BigDecimal("3300.00")));
 
         var r = service.actualizarDetalle(ID_COMPRA, 3, new ActualizarDetalleCompraRequest(
                 new BigDecimal("150.00"), new BigDecimal("3200.00")));
@@ -336,6 +444,10 @@ class DetalleCompraServiceTest {
         verify(detalleCompraRepository).calcularTotal(ID_COMPRA);
         assertThat(r.totalCompra()).isEqualByComparingTo("480000.00");
         assertThat(r.totalCompra().scale()).isEqualTo(2);
+        // R-04 también llega en la edición: 3200 pagados contra un costo de referencia de 3300.
+        assertThat(r.costoReferencia()).isEqualByComparingTo("3300.00");
+        assertThat(r.diferenciaCosto()).isEqualByComparingTo("-100.00");
+        assertThat(r.diferenciaCosto().scale()).isEqualTo(2);
     }
 
     @Test
