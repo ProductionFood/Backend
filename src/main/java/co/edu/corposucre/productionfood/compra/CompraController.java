@@ -4,10 +4,12 @@ import java.net.URI;
 import java.time.LocalDate;
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -279,5 +282,32 @@ public class CompraController {
             case CANCELADA -> ResponseEntity.ok(compraService.cancelar(id));
             default -> throw compraService.transicionInvalida(id, req.estado());
         };
+    }
+
+    /**
+     * Reserva los paths de solo lectura de HU-15 frente a cualquier intento de escritura.
+     *
+     * <p>{@code /resumen} y {@code /por-proveedor} no tienen endpoint de escritura (HU-15
+     * R-01). Sin este mapping explícito, un PUT —por ejemplo— encajaría en el
+     * {@code @PutMapping("/{id}")} de HU-13 y fallaría al convertir «resumen» a entero,
+     * respondiendo 400 PARAMETRO_INVALIDO en lugar del 405 que exige el contrato (CP-21).
+     * El path literal es más específico que {@code /{id}} y solo declara los métodos de
+     * escritura, de modo que los GET de {@code /resumen} y {@code /por-proveedor} siguen
+     * resolviéndose sin ambigüedad a sus handlers.
+     *
+     * <p>El método no hace nada: lanza {@link HttpRequestMethodNotSupportedException}, que
+     * {@code GlobalExceptionHandler} ya serializa como 405 METODO_NO_PERMITIDO con el cuerpo
+     * estándar. No lleva {@code @PreAuthorize} porque no toca datos ni pasa por el servicio;
+     * la autenticación la exige la cadena de seguridad global.
+     *
+     * @param request petición entrante, solo para leer el método HTTP que se debe rechazar
+     * @throws HttpRequestMethodNotSupportedException siempre; es el mecanismo de respuesta 405
+     */
+    @RequestMapping(value = {"/resumen", "/por-proveedor"},
+            method = {RequestMethod.POST, RequestMethod.PUT,
+                      RequestMethod.PATCH, RequestMethod.DELETE})
+    public void escriturasNoPermitidas(HttpServletRequest request)
+            throws HttpRequestMethodNotSupportedException {
+        throw new HttpRequestMethodNotSupportedException(request.getMethod());
     }
 }

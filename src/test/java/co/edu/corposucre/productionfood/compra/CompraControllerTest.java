@@ -639,6 +639,32 @@ class CompraControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("CP-21: un PUT sobre /resumen responde 405 METODO_NO_PERMITIDO")
+    void putSobreResumenResponde405() throws Exception {
+        mockMvc.perform(put("/api/v1/compras/resumen")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METODO_NO_PERMITIDO"));
+
+        verify(compraService, never()).resumen(any(), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("CP-21: un PUT sobre /por-proveedor responde 405 METODO_NO_PERMITIDO")
+    void putSobrePorProveedorResponde405() throws Exception {
+        mockMvc.perform(put("/api/v1/compras/por-proveedor")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METODO_NO_PERMITIDO"));
+
+        verify(compraService, never()).gastoPorProveedor(any(), any());
+    }
+
+    @Test
     @WithMockUser(roles = "PRODUCCION")
     @DisplayName("Obtener una compra existente devuelve todos sus campos")
     void obtenerCompraExistenteDevuelveSusDatos() throws Exception {
@@ -677,6 +703,20 @@ class CompraControllerTest {
                 .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
 
         verify(compraService, never()).obtener(anyInt());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("Editar una compra con id no numérico responde 400 PARAMETRO_INVALIDO "
+            + "(regresión HU-13)")
+    void editarCompraConIdNoNumericoResponde400() throws Exception {
+        mockMvc.perform(put("/api/v1/compras/abc")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idProveedor\":1,\"fecha\":\"2026-09-18\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
+
+        verify(compraService, never()).actualizar(anyInt(), any(ActualizarCompraRequest.class));
     }
 
     @Test
