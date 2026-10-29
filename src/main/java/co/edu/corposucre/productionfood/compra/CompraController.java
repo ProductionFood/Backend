@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.compra;
 
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.List;
 
 import jakarta.validation.Valid;
 
@@ -21,6 +22,7 @@ import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CambiarEstadoCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -123,6 +125,36 @@ public class CompraController {
             @RequestParam(required = false) LocalDate fechaInicio,
             @RequestParam(required = false) LocalDate fechaFin) {
         return compraService.resumen(fechaInicio, fechaFin);
+    }
+
+    @GetMapping("/por-proveedor")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPRAS')")
+    @Operation(summary = "Gasto de compras por proveedor",
+               description = "Resume las compras RECIBIDA del período agrupadas por proveedor: "
+                        + "cantidad de compras distintas, total de sus líneas —recalculado "
+                        + "siempre del detalle (R-05)— y el porcentaje del total del proveedor "
+                        + "sobre la suma del período, a escala 2. Solo cuenta el gasto "
+                        + "ejecutado: las PENDIENTE y las CANCELADA quedan fuera, y un "
+                        + "proveedor sin recibidas en el rango no aparece. El listado viene "
+                        + "ordenado por total descendente (CP-15) y los porcentajes suman "
+                        + "100.00 con el residuo de redondeo permitido (CP-16). fechaInicio y "
+                        + "fechaFin son opcionales, inclusivos y en formato ISO (yyyy-MM-dd); "
+                        + "un rango invertido responde 400 RANGO_FECHAS_INVALIDO. Un período "
+                        + "sin compras recibidas responde 200 con la lista vacía. Igual que "
+                        + "el resumen, la matriz de roles de HU-15 lo reserva a ADMIN y "
+                        + "COMPRAS.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Lista de gastos por proveedor, con "
+                + "compras o vacía"),
+        @ApiResponse(responseCode = "400", description = "Rango de fechas invertido "
+                + "(RANGO_FECHAS_INVALIDO)"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos")
+    })
+    public List<GastoProveedorResponse> gastoPorProveedor(
+            @RequestParam(required = false) LocalDate fechaInicio,
+            @RequestParam(required = false) LocalDate fechaFin) {
+        return compraService.gastoPorProveedor(fechaInicio, fechaFin);
     }
 
     @GetMapping("/{id}")

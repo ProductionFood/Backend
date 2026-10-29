@@ -34,6 +34,7 @@ import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CambiarEstadoCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.compra.dto.MovimientoGeneradoResponse;
 import co.edu.corposucre.productionfood.compra.dto.ProveedorRefResponse;
 import co.edu.corposucre.productionfood.compra.dto.RecepcionResponse;
@@ -136,6 +137,18 @@ class CompraControllerTest {
                 new ResumenComprasResponse.TotalesEstado(0, cero),
                 new ResumenComprasResponse.TotalesEstado(0, cero),
                 cero, cero);
+    }
+
+    /**
+     * Gasto por proveedor de ejemplo de septiembre 2026, con la forma del contrato de HU-15 §2
+     * y valores distintos por fila para poder comprobar que cada elemento es el que dice ser.
+     */
+    private static List<GastoProveedorResponse> gastoPorProveedor() {
+        return List.of(
+                new GastoProveedorResponse("Harinas del Caribe S.A.S.", 4,
+                        new BigDecimal("2340000.00"), new BigDecimal("56.39")),
+                new GastoProveedorResponse("Distribuidora Lácteos", 3,
+                        new BigDecimal("1810000.00"), new BigDecimal("43.61")));
     }
 
     @Test
@@ -438,6 +451,84 @@ class CompraControllerTest {
                 .andExpect(jsonPath("$.code").value("SIN_PERMISO"));
 
         verify(compraService, never()).resumen(any(), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("El gasto por proveedor devuelve un array con la forma completa del contrato")
+    void gastoPorProveedorDevuelveLaFormaCompleta() throws Exception {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        when(compraService.gastoPorProveedor(inicio, fin)).thenReturn(gastoPorProveedor());
+
+        // La respuesta es un array plano, no paginado ni envuelto (HU-15 §2).
+        mockMvc.perform(get("/api/v1/compras/por-proveedor")
+                        .param("fechaInicio", "2026-09-01")
+                        .param("fechaFin", "2026-09-30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].proveedor").value("Harinas del Caribe S.A.S."))
+                .andExpect(jsonPath("$[0].cantidadCompras").value(4))
+                .andExpect(jsonPath("$[0].total").value(2340000.00))
+                .andExpect(jsonPath("$[0].porcentaje").value(56.39))
+                .andExpect(jsonPath("$[1].proveedor").value("Distribuidora Lácteos"))
+                .andExpect(jsonPath("$[1].cantidadCompras").value(3))
+                .andExpect(jsonPath("$[1].total").value(1810000.00))
+                .andExpect(jsonPath("$[1].porcentaje").value(43.61));
+
+        verify(compraService).gastoPorProveedor(inicio, fin);
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("El gasto por proveedor de un período sin recibidas responde 200 con [] vacío")
+    void gastoPorProveedorVacioResponde200ConListaVacia() throws Exception {
+        when(compraService.gastoPorProveedor(null, null)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/compras/por-proveedor"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        verify(compraService).gastoPorProveedor(null, null);
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("Un rango invertido en el gasto por proveedor responde 400 "
+            + "RANGO_FECHAS_INVALIDO")
+    void gastoPorProveedorConRangoInvertidoResponde400() throws Exception {
+        when(compraService.gastoPorProveedor(LocalDate.of(2026, 9, 30),
+                LocalDate.of(2026, 9, 1)))
+                .thenThrow(new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                        "La fecha de inicio no puede ser posterior a la fecha de fin."));
+
+        mockMvc.perform(get("/api/v1/compras/por-proveedor")
+                        .param("fechaInicio", "2026-09-30")
+                        .param("fechaFin", "2026-09-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("RANGO_FECHAS_INVALIDO"));
+    }
+
+    @Test
+    @DisplayName("El gasto por proveedor sin token responde 401 NO_AUTENTICADO")
+    void gastoPorProveedorSinTokenResponde401() throws Exception {
+        mockMvc.perform(get("/api/v1/compras/por-proveedor"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("NO_AUTENTICADO"));
+
+        verify(compraService, never()).gastoPorProveedor(any(), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "VENTAS")
+    @DisplayName("El gasto por proveedor con un rol sin permiso responde 403 SIN_PERMISO")
+    void gastoPorProveedorConRolSinPermisoResponde403() throws Exception {
+        mockMvc.perform(get("/api/v1/compras/por-proveedor"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("SIN_PERMISO"));
+
+        verify(compraService, never()).gastoPorProveedor(any(), any());
     }
 
     @Test

@@ -1,8 +1,10 @@
 package co.edu.corposucre.productionfood.compra;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -18,6 +20,7 @@ import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.compra.dto.MovimientoGeneradoResponse;
 import co.edu.corposucre.productionfood.compra.dto.ProveedorRefResponse;
 import co.edu.corposucre.productionfood.compra.dto.RecepcionResponse;
@@ -299,6 +302,63 @@ public class CompraService {
         return new ResumenComprasResponse(new Periodo(fechaInicio, fechaFin),
                 recibidas, pendientes, canceladas,
                 recibidas.total(), pendientes.total());
+    }
+
+    /**
+     * Resume las compras recibidas de un período agrupadas por proveedor (HU-15 §2).
+     *
+     * <p>El rango se valida igual que en {@link #resumen(LocalDate, LocalDate)}: un rango
+     * invertido no tiene resultados posibles y responde 400 {@code RANGO_FECHAS_INVALIDO} antes
+     * de tocar la base.
+     *
+     * <p>El repositorio devuelve solo las compras RECIBIDA —el gasto ejecutado—, ordenadas por
+     * total descendente (CP-15), y ese orden se preserva en la respuesta. Cada fila recibe su
+     * porcentaje sobre la suma global de los totales del período, a escala 2 con redondeo
+     * HALF_UP (CP-16): la suma de los porcentajes es 100.00 con el residuo de redondeo
+     * permitido, sin ajustar el último. Un proveedor sin recibidas en el rango no aparece; un
+     * rango vacío responde la lista vacía, no un error.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return gasto por proveedor, ordenado por total descendente; vacía si no hay recibidas
+     * @throws ParametroInvalidoException si el rango de fechas está invertido
+     */
+    @Transactional(readOnly = true)
+    public List<GastoProveedorResponse> gastoPorProveedor(LocalDate fechaInicio,
+                                                           LocalDate fechaFin) {
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            // Mismo código del contrato transversal que en listar y en resumen.
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        var filas = compraRepository.gastoPorProveedor(fechaInicio, fechaFin);
+        var sumaGlobal = filas.stream()
+                .map(GastoProveedorFila::total)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return filas.stream()
+                .map(fila -> new GastoProveedorResponse(
+                        fila.proveedor(),
+                        fila.cantidadCompras(),
+                        fila.total(),
+                        porcentajeDe(fila.total(), sumaGlobal)))
+                .toList();
+    }
+
+    /**
+     * Peso de un total sobre la suma global, a escala 2 con redondeo HALF_UP (CP-16).
+     *
+     * <p>Una suma global en cero solo cabe un período cuyas recibidas suman todos {@code 0.00}
+     * —precios o cantidades a cero—: en ese caso el porcentaje de cada fila es {@code 0.00},
+     * porque no hay nada sobre lo que calcular una fracción.
+     */
+    private static BigDecimal porcentajeDe(BigDecimal total, BigDecimal sumaGlobal) {
+        if (sumaGlobal.signum() == 0) {
+            return new BigDecimal("0.00");
+        }
+        return total.multiply(new BigDecimal(100))
+                .divide(sumaGlobal, 2, RoundingMode.HALF_UP);
     }
 
     /**

@@ -64,6 +64,28 @@ public class CompraRepository {
             LEFT JOIN detalle_compra d ON d.id_compra = c.id_compra
             """;
 
+    /**
+     * Origen del gasto por proveedor (HU-15): agrupa las compras recibidas del rango por
+     * proveedor para sumar su gasto ejecutado.
+     *
+     * <p>Aquí los {@code JOIN} son interiores y no un {@code LEFT JOIN}: el filtro de estado
+     * {@code RECIBIDA} garantiza que cada compra agrupada tiene al menos una línea de detalle
+     * —recibir la compra lo exige (COMPRA_SIN_DETALLE)—, así que el {@code INNER JOIN} con
+     * {@code detalle_compra} no descarta ninguna fila y evita el {@code COALESCE} de un
+     * {@code SUM} sobre un conjunto vacío. El {@code JOIN} con {@code proveedores} es seguro
+     * porque {@code id_proveedor} es {@code NOT NULL} con llave foránea. Igual que en el
+     * resumen, {@code COUNT(DISTINCT c.id_compra)} evita contar una RECIBIDA con dos líneas
+     * como dos compras.
+     */
+    private static final String SELECT_GASTO_PROVEEDOR = """
+            SELECT p.nombre AS proveedor,
+                   COUNT(DISTINCT c.id_compra) AS cantidad,
+                   COALESCE(SUM(d.cantidad * d.precio_unitario), 0) AS total
+            FROM compras c
+            JOIN proveedores p ON p.id_proveedor = c.id_proveedor
+            JOIN detalle_compra d ON d.id_compra = c.id_compra
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
 
     public CompraRepository(NamedParameterJdbcTemplate jdbc) {
@@ -148,6 +170,31 @@ public class CompraRepository {
 
         return jdbc.query(SELECT_RESUMEN + where + " GROUP BY c.estado", params,
                 new ResumenEstadoFilaRowMapper());
+    }
+
+    /**
+     * Resume las compras RECIBIDA de un período agrupadas por proveedor (HU-15).
+     *
+     * <p>Reutiliza el {@code WHERE} de {@link #armarFiltros} con el estado fijo en
+     * {@code RECIBIDA} —el único que cuenta como gasto ejecutado— y el filtro de proveedor
+     * anulado: la consulta justamente agrupa todos los proveedores. Las fechas viajan como
+     * parámetros con nombre, nunca concatenadas en el SQL.
+     *
+     * <p>Los proveedores sin compras recibidas en el rango no devuelven fila. Un rango vacío
+     * devuelve la lista vacía y no un error.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return una fila por proveedor con recibidas en el rango, ordenada por total descendente;
+     *         vacía si el rango no tiene compras recibidas
+     */
+    public List<GastoProveedorFila> gastoPorProveedor(LocalDate fechaInicio, LocalDate fechaFin) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(null, EstadoCompra.RECIBIDA, fechaInicio, fechaFin, params);
+
+        return jdbc.query(SELECT_GASTO_PROVEEDOR + where
+                + " GROUP BY p.id_proveedor, p.nombre"
+                + " ORDER BY total DESC", params, new GastoProveedorFilaRowMapper());
     }
 
     /**

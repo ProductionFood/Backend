@@ -27,6 +27,7 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.SaldosInventario;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
@@ -481,6 +482,100 @@ class CompraServiceTest {
         assertThat(r.gastoEjecutado().scale()).isEqualTo(2);
         assertThat(r.gastoComprometido()).isEqualByComparingTo("0.00");
         assertThat(r.gastoComprometido().scale()).isEqualTo(2);
+    }
+
+    private static GastoProveedorFila filaGasto(String proveedor, long cantidad, String total) {
+        return new GastoProveedorFila(proveedor, cantidad, new BigDecimal(total));
+    }
+
+    @Test
+    @DisplayName("RANGO_FECHAS_INVALIDO: el gasto por proveedor con rango invertido no consulta "
+            + "la base")
+    void gastoPorProveedorConRangoInvertidoResponde400() {
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.gastoPorProveedor(hoy, hoy.minusDays(1)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("CP-15: el gasto por proveedor preserva el orden por total descendente del "
+            + "repositorio y solo trae RECIBIDA")
+    void gastoPorProveedorPreservaElOrdenYSoloAgrupaRecibidas() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        // El repositorio ya filtra RECIBIDA y ordena por total descendente (se comprueba en
+        // CompraRepositoryTest); el servicio no reordena ni reinterpreta las filas.
+        when(compraRepository.gastoPorProveedor(inicio, fin)).thenReturn(List.of(
+                filaGasto("Harinas del Caribe S.A.S.", 4, "2340000.00"),
+                filaGasto("Distribuidora Lácteos", 3, "1810000.00")));
+
+        var r = service.gastoPorProveedor(inicio, fin);
+
+        assertThat(r).extracting(GastoProveedorResponse::proveedor)
+                .containsExactly("Harinas del Caribe S.A.S.", "Distribuidora Lácteos");
+        assertThat(r.get(0).total()).isEqualByComparingTo("2340000.00");
+        assertThat(r.get(1).total()).isEqualByComparingTo("1810000.00");
+        assertThat(r.get(0).cantidadCompras()).isEqualTo(4);
+        assertThat(r.get(1).cantidadCompras()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("CP-16: el porcentaje de cada proveedor se calcula sobre la suma global del "
+            + "período, con HALF_UP a escala 2")
+    void gastoPorProveedorCalculaElPorcentajeSobreElTotalGlobal() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        when(compraRepository.gastoPorProveedor(inicio, fin)).thenReturn(List.of(
+                filaGasto("Harinas del Caribe S.A.S.", 4, "2340000.00"),
+                filaGasto("Distribuidora Lácteos", 3, "1810000.00")));
+
+        var r = service.gastoPorProveedor(inicio, fin);
+
+        // Suma global 4150000.00: 2340000/4150000 × 100 = 56.3855… → 56.39 y
+        // 1810000/4150000 × 100 = 43.6144… → 43.61; los dos suman exactamente 100.00.
+        assertThat(r.get(0).porcentaje()).isEqualByComparingTo("56.39");
+        assertThat(r.get(0).porcentaje().scale()).isEqualTo(2);
+        assertThat(r.get(1).porcentaje()).isEqualByComparingTo("43.61");
+        assertThat(r.get(1).porcentaje().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("CP-16: los porcentajes con residuo de redondeo suman 100 ± 0.01 sin ajuste "
+            + "del último")
+    void gastoPorProveedorAdmiteElResiduoDeRedondeo() {
+        var hoy = LocalDate.now();
+        // Tres totales iguales: cada uno es 33.333…% y HALF_UP deja 33.33; la suma es 99.99,
+        // dentro del residuo que CP-16 permite y sin inflar artificialmente el último.
+        when(compraRepository.gastoPorProveedor(hoy, hoy)).thenReturn(List.of(
+                filaGasto("Proveedor A", 1, "1.00"),
+                filaGasto("Proveedor B", 1, "1.00"),
+                filaGasto("Proveedor C", 1, "1.00")));
+
+        var r = service.gastoPorProveedor(hoy, hoy);
+
+        assertThat(r).extracting(GastoProveedorResponse::porcentaje)
+                .allSatisfy(porcentaje -> {
+                    assertThat(porcentaje).isEqualByComparingTo("33.33");
+                    assertThat(porcentaje.scale()).isEqualTo(2);
+                });
+        var suma = r.stream().map(GastoProveedorResponse::porcentaje)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(suma).isBetween(new BigDecimal("99.99"), new BigDecimal("100.01"));
+    }
+
+    @Test
+    @DisplayName("CP-17: un rango sin compras recibidas devuelve la lista vacía, no un error")
+    void gastoPorProveedorDeUnRangoVacioDevuelveListaVacia() {
+        when(compraRepository.gastoPorProveedor(null, null)).thenReturn(List.of());
+
+        var r = service.gastoPorProveedor(null, null);
+
+        verify(compraRepository).gastoPorProveedor(null, null);
+        assertThat(r).isEmpty();
     }
 
     @Test
