@@ -21,6 +21,7 @@ import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CambiarEstadoCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -94,6 +95,34 @@ public class CompraController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String sort) {
         return compraService.listar(idProveedor, estado, fechaInicio, fechaFin, page, size, sort);
+    }
+
+    @GetMapping("/resumen")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPRAS')")
+    @Operation(summary = "Resumen de compras por período",
+               description = "Resume las compras del período agrupadas por estado: cantidad y "
+                        + "total de las recibidas, pendientes y canceladas, más el gasto "
+                        + "ejecutado —solo el total de las RECIBIDA— y el comprometido —solo el "
+                        + "total de las PENDIENTE—; las canceladas quedan fuera de ambos "
+                        + "(R-04) y los totales se recalculan siempre del detalle (R-05). "
+                        + "fechaInicio y fechaFin son opcionales, inclusivos y en formato ISO "
+                        + "(yyyy-MM-dd); un rango invertido responde 400 RANGO_FECHAS_INVALIDO. "
+                        + "Un período sin compras responde 200 con todas las cantidades en 0 y "
+                        + "los totales en 0.00 (CP-17). A diferencia del listado, el resumen "
+                        + "no admite PRODUCCION ni CONSULTA: la matriz de roles de HU-15 lo "
+                        + "reserva a ADMIN y COMPRAS.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Resumen del período, con compras o "
+                + "con todo en cero"),
+        @ApiResponse(responseCode = "400", description = "Rango de fechas invertido "
+                + "(RANGO_FECHAS_INVALIDO)"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos")
+    })
+    public ResumenComprasResponse resumen(
+            @RequestParam(required = false) LocalDate fechaInicio,
+            @RequestParam(required = false) LocalDate fechaFin) {
+        return compraService.resumen(fechaInicio, fechaFin);
     }
 
     @GetMapping("/{id}")

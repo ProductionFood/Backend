@@ -38,6 +38,7 @@ import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.MovimientoGeneradoResponse;
 import co.edu.corposucre.productionfood.compra.dto.ProveedorRefResponse;
 import co.edu.corposucre.productionfood.compra.dto.RecepcionResponse;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.config.SecurityConfig;
 import co.edu.corposucre.productionfood.rol.Rol;
@@ -80,7 +81,9 @@ import tools.jackson.databind.ObjectMapper;
  * PRODUCCION consume el stock que las compras alimentan, pero no administra el aprovisionamiento
  * y solo tiene permiso de lectura; CONSULTA es el rol de solo lectura del backoffice y nunca
  * escribe. COMPRAS sí está en todos los endpoints de la historia y solo se usa aquí para los
- * casos positivos, no para SEC-04.
+ * casos positivos, no para SEC-04. El resumen de HU-15 es la excepción a la lectura amplia: su
+ * matriz lo reserva a ADMIN y COMPRAS, así que PRODUCCION y CONSULTA también caen en SEC-04
+ * cuando lo piden.
  */
 @WebMvcTest(CompraController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, JwtService.class,
@@ -91,6 +94,7 @@ class CompraSeguridadTest {
     private static final String COLECCION = "/api/v1/compras";
     private static final String RECURSO = "/api/v1/compras/1";
     private static final String ESTADO = "/api/v1/compras/1/estado";
+    private static final String RESUMEN = "/api/v1/compras/resumen";
     private static final String CUERPO_CREAR = "crear";
     private static final String CUERPO_ACTUALIZAR = "actualizar";
     private static final String CUERPO_ESTADO = "estado";
@@ -114,15 +118,16 @@ class CompraSeguridadTest {
     UsuarioRepository usuarioRepository;
 
     /**
-     * Los cinco endpoints de la historia: colección, recurso por id, alta, edición de cabecera y
-     * transición de estado. Los cuerpos de las peticiones de escritura son válidos a propósito:
-     * si la autorización no cortara la petición, el resultado sería 200 o 201 y no un 400 que
-     * enmascararía el fallo de seguridad.
+     * Los seis endpoints de la historia: colección, recurso por id, resumen, alta, edición de
+     * cabecera y transición de estado. Los cuerpos de las peticiones de escritura son válidos a
+     * propósito: si la autorización no cortara la petición, el resultado sería 200 o 201 y no un
+     * 400 que enmascararía el fallo de seguridad.
      */
     private static Stream<Arguments> endpoints() {
         return Stream.of(
                 arguments(HttpMethod.GET, COLECCION, null),
                 arguments(HttpMethod.GET, RECURSO, null),
+                arguments(HttpMethod.GET, RESUMEN, null),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR),
                 arguments(HttpMethod.PUT, RECURSO, CUERPO_ACTUALIZAR),
                 arguments(HttpMethod.PATCH, ESTADO, CUERPO_ESTADO));
@@ -131,12 +136,16 @@ class CompraSeguridadTest {
     /**
      * Cada endpoint con un rol al que se le niega el permiso. VENTAS no lee ni escribe compras
      * (gestiona el punto de venta, no el aprovisionamiento); en las escrituras tampoco CONSULTA,
-     * que nunca escribe, ni PRODUCCION, que solo lee.
+     * que nunca escribe, ni PRODUCCION, que solo lee. El resumen (HU-15) es más restrictivo que
+     * el resto de lecturas: ni PRODUCCION ni CONSULTA lo consultan, solo ADMIN y COMPRAS.
      */
     private static Stream<Arguments> endpointsSinPermiso() {
         return Stream.of(
                 arguments(HttpMethod.GET, COLECCION, null, "VENTAS"),
                 arguments(HttpMethod.GET, RECURSO, null, "VENTAS"),
+                arguments(HttpMethod.GET, RESUMEN, null, "VENTAS"),
+                arguments(HttpMethod.GET, RESUMEN, null, "PRODUCCION"),
+                arguments(HttpMethod.GET, RESUMEN, null, "CONSULTA"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "VENTAS"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "CONSULTA"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "PRODUCCION"),
@@ -273,6 +282,18 @@ class CompraSeguridadTest {
                 .andExpect(jsonPath("$.idCompra").value(1));
     }
 
+    @ParameterizedTest(name = "GET resumen con rol {0} responde 200")
+    @ValueSource(strings = {"ADMIN", "COMPRAS"})
+    @DisplayName("Solo ADMIN y COMPRAS obtienen el resumen de compras")
+    void getResumenConRolPermitidoResponde200(String rol) throws Exception {
+        when(compraService.resumen(any(), any())).thenReturn(resumen());
+        var token = tokenDeRol(rol);
+
+        mockMvc.perform(conToken(peticion(HttpMethod.GET, RESUMEN, null), token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recibidas.cantidad").value(8));
+    }
+
     /**
      * Construye la petición del endpoint indicado con su cuerpo, si lo necesita.
      *
@@ -375,5 +396,15 @@ class CompraSeguridadTest {
                 List.of(new MovimientoGeneradoResponse("Harina de trigo",
                         new BigDecimal("10.000"), new BigDecimal("5.000"),
                         new BigDecimal("15.000"))));
+    }
+
+    private static ResumenComprasResponse resumen() {
+        return new ResumenComprasResponse(
+                new ResumenComprasResponse.Periodo(LocalDate.of(2026, 9, 1),
+                        LocalDate.of(2026, 9, 30)),
+                new ResumenComprasResponse.TotalesEstado(8, new BigDecimal("4850000.00")),
+                new ResumenComprasResponse.TotalesEstado(2, new BigDecimal("620000.00")),
+                new ResumenComprasResponse.TotalesEstado(1, new BigDecimal("85000.00")),
+                new BigDecimal("4850000.00"), new BigDecimal("620000.00"));
     }
 }

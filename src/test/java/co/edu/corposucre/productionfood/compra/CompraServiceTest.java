@@ -394,6 +394,95 @@ class CompraServiceTest {
         verifyNoInteractions(compraRepository);
     }
 
+    private static ResumenEstadoFila filaResumen(EstadoCompra estado, long cantidad,
+                                                 String total) {
+        return new ResumenEstadoFila(estado, cantidad, new BigDecimal(total));
+    }
+
+    @Test
+    @DisplayName("RANGO_FECHAS_INVALIDO: resumen con el rango invertido no consulta la base")
+    void resumenConRangoInvertidoResponde400() {
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.resumen(hoy, hoy.minusDays(1)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("R-04: el resumen agrupa por estado y excluye las canceladas de ambos gastos")
+    void resumenAgrupaPorEstadoYExcluyeCanceladasDeLosGastos() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        // El total llega con escala 4 del SUM de MySQL; la respuesta lo fija a 2.
+        when(compraRepository.resumenPorPeriodo(inicio, fin)).thenReturn(List.of(
+                filaResumen(EstadoCompra.RECIBIDA, 8, "4850000.0000"),
+                filaResumen(EstadoCompra.PENDIENTE, 2, "620000.00"),
+                filaResumen(EstadoCompra.CANCELADA, 1, "85000.00")));
+
+        var r = service.resumen(inicio, fin);
+
+        assertThat(r.periodo().desde()).isEqualTo(inicio);
+        assertThat(r.periodo().hasta()).isEqualTo(fin);
+        assertThat(r.recibidas().cantidad()).isEqualTo(8);
+        assertThat(r.recibidas().total()).isEqualByComparingTo("4850000.00");
+        assertThat(r.recibidas().total().scale()).isEqualTo(2);
+        assertThat(r.pendientes().cantidad()).isEqualTo(2);
+        assertThat(r.pendientes().total()).isEqualByComparingTo("620000.00");
+        assertThat(r.canceladas().cantidad()).isEqualTo(1);
+        assertThat(r.canceladas().total()).isEqualByComparingTo("85000.00");
+        // R-04: ejecutado solo RECIBIDA, comprometido solo PENDIENTE; 85000.00 de canceladas
+        // no financia ninguno de los dos.
+        assertThat(r.gastoEjecutado()).isEqualByComparingTo("4850000.00");
+        assertThat(r.gastoEjecutado().scale()).isEqualTo(2);
+        assertThat(r.gastoComprometido()).isEqualByComparingTo("620000.00");
+        assertThat(r.gastoComprometido().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("CP-17: un estado sin compras en el rango responde 0 y 0.00, no un error")
+    void resumenConEstadosAusentesRespondeCeros() {
+        var hoy = LocalDate.now();
+        when(compraRepository.resumenPorPeriodo(hoy, hoy))
+                .thenReturn(List.of(filaResumen(EstadoCompra.RECIBIDA, 1, "150.00")));
+
+        var r = service.resumen(hoy, hoy);
+
+        assertThat(r.recibidas().cantidad()).isEqualTo(1);
+        assertThat(r.recibidas().total()).isEqualByComparingTo("150.00");
+        assertThat(r.pendientes().cantidad()).isZero();
+        assertThat(r.pendientes().total()).isEqualByComparingTo("0.00");
+        assertThat(r.pendientes().total().scale()).isEqualTo(2);
+        assertThat(r.canceladas().cantidad()).isZero();
+        assertThat(r.canceladas().total()).isEqualByComparingTo("0.00");
+        assertThat(r.canceladas().total().scale()).isEqualTo(2);
+        assertThat(r.gastoEjecutado()).isEqualByComparingTo("150.00");
+        assertThat(r.gastoComprometido()).isEqualByComparingTo("0.00");
+        assertThat(r.gastoComprometido().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("resumen sin filtros pasa las fechas nulas y el periodo responde null")
+    void resumenSinFiltrosDevuelvePeriodoNulo() {
+        when(compraRepository.resumenPorPeriodo(null, null)).thenReturn(List.of());
+
+        var r = service.resumen(null, null);
+
+        verify(compraRepository).resumenPorPeriodo(null, null);
+        assertThat(r.periodo().desde()).isNull();
+        assertThat(r.periodo().hasta()).isNull();
+        // CP-17: un rango sin compras responde 200 con todo en cero, no un 404 ni un 400.
+        assertThat(r.recibidas().cantidad()).isZero();
+        assertThat(r.recibidas().total()).isEqualByComparingTo("0.00");
+        assertThat(r.recibidas().total().scale()).isEqualTo(2);
+        assertThat(r.gastoEjecutado()).isEqualByComparingTo("0.00");
+        assertThat(r.gastoEjecutado().scale()).isEqualTo(2);
+        assertThat(r.gastoComprometido()).isEqualByComparingTo("0.00");
+        assertThat(r.gastoComprometido().scale()).isEqualTo(2);
+    }
+
     @Test
     @DisplayName("obtener devuelve la compra con su proveedor y sus totales")
     void obtenerDevuelveLaCompra() {

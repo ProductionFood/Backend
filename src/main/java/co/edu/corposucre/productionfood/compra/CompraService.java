@@ -21,6 +21,9 @@ import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.MovimientoGeneradoResponse;
 import co.edu.corposucre.productionfood.compra.dto.ProveedorRefResponse;
 import co.edu.corposucre.productionfood.compra.dto.RecepcionResponse;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse.Periodo;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse.TotalesEstado;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
 import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
@@ -254,6 +257,58 @@ public class CompraService {
         return PageResponse.of(
                 filas.stream().map(CompraService::aResponse).toList(),
                 orden.page(), orden.size(), total);
+    }
+
+    /**
+     * Resume las compras de un período por estado, con sus gastos ejecutado y comprometido
+     * (HU-15 §2).
+     *
+     * <p>El rango se valida igual que en {@link #listar(Integer, EstadoCompra, LocalDate,
+     * LocalDate, int, int, String)}: un rango invertido no tiene resultados posibles y responde
+     * 400 {@code RANGO_FECHAS_INVALIDO} antes de tocar la base.
+     *
+     * <p>Los totales llegan del repositorio ya agrupados por estado y siempre recalculados desde
+     * {@code detalle_compra} (R-05). Un estado sin compras en el rango —y también un rango vacío
+     * (CP-17)— responde cantidad {@code 0} y total {@code 0.00}, no un error. Por R-04 el gasto
+     * ejecutado es solo el total de las RECIBIDA y el comprometido solo el de las PENDIENTE: las
+     * CANCELADA se contabilizan en su bloque y quedan fuera de ambos.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return el resumen del período; el periodo de la respuesta recoge los filtros tal cual,
+     *         con ambos campos {@code null} cuando no se envió ninguno
+     * @throws ParametroInvalidoException si el rango de fechas está invertido
+     */
+    @Transactional(readOnly = true)
+    public ResumenComprasResponse resumen(LocalDate fechaInicio, LocalDate fechaFin) {
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            // Mismo código del contrato transversal que en listar: el frontend distingue el
+            // rango invertido de un query mal formado.
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        var porEstado = compraRepository.resumenPorPeriodo(fechaInicio, fechaFin).stream()
+                .collect(Collectors.toMap(ResumenEstadoFila::estado, fila -> fila));
+
+        var recibidas = totalesDe(porEstado.get(EstadoCompra.RECIBIDA));
+        var pendientes = totalesDe(porEstado.get(EstadoCompra.PENDIENTE));
+        var canceladas = totalesDe(porEstado.get(EstadoCompra.CANCELADA));
+
+        // R-04: canceladas se contabiliza aparte; ninguno de los dos gastos la financia.
+        return new ResumenComprasResponse(new Periodo(fechaInicio, fechaFin),
+                recibidas, pendientes, canceladas,
+                recibidas.total(), pendientes.total());
+    }
+
+    /**
+     * Totales de un estado del resumen; un estado sin compras en el rango responde {@code 0} y
+     * {@code 0.00} (CP-17), con la escala 2 del contrato monetario.
+     */
+    private static TotalesEstado totalesDe(ResumenEstadoFila fila) {
+        return fila == null
+                ? new TotalesEstado(0L, new BigDecimal("0.00"))
+                : new TotalesEstado(fila.cantidad(), fila.total());
     }
 
     /**

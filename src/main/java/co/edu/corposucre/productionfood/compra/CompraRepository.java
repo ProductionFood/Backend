@@ -47,6 +47,23 @@ public class CompraRepository {
             JOIN proveedores p ON p.id_proveedor = c.id_proveedor
             """;
 
+    /**
+     * Origen del resumen por estado (HU-15): agrupa las compras del rango con un
+     * {@code LEFT JOIN} a {@code detalle_compra} para sumar sus líneas en la misma consulta.
+     *
+     * <p>{@code COUNT(DISTINCT c.id_compra)} y no {@code COUNT(*)}: con el {@code LEFT JOIN}
+     * cada línea de detalle duplica la fila de su compra, y un {@code COUNT(*)} contaría una
+     * RECIBIDA con dos líneas como dos compras. {@code COALESCE} cubre las compras sin líneas,
+     * cuyo {@code SUM} es {@code NULL} y debe responder {@code 0}.
+     */
+    private static final String SELECT_RESUMEN = """
+            SELECT c.estado,
+                   COUNT(DISTINCT c.id_compra) AS cantidad,
+                   COALESCE(SUM(d.cantidad * d.precio_unitario), 0) AS total
+            FROM compras c
+            LEFT JOIN detalle_compra d ON d.id_compra = c.id_compra
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
 
     public CompraRepository(NamedParameterJdbcTemplate jdbc) {
@@ -109,6 +126,28 @@ public class CompraRepository {
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM compras c " + where, params,
                 Long.class);
         return total == null ? 0L : total;
+    }
+
+    /**
+     * Resume las compras de un período agrupadas por estado (HU-15).
+     *
+     * <p>Reutiliza el {@code WHERE} de {@link #armarFiltros} con los filtros de proveedor y
+     * estado anulados —el resumen justamente agrupa todos los estados y no se parte por
+     * proveedor—: las fechas viajan como parámetros con nombre, nunca concatenadas en el SQL.
+     *
+     * <p>Los estados sin compras en el rango no devuelven fila: el servicio los rellena con
+     * {@code 0}/{@code 0.00}. Un rango vacío devuelve la lista vacía y no un error (CP-17).
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return una fila por estado presente en el rango; vacía si el rango no tiene compras
+     */
+    public List<ResumenEstadoFila> resumenPorPeriodo(LocalDate fechaInicio, LocalDate fechaFin) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(null, null, fechaInicio, fechaFin, params);
+
+        return jdbc.query(SELECT_RESUMEN + where + " GROUP BY c.estado", params,
+                new ResumenEstadoFilaRowMapper());
     }
 
     /**
@@ -246,8 +285,9 @@ public class CompraRepository {
     }
 
     /**
-     * Fragmento {@code WHERE} compartido por {@link #buscar} y {@link #contar}, para que ambos
-     * apliquen exactamente los mismos filtros y el total no diverja de la página.
+     * Fragmento {@code WHERE} compartido por {@link #buscar}, {@link #contar} y
+     * {@link #resumenPorPeriodo}, para que todos apliquen exactamente los mismos filtros y el
+     * total no diverja de la página.
      *
      * <p>Los cuatro filtros son opcionales y se acumulan. Solo se concatenan fragmentos
      * constantes; los valores viajan como parámetros con nombre. {@code c.fecha} es una columna
