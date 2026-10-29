@@ -3,6 +3,9 @@ package co.edu.corposucre.productionfood.compra;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -26,6 +29,7 @@ import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
@@ -74,6 +78,22 @@ class CompraServiceTest {
         compra.setTotalCompra(total);
         compra.setCantidadItems(items);
         return compra;
+    }
+
+    /**
+     * Fila plana de {@link CompraRepository#buscarConDetalle}: {@code null} en cualquier campo
+     * de detalle equivale a la fila de una compra sin líneas que devuelve el {@code LEFT JOIN}.
+     */
+    private static CompraDetalleFila filaDetalle(Integer idCompra, EstadoCompra estado,
+                                                 String total, int items, Integer idDetalle,
+                                                 Integer idMateriaPrima, String cantidad,
+                                                 String precio, String nombreMateriaPrima,
+                                                 String unidad, String costo) {
+        return new CompraDetalleFila(idCompra, ID_PROVEEDOR, LocalDate.of(2026, 9, 18), estado,
+                "Harinas SA", new BigDecimal(total), items, idMateriaPrima, idDetalle,
+                cantidad == null ? null : new BigDecimal(cantidad),
+                precio == null ? null : new BigDecimal(precio),
+                nombreMateriaPrima, unidad, costo == null ? null : new BigDecimal(costo));
     }
 
     private static CrearCompraRequest alta(LocalDate fecha, EstadoCompra estado) {
@@ -336,7 +356,8 @@ class CompraServiceTest {
         when(compraRepository.contar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin))
                 .thenReturn(21L);
 
-        var r = service.listar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin, 2, 10, null);
+        var r = service.listar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin, 2, 10, null,
+                false);
 
         assertThat(r.content()).hasSize(1);
         assertThat(r.content().get(0).idCompra()).isEqualTo(7);
@@ -357,7 +378,7 @@ class CompraServiceTest {
                 eq(20), eq(0L))).thenReturn(List.of());
         when(compraRepository.contar(any(), any(), any(), any())).thenReturn(0L);
 
-        var r = service.listar(null, null, null, null, 0, 20, null);
+        var r = service.listar(null, null, null, null, 0, 20, null, false);
 
         assertThat(r.content()).isEmpty();
         assertThat(r.totalElements()).isZero();
@@ -368,7 +389,8 @@ class CompraServiceTest {
     void listarConRangoInvertidoResponde400() {
         var hoy = LocalDate.now();
 
-        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null))
+        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null,
+                false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
 
@@ -378,7 +400,8 @@ class CompraServiceTest {
     @Test
     @DisplayName("listar con un campo de orden no listado responde 400 CAMPO_ORDEN_INVALIDO")
     void listarConCampoDeOrdenNoListadoResponde400() {
-        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "proveedor"))
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "proveedor",
+                false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
 
@@ -388,11 +411,121 @@ class CompraServiceTest {
     @Test
     @DisplayName("listar con size mayor a 100 responde 400 PARAMETRO_INVALIDO")
     void listarConSizeGrandeResponde400() {
-        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 101, null))
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 101, null, false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
 
         verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("listar sin incluirDetalle responde con el detalle a null y nunca consulta el "
+            + "detalle")
+    void listarSinIncluirDetalleNoTraeDetalle() {
+        when(compraRepository.buscar(any(), any(), any(), any(), eq("c.fecha"), eq(false),
+                eq(20), eq(0L))).thenReturn(List.of(
+                        fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.PENDIENTE,
+                                new BigDecimal("150.00"), 2)));
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(1L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null, false);
+
+        assertThat(r.content()).hasSize(1);
+        // CP-10: sin incluirDetalle el componente detalle va en null y no se serializa.
+        assertThat(r.content().get(0).detalle()).isNull();
+        // El camino sin detalle sigue siendo buscar() + contar(), sin tocar buscarConDetalle.
+        verify(compraRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                anyBoolean(), anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("R-06: con incluirDetalle agrupa las líneas de cada compra con sus subtotales "
+            + "y el comparativo de costo")
+    void listarConIncluirDetalleAgrupaLasLineasDeCadaCompra() {
+        when(compraRepository.buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(20), eq(0L))).thenReturn(List.of(
+                // La cabecera se repite en las dos filas de la compra 7.
+                filaDetalle(7, EstadoCompra.PENDIENTE, "63.33", 2, 101, 5, "3.33", "10.01",
+                        "Harina de trigo", "kg", "8.00"),
+                filaDetalle(7, EstadoCompra.PENDIENTE, "63.33", 2, 102, 6, "2.00", "15.00",
+                        "Azúcar", "kg", null),
+                // La compra 8 no tiene líneas: el LEFT JOIN la trae con el detalle a null.
+                filaDetalle(8, EstadoCompra.RECIBIDA, "0.00", 0, null, null, null, null, null,
+                        null, null)));
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(2L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null, true);
+
+        assertThat(r.content()).extracting(CompraResponse::idCompra).containsExactly(7, 8);
+        var conLineas = r.content().get(0);
+        assertThat(conLineas.detalle()).hasSize(2);
+        assertThat(conLineas.detalle().get(0).idDetalleCompra()).isEqualTo(101);
+        assertThat(conLineas.detalle().get(0).materiaPrima().nombre()).isEqualTo("Harina de trigo");
+        assertThat(conLineas.detalle().get(0).materiaPrima().unidad()).isEqualTo("kg");
+        // 3.33 × 10.01 = 33.3333 → subtotal a escala 2 con HALF_UP, nunca el producto crudo.
+        assertThat(conLineas.detalle().get(0).subtotal()).isEqualByComparingTo("33.33");
+        assertThat(conLineas.detalle().get(0).subtotal().scale()).isEqualTo(2);
+        assertThat(conLineas.detalle().get(1).subtotal()).isEqualByComparingTo("30.00");
+        // Comparativo de HU-14 R-04: precio pagado menos costo de referencia.
+        assertThat(conLineas.detalle().get(0).costoReferencia()).isEqualByComparingTo("8.00");
+        assertThat(conLineas.detalle().get(0).diferenciaCosto()).isEqualByComparingTo("2.01");
+        // Sin costo de referencia no hay comparativo: ambos campos en null (no se serializan).
+        assertThat(conLineas.detalle().get(1).costoReferencia()).isNull();
+        assertThat(conLineas.detalle().get(1).diferenciaCosto()).isNull();
+        // En un listado el total de cada línea va en null: el agregado está en la cabecera.
+        assertThat(conLineas.detalle()).allSatisfy(linea -> assertThat(linea.totalCompra())
+                .isNull());
+        // CP-11: el total de la cabecera concuerda con la suma de los subtotales de su detalle.
+        assertThat(conLineas.totalCompra()).isEqualByComparingTo("63.33");
+
+        var sinLineas = r.content().get(1);
+        assertThat(sinLineas.totalCompra()).isEqualByComparingTo("0.00");
+        assertThat(sinLineas.cantidadItems()).isZero();
+        // CP-10/R-06: una compra sin líneas responde lista vacía, nunca null.
+        assertThat(sinLineas.detalle()).isNotNull().isEmpty();
+
+        // Una sola consulta de detalle y el conteo del total; el listado sin detalle no se usa.
+        verify(compraRepository).contar(any(), any(), any(), any());
+        verify(compraRepository, never()).buscar(any(), any(), any(), any(), any(), anyBoolean(),
+                anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("CP-12: con incluirDetalle un size mayor que 20 se recorta a 20 sin error y la "
+            + "respuesta refleja el tamaño recortado")
+    void listarConIncluirDetalleRecortaElSizeA20() {
+        when(compraRepository.buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(20), eq(0L))).thenReturn(List.of(
+                filaDetalle(7, EstadoCompra.PENDIENTE, "0.00", 0, null, null, null, null, null,
+                        null, null)));
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(150L);
+
+        var r = service.listar(null, null, null, null, 0, 100, null, true);
+
+        assertThat(r.size()).isEqualTo(20);
+        assertThat(r.page()).isZero();
+        assertThat(r.totalElements()).isEqualTo(150L);
+        // La página efectiva es la recortada: el repositorio recibe size 20 y offset 0.
+        verify(compraRepository).buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(20), eq(0L));
+
+        // El recorte es una cota, no un límite de validación: 101 también acaba en 20.
+        var grande = service.listar(null, null, null, null, 0, 101, null, true);
+        assertThat(grande.size()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("CP-12: con incluirDetalle un size menor o igual que 20 no se modifica")
+    void listarConIncluirDetalleConservaElSizeMenorQueLaCota() {
+        when(compraRepository.buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(7), eq(0L))).thenReturn(List.of());
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(0L);
+
+        var r = service.listar(null, null, null, null, 0, 7, null, true);
+
+        assertThat(r.size()).isEqualTo(7);
+        verify(compraRepository).buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(7), eq(0L));
     }
 
     private static ResumenEstadoFila filaResumen(EstadoCompra estado, long cantidad,

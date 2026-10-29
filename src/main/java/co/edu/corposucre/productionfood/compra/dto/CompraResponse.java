@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.compra.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * Respuesta con una compra y su proveedor (HU-13).
@@ -20,6 +21,12 @@ import java.time.LocalDate;
  * <p>{@code editable} lo calcula el servicio a partir de la máquina de estados de
  * {@code EstadoCompra}: solo una compra {@code PENDIENTE} admite edición de cabecera o cambio de
  * estado, y el booleano le ahorra al consumidor reimplementar esa regla.
+ *
+ * <p>{@code detalle} es la lista de líneas de la compra en la forma de HU-14 y solo se rellena
+ * cuando el listado se pide con {@code incluirDetalle=true} (HU-15 R-06); en el resto de
+ * respuestas viaja en {@code null} y, como la aplicación incluye solo propiedades no nulas, el
+ * campo ni siquiera se serializa. Una compra pedida con detalle y sin líneas responde
+ * {@code detalle: []}, nunca {@code null}.
  */
 public record CompraResponse(
         Integer idCompra,
@@ -28,5 +35,6 @@ public record CompraResponse(
         String estado,
         BigDecimal totalCompra,
         int cantidadItems,
-        boolean editable) {
+        boolean editable,
+        List<DetalleCompraResponse> detalle) {
 }

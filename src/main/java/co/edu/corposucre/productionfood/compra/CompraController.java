@@ -79,7 +79,12 @@ public class CompraController {
                         + "inclusivo y un rango invertido responde 400 RANGO_FECHAS_INVALIDO. "
                         + "Se puede ordenar por fecha, estado o id, por defecto fecha "
                         + "descendente. La validación de page, size y sort la hace el "
-                        + "servicio (1 ≤ size ≤ 100).")
+                        + "servicio (1 ≤ size ≤ 100). Con incluirDetalle=true cada compra del "
+                        + "contenido añade su lista de líneas de detalle en la forma de HU-14 "
+                        + "(una sola consulta, sin consulta por compra) y el tamaño de página "
+                        + "se recorta a 20 como máximo si lo excede, reflejándose en la "
+                        + "respuesta; sin incluirDetalle la respuesta no lleva el campo detalle "
+                        + "y la cota de size sigue en 100 (CP-12).")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Listado paginado"),
         @ApiResponse(responseCode = "400", description = "Parámetros de paginación, orden o "
@@ -95,8 +100,10 @@ public class CompraController {
             @RequestParam(required = false) LocalDate fechaFin,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String sort) {
-        return compraService.listar(idProveedor, estado, fechaInicio, fechaFin, page, size, sort);
+            @RequestParam(required = false) String sort,
+            @RequestParam(defaultValue = "false") boolean incluirDetalle) {
+        return compraService.listar(idProveedor, estado, fechaInicio, fechaFin, page, size, sort,
+                incluirDetalle);
     }
 
     @GetMapping("/resumen")

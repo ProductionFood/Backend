@@ -10,6 +10,11 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -19,16 +24,20 @@ import org.junit.jupiter.api.Test;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 
+import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
+import co.edu.corposucre.productionfood.compra.dto.DetalleCompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
 
 /**
- * Pruebas de integración de {@link CompraRepository#resumenPorPeriodo} y
- * {@link CompraRepository#gastoPorProveedor} contra MySQL (HU-15).
+ * Pruebas de integración de {@link CompraRepository#resumenPorPeriodo},
+ * {@link CompraRepository#gastoPorProveedor} y {@link CompraRepository#buscarConDetalle} contra
+ * MySQL (HU-15).
  *
  * <p>El proyecto no usa Testcontainers ni H2: la única base soportada es la del
  * {@code docker-compose}. La prueba se conecta con los mismos parámetros que
@@ -37,11 +46,13 @@ import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
  * entorno sin el contenedor levantado.
  *
  * <p>Cada prueba crea sus propios proveedores, materias primas y compras, y las elimina al
- * terminar. Las fechas propias viven en 1990 —marzo para el resumen y junio para el gasto por
- * proveedor—: ambas consultas se pueden acotar solo por fecha, no por proveedor propio, así que
- * un rango tan remoto no puede cruzarse con la semilla ni con los datos de uso manual que las
- * tablas ya contienen, y el rango vacío de CP-17 (enero de 1991) está garantizado sin depender
- * del estado de la base.
+ * terminar. Las fechas propias viven en 1990 —marzo para el resumen, junio para el gasto por
+ * proveedor, septiembre para el listado con detalle y octubre para la prueba de rendimiento—:
+ * las consultas se pueden acotar solo por fecha, no por proveedor propio, así que un rango tan
+ * remoto no puede cruzarse con la semilla ni con los datos de uso manual que las tablas ya
+ * contienen, y el rango vacío de CP-17 (enero de 1991) está garantizado sin depender del estado
+ * de la base. Septiembre y octubre se limpian por rango en {@code @AfterEach}, porque sus
+ * siembras son de decenas o cientos de filas y no se registran id a id.
  */
 class CompraRepositoryTest {
 
@@ -59,6 +70,33 @@ class CompraRepositoryTest {
     /** Rango propio del gasto por proveedor, separado del del resumen para no cruzarlos. */
     private static final LocalDate INICIO_GASTO = LocalDate.of(1990, 6, 1);
     private static final LocalDate FIN_GASTO = LocalDate.of(1990, 6, 30);
+
+    /** Rango propio del listado con detalle, separado de los otros dos para no cruzarlos. */
+    private static final LocalDate INICIO_DETALLE = LocalDate.of(1990, 9, 1);
+    private static final LocalDate FIN_DETALLE = LocalDate.of(1990, 9, 30);
+
+    /**
+     * Rango propio de la prueba de rendimiento y carrera (CP-18), también separado: ahí se
+     * siembran cientos de compras y la limpieza es por fecha, no id a id.
+     */
+    private static final LocalDate INICIO_RENDIMIENTO = LocalDate.of(1990, 10, 1);
+    private static final LocalDate FIN_RENDIMIENTO = LocalDate.of(1990, 10, 31);
+
+    /** Umbral fijo de CP-18: la lectura de la página con detalle, en milisegundos. */
+    private static final long UMBRAL_MILISEGUNDOS_CP18 = 2000L;
+
+    /** Número de compras de la siembra de rendimiento, el que pide CP-18. */
+    private static final int COMPRAS_RENDIMIENTO = 200;
+
+    private static final String INSERTAR_COMPRA = """
+            INSERT INTO compras (id_proveedor, fecha, estado)
+            VALUES (:idProveedor, :fecha, :estado)
+            """;
+
+    private static final String INSERTAR_LINEA = """
+            INSERT INTO detalle_compra (id_compra, id_materia_prima, cantidad, precio_unitario)
+            VALUES (:idCompra, :idMateriaPrima, :cantidad, :precio)
+            """;
 
     private NamedParameterJdbcTemplate jdbc;
     private CompraRepository repository;
@@ -121,6 +159,12 @@ class CompraRepositoryTest {
             jdbc.update("DELETE FROM compras WHERE id_compra = :id",
                     new MapSqlParameterSource().addValue("id", idCompra));
         }
+        // Las siembras de detalle y de rendimiento son de decenas o cientos de filas y no se
+        // registran id a id: se limpian por rango de fecha, con el detalle antes que la cabecera
+        // porque detalle_compra → compras es FK. Hay que hacerlo antes de borrar materias
+        // primas y proveedores, que esas sí referencian estas filas.
+        borrarRango(INICIO_DETALLE, FIN_DETALLE);
+        borrarRango(INICIO_RENDIMIENTO, FIN_RENDIMIENTO);
         if (!idsMateriaPrima.isEmpty()) {
             jdbc.update("DELETE FROM materias_primas WHERE id_materia_prima IN (:ids)",
                     new MapSqlParameterSource().addValue("ids", idsMateriaPrima));
@@ -296,6 +340,161 @@ class CompraRepositoryTest {
         assertThat(suma).isBetween(new BigDecimal("99.99"), new BigDecimal("100.01"));
     }
 
+    @Test
+    @DisplayName("R-06 sobre la base real: buscarConDetalle devuelve una fila por línea y el "
+            + "servicio agrupa la página con subtotales, comparativo de costo y lista vacía "
+            + "cuando la compra no tiene líneas")
+    void listarConDetalleAgrupaLineasYRespondeVaciaSinLineas() {
+        var recibida = insertarCompra(LocalDate.of(1990, 9, 10), EstadoCompra.RECIBIDA);
+        insertarLinea(recibida, 0, "3.33", "10.01");
+        insertarLinea(recibida, 1, "2.00", "15.00");
+        var pendiente = insertarCompra(LocalDate.of(1990, 9, 5), EstadoCompra.PENDIENTE);
+
+        var filas = repository.buscarConDetalle(null, null, INICIO_DETALLE, FIN_DETALLE,
+                "c.fecha", false, 20, 0);
+        // Una fila por línea: la RECIBIDA sale dos veces con su cabecera repetida y la
+        // PENDIENTE, sin líneas, una sola con el detalle en null.
+        assertThat(filas).extracting(CompraDetalleFila::idCompra)
+                .containsExactly(recibida, recibida, pendiente);
+        assertThat(filas).filteredOn(fila -> fila.conDetalle()).hasSize(2);
+
+        var servicio = new CompraService(repository, mock(ProveedorRepository.class),
+                mock(InventarioService.class));
+
+        var r = servicio.listar(null, null, INICIO_DETALLE, FIN_DETALLE, 0, 20, null, true);
+
+        assertThat(r.totalElements()).isEqualTo(2);
+        // Orden por fecha descendente: la del día 10 antes que la del día 5.
+        assertThat(r.content()).extracting(CompraResponse::idCompra)
+                .containsExactly(recibida, pendiente);
+
+        var conLineas = r.content().get(0);
+        assertThat(conLineas.estado()).isEqualTo("RECIBIDA");
+        assertThat(conLineas.cantidadItems()).isEqualTo(2);
+        var lineas = conLineas.detalle();
+        assertThat(lineas).hasSize(2);
+        // 3.33 × 10.01 = 33.3333 → 33.33 con HALF_UP; 2.00 × 15.00 = 30.00 exacto.
+        assertThat(lineas).extracting(DetalleCompraResponse::subtotal)
+                .containsExactlyInAnyOrder(new BigDecimal("33.33"), new BigDecimal("30.00"));
+        assertThat(lineas).allSatisfy(linea -> assertThat(linea.subtotal().scale())
+                .isEqualTo(2));
+        assertThat(lineas).extracting(linea -> linea.materiaPrima().nombre())
+                .containsExactlyInAnyOrder("Harina HU-15 test" + sufijo,
+                        "Azúcar HU-15 test" + sufijo);
+        // CP-11: el total de la cabecera es exactamente la suma de los subtotales, 63.33.
+        var sumaSubtotales = lineas.stream().map(DetalleCompraResponse::subtotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(conLineas.totalCompra()).isEqualByComparingTo(sumaSubtotales);
+        assertThat(conLineas.totalCompra()).isEqualByComparingTo("63.33");
+        // Comparativo de HU-14 R-04: el costo de referencia es el de materias_primas (el que
+        // fija insertarMateriaPrima) y la diferencia es lo pagado menos ese costo.
+        assertThat(lineas).allSatisfy(linea -> {
+            assertThat(linea.costoReferencia()).isEqualByComparingTo("3200.00");
+            assertThat(linea.diferenciaCosto()).isEqualByComparingTo(
+                    linea.precioUnitario().subtract(new BigDecimal("3200.00")));
+        });
+
+        var sinLineas = r.content().get(1);
+        assertThat(sinLineas.estado()).isEqualTo("PENDIENTE");
+        assertThat(sinLineas.totalCompra()).isEqualByComparingTo("0.00");
+        assertThat(sinLineas.cantidadItems()).isZero();
+        // CP-10/R-06: pedida con detalle y sin líneas responde lista vacía, nunca null.
+        assertThat(sinLineas.detalle()).isNotNull().isEmpty();
+    }
+
+    @Test
+    @DisplayName("CP-18: la página con detalle responde en menos de 2 s con 200 compras y "
+            + "aguanta la carrera de cuatro hilos escribiendo mientras se lee")
+    void buscarConDetalleRindeYResisteLaCarrera() throws Exception {
+        asegurarCuatroMateriasPrimas();
+        sembrarComprasDeRendimiento(COMPRAS_RENDIMIENTO, 28);
+
+        // Calentamiento descartado: la primera consulta paga la preparación del plan en MySQL.
+        medirLecturaDePagina();
+
+        var milisSinCarrera = medirLecturaDePagina();
+        assertThat(milisSinCarrera).as("lectura de la página sin carrera")
+                .isLessThan(UMBRAL_MILISEGUNDOS_CP18);
+
+        var executor = Executors.newFixedThreadPool(4);
+        var arranque = new CountDownLatch(1);
+        try {
+            var futuros = new ArrayList<Future<?>>();
+            for (int hilo = 0; hilo < 4; hilo++) {
+                futuros.add(executor.submit(() -> {
+                    arranque.await();
+                    // Diez compras fechadas los días 1 y 2, los más antiguos de octubre: la
+                    // página 0 ordena por fecha descendente y no cambia mientras se mide.
+                    sembrarComprasDeRendimiento(10, 2);
+                    return null;
+                }));
+            }
+            // Las cuatro escrituras arrancan a la vez con la medición, para que la lectura
+            // corra en medio de la carrera y no antes ni después.
+            arranque.countDown();
+            var milisConCarrera = medirLecturaDePagina();
+            assertThat(milisConCarrera).as("lectura de la página durante la carrera")
+                    .isLessThan(UMBRAL_MILISEGUNDOS_CP18);
+
+            executor.shutdown();
+            assertThat(executor.awaitTermination(60, TimeUnit.SECONDS))
+                    .as("las cuatro escrituras terminan antes de 60 s")
+                    .isTrue();
+            for (var futuro : futuros) {
+                // Propaga el fallo de cualquier escritura concurrente.
+                futuro.get();
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        // Entre la siembra (200) y la siembra más los 4 × 10 de la carrera (240): este rango
+        // de octubre solo lo tocan estas pruebas.
+        var total = repository.contar(null, null, INICIO_RENDIMIENTO, FIN_RENDIMIENTO);
+        assertThat(total).isBetween(200L, 240L);
+
+        var pagina = repository.buscarConDetalle(null, null, INICIO_RENDIMIENTO,
+                FIN_RENDIMIENTO, "c.fecha", false, 20, 0);
+        var idsPagina = pagina.stream().map(CompraDetalleFila::idCompra).distinct().toList();
+        assertThat(idsPagina).hasSize(20);
+    }
+
+    @Test
+    @DisplayName("La paginación con detalle es estable: 28 compras se reparten en 20 + 8 sin "
+            + "solapamiento y sin perder ninguna")
+    void paginarConDetalleNoRepiteNiOmiteCompras() {
+        for (int i = 0; i < 28; i++) {
+            var compra = insertarCompra(INICIO_DETALLE.plusDays(i), EstadoCompra.PENDIENTE);
+            // Dos líneas por compra: si el LIMIT cayera sobre el JOIN, la página de 20
+            // llegaría con menos de 20 compras.
+            insertarLinea(compra, i % 2, "1.00", "10.00");
+            insertarLinea(compra, (i + 1) % 2, "2.00", "5.00");
+        }
+        var servicio = new CompraService(repository, mock(ProveedorRepository.class),
+                mock(InventarioService.class));
+
+        var pagina0 = servicio.listar(null, null, INICIO_DETALLE, FIN_DETALLE, 0, 20, null,
+                true);
+        var pagina1 = servicio.listar(null, null, INICIO_DETALLE, FIN_DETALLE, 1, 20, null,
+                true);
+
+        assertThat(pagina0.content()).hasSize(20);
+        assertThat(pagina0.content()).extracting(CompraResponse::idCompra)
+                .doesNotHaveDuplicates();
+        assertThat(pagina1.content()).hasSize(8);
+        assertThat(pagina1.content()).extracting(CompraResponse::idCompra)
+                .doesNotHaveDuplicates();
+        assertThat(pagina0.totalElements()).isEqualTo(28);
+        assertThat(pagina1.totalElements()).isEqualTo(28);
+
+        var ids0 = pagina0.content().stream().map(CompraResponse::idCompra).toList();
+        var ids1 = pagina1.content().stream().map(CompraResponse::idCompra).toList();
+        assertThat(ids1).doesNotContainAnyElementsOf(ids0);
+        var todos = new ArrayList<>(ids0);
+        todos.addAll(ids1);
+        assertThat(todos).hasSize(28).doesNotHaveDuplicates();
+    }
+
     /**
      * Siembra las tres compras del período propio: una RECIBIDA con dos líneas, una PENDIENTE
      * con una y una CANCELADA con otra.
@@ -347,6 +546,119 @@ class CompraRepositoryTest {
         return new String[] {nombreA, nombreB, nombreC};
     }
 
+    /**
+     * Borra por rango de fecha un par detalle–cabecera, en ese orden por la
+     * {@code detalle_compra → compras}. Es la limpieza de las siembras grandes, que no se
+     * registran id a id en {@code idsCompra}.
+     *
+     * @param inicio primer día incluido del rango propio
+     * @param fin    último día incluido del rango propio
+     */
+    private void borrarRango(LocalDate inicio, LocalDate fin) {
+        var params = new MapSqlParameterSource()
+                .addValue("inicio", inicio)
+                .addValue("fin", fin);
+        jdbc.update("""
+                DELETE dc FROM detalle_compra dc
+                JOIN compras c ON c.id_compra = dc.id_compra
+                WHERE c.fecha BETWEEN :inicio AND :fin
+                """, params);
+        jdbc.update("DELETE FROM compras WHERE fecha BETWEEN :inicio AND :fin", params);
+    }
+
+    /**
+     * Completa el conjunto propio de materias primas hasta cuatro, que es lo que la siembra de
+     * rendimiento necesita para dar hasta cuatro líneas por compra sin repetir materia prima
+     * ({@code uk_detalle_compra}).
+     */
+    private void asegurarCuatroMateriasPrimas() {
+        while (idsMateriaPrima.size() < 4) {
+            idsMateriaPrima.add(insertarMateriaPrima(
+                    "Materia HU-15 test" + idsMateriaPrima.size() + sufijo));
+        }
+    }
+
+    /**
+     * Ejecuta la lectura de CP-18 —la página de 20 compras con detalle y su conteo— y devuelve
+     * lo que tardó, en milisegundos.
+     *
+     * @return milisegundos transcurridos desde el inicio de la página hasta el fin del conteo
+     */
+    private long medirLecturaDePagina() {
+        var inicio = System.nanoTime();
+        repository.buscarConDetalle(null, null, INICIO_RENDIMIENTO, FIN_RENDIMIENTO,
+                "c.fecha", false, 20, 0);
+        repository.contar(null, null, INICIO_RENDIMIENTO, FIN_RENDIMIENTO);
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - inicio);
+    }
+
+    /**
+     * Crea compras de rendimiento del rango propio de octubre por batch: la fecha rota sobre
+     * los {@code dias} primeros días de octubre, el estado reparte los tres en ciclo y cada
+     * compra recibe entre 2 y 4 líneas sobre las materias primas propias, que rotan para no
+     * repetirse dentro de la misma compra.
+     *
+     * <p>Cabeceras y líneas viajan en dos {@code batchUpdate}, nunca en un bucle de updates:
+     * la siembra de CP-18 son cientos de filas y la carrera añade 40 más. La llamada de la
+     * carrera usa 2 días para caer en los más antiguos de octubre, fuera de la página 0 que
+     * ordena por fecha descendente.
+     *
+     * @param cantidad número de compras a crear
+     * @param dias     días de octubre que rotan las fechas, contando desde el 1
+     */
+    private void sembrarComprasDeRendimiento(int cantidad, int dias) {
+        var estados = EstadoCompra.values();
+        var cabeceras = new SqlParameterSource[cantidad];
+        for (int i = 0; i < cantidad; i++) {
+            cabeceras[i] = new MapSqlParameterSource()
+                    .addValue("idProveedor", idProveedor)
+                    .addValue("fecha", INICIO_RENDIMIENTO.plusDays(i % dias))
+                    .addValue("estado", estados[i % 3].name());
+        }
+        var ids = insertarComprasPorBatch(cabeceras);
+
+        var lineas = new ArrayList<SqlParameterSource>();
+        for (int i = 0; i < ids.size(); i++) {
+            for (int k = 0; k < 2 + (i % 3); k++) {
+                lineas.add(new MapSqlParameterSource()
+                        .addValue("idCompra", ids.get(i))
+                        .addValue("idMateriaPrima",
+                                idsMateriaPrima.get((i + k) % idsMateriaPrima.size()))
+                        .addValue("cantidad", BigDecimal.valueOf(i + k + 1, 2))
+                        .addValue("precio", BigDecimal.valueOf(1000 + i + k, 2)));
+            }
+        }
+        jdbc.batchUpdate(INSERTAR_LINEA, lineas.toArray(SqlParameterSource[]::new));
+    }
+
+    /**
+     * Inserta cabeceras en un solo batch y devuelve sus ids generados.
+     *
+     * <p>MySQL devuelve todas las llaves del batch en el orden de inserción; cada fila del
+     * {@link GeneratedKeyHolder} trae una sola columna, la del identificador. Si el conector
+     * no devolviera una llave por cabecera, la aserción del tamaño corta la prueba en seco en
+     * vez de sembrar líneas contra ids que no existen.
+     *
+     * @param cabeceras parámetros de las compras a insertar
+     * @return los ids insertados, en el mismo orden
+     */
+    private List<Integer> insertarComprasPorBatch(SqlParameterSource[] cabeceras) {
+        var claves = new GeneratedKeyHolder();
+        jdbc.batchUpdate(INSERTAR_COMPRA, cabeceras, claves);
+
+        var ids = new ArrayList<Integer>(cabeceras.length);
+        for (var fila : claves.getKeyList()) {
+            Object clave = fila.size() == 1 ? fila.values().iterator().next()
+                    : fila.getOrDefault("id_compra", fila.get("GENERATED_KEY"));
+            assertThat(clave).as("llave generada de una cabecera del batch")
+                    .isInstanceOf(Number.class);
+            ids.add(((Number) clave).intValue());
+        }
+        assertThat(ids).as("llaves devueltas por el batch de cabeceras")
+                .hasSize(cabeceras.length);
+        return ids;
+    }
+
     private Integer insertarProveedorExtra(String nombre) {
         var id = insertarConId("""
                 INSERT INTO proveedores (nombre, estado) VALUES (:nombre, 1)
@@ -367,10 +679,7 @@ class CompraRepositoryTest {
     }
 
     private Integer insertarCompraEn(Integer proveedor, LocalDate fecha, EstadoCompra estado) {
-        var id = insertarConId("""
-                INSERT INTO compras (id_proveedor, fecha, estado)
-                VALUES (:idProveedor, :fecha, :estado)
-                """, new MapSqlParameterSource()
+        var id = insertarConId(INSERTAR_COMPRA, new MapSqlParameterSource()
                         .addValue("idProveedor", proveedor)
                         .addValue("fecha", fecha)
                         .addValue("estado", estado.name()));
@@ -380,10 +689,7 @@ class CompraRepositoryTest {
 
     private void insertarLinea(Integer idCompra, int indiceMateriaPrima, String cantidad,
                                String precio) {
-        jdbc.update("""
-                INSERT INTO detalle_compra (id_compra, id_materia_prima, cantidad, precio_unitario)
-                VALUES (:idCompra, :idMateriaPrima, :cantidad, :precio)
-                """, new MapSqlParameterSource()
+        jdbc.update(INSERTAR_LINEA, new MapSqlParameterSource()
                         .addValue("idCompra", idCompra)
                         .addValue("idMateriaPrima", idsMateriaPrima.get(indiceMateriaPrima))
                         .addValue("cantidad", new BigDecimal(cantidad))
