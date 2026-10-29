@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -361,6 +362,34 @@ class CompraControllerTest {
         mockMvc.perform(get("/api/v1/compras").param("sort", "nombre"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("CAMPO_ORDEN_INVALIDO"));
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("Un idProveedor inexistente en el filtro responde 404 PROVEEDOR_INEXISTENTE")
+    void listadoConProveedorInexistenteResponde404() throws Exception {
+        when(compraService.listar(eq(99999), any(), any(), any(), anyInt(), anyInt(), any(),
+                anyBoolean()))
+                .thenThrow(new ProveedorInexistenteFiltroException(99999));
+
+        mockMvc.perform(get("/api/v1/compras").param("idProveedor", "99999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PROVEEDOR_INEXISTENTE"));
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("El listado con sort=total,desc responde 200 con el orden pedido")
+    void listadoPorTotalResponde200() throws Exception {
+        when(compraService.listar(null, null, null, null, 0, 20, "total,desc", false))
+                .thenReturn(PageResponse.of(List.of(compra(41)), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/compras").param("sort", "total,desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idCompra").value(41))
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        verify(compraService).listar(null, null, null, null, 0, 20, "total,desc", false);
     }
 
     @Test

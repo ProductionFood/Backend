@@ -57,9 +57,14 @@ public class CompraService {
      * de columna SQL de {@code compras} (alias {@code c}). {@code PageRequest.of} rechaza
      * cualquier campo que no esté aquí, y la columna resuelta es la única que llega al
      * repositorio, de modo que el orden nunca es SQL arbitrario.
+     *
+     * <p>{@code total} es el alias {@code total_compra} del {@code SELECT} base, no una columna
+     * de la tabla: el total se calcula con una subconsulta correlada sobre
+     * {@code detalle_compra} y MySQL admite ordenar por el alias del select.
      */
     private static final Map<String, String> ORDEN = Map.of(
-            "fecha", "c.fecha", "estado", "c.estado", "id", "c.id_compra");
+            "fecha", "c.fecha", "estado", "c.estado", "total", "total_compra",
+            "id", "c.id_compra");
 
     private static final String ORDEN_POR_DEFECTO = "fecha,desc";
 
@@ -233,6 +238,12 @@ public class CompraService {
      *
      * <p>El rango de fechas se valida antes de tocar la base (contrato §4): un rango invertido no
      * tiene resultados posibles y responder 400 explica el error mejor que una página vacía.
+     * Con el mismo criterio, un filtro {@code idProveedor} que apunte a un proveedor inexistente
+     * responde 404 ({@code PROVEEDOR_INEXISTENTE}, HU-15 §5) en lugar de una página vacía que
+     * parecería «ese proveedor no tiene compras». Solo se comprueba <strong>existencia</strong>,
+     * no actividad: el historial de una compra ya registrada no se bloquea por desactivar a su
+     * proveedor, igual que el {@code PUT} de HU-13; el alta y la edición siguen respondiendo
+     * 409 con el mismo código.
      *
      * <p>Los cuatro filtros son opcionales y viajan tal cual al repositorio; un valor nulo no
      * restringe. El total sale de {@link CompraRepository#contar} y no del tamaño de la página:
@@ -261,12 +272,15 @@ public class CompraService {
      * @param page           página solicitada, desde 0
      * @param size           tamaño de página, entre 1 y 100; con {@code incluirDetalle} se
      *                       recorta a 20 si lo excede
-     * @param sort           orden "campo,direccion"; por defecto "fecha,desc"
+     * @param sort           orden "campo,direccion", con campos de la lista blanca
+     *                       {@code fecha}, {@code estado}, {@code total} e {@code id};
+     *                       por defecto "fecha,desc"
      * @param incluirDetalle {@code true} para añadir a cada compra su lista de líneas de detalle
      * @return página de compras con su proveedor y sus totales, y con {@code detalle} relleno
      *         solo cuando se pidió incluirlo
      * @throws ParametroInvalidoException si el rango de fechas está invertido, o la paginación o
      *                                    el campo de orden son inválidos
+     * @throws ProveedorInexistenteFiltroException si {@code idProveedor} no existe
      */
     @Transactional(readOnly = true)
     public PageResponse<CompraResponse> listar(Integer idProveedor, EstadoCompra estado,
@@ -278,6 +292,13 @@ public class CompraService {
             // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
             throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
                     "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        // HU-15 §5: validación barata (un EXISTS por id) antes de cualquier consulta del
+        // historial; solo en listar, que es el único endpoint con este filtro. Aquí no se
+        // comprueba actividad por la misma razón que el PUT de HU-13.
+        if (idProveedor != null && !proveedorRepository.existsById(idProveedor)) {
+            throw new ProveedorInexistenteFiltroException(idProveedor);
         }
 
         // CP-12: el recorte va antes de PageRequest.of para que un size sobre la cota de detalle

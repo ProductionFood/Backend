@@ -73,11 +73,12 @@ public class CompraController {
                description = "Listado paginado de compras con su proveedor embebido, su estado, "
                         + "el total derivado del detalle y el número de líneas. Los cuatro "
                         + "filtros son opcionales y se pueden combinar: idProveedor acota a un "
-                        + "proveedor; estado, como valor canónico del enum, deja solo las "
+                        + "proveedor (un id que no existe responde 404 PROVEEDOR_INEXISTENTE); "
+                        + "estado, como valor canónico del enum, deja solo las "
                         + "compras en ese estado (un literal no canónico como ENVIADA responde "
                         + "400 PARAMETRO_INVALIDO); fechaInicio y fechaFin delimitan un rango "
                         + "inclusivo y un rango invertido responde 400 RANGO_FECHAS_INVALIDO. "
-                        + "Se puede ordenar por fecha, estado o id, por defecto fecha "
+                        + "Se puede ordenar por fecha, estado, total o id, por defecto fecha "
                         + "descendente. La validación de page, size y sort la hace el "
                         + "servicio (1 ≤ size ≤ 100). Con incluirDetalle=true cada compra del "
                         + "contenido añade su lista de líneas de detalle en la forma de HU-14 "
@@ -91,7 +92,9 @@ public class CompraController {
                 + "rango de fechas inválidos, o estado no canónico (PARAMETRO_INVALIDO, "
                 + "CAMPO_ORDEN_INVALIDO, RANGO_FECHAS_INVALIDO)"),
         @ApiResponse(responseCode = "401", description = "Sin token"),
-        @ApiResponse(responseCode = "403", description = "Sin permisos")
+        @ApiResponse(responseCode = "403", description = "Sin permisos"),
+        @ApiResponse(responseCode = "404", description = "El filtro idProveedor apunta a un "
+                + "proveedor inexistente (PROVEEDOR_INEXISTENTE)")
     })
     public PageResponse<CompraResponse> listar(
             @RequestParam(required = false) Integer idProveedor,

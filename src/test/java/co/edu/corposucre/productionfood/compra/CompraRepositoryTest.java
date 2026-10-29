@@ -36,8 +36,8 @@ import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
 
 /**
  * Pruebas de integración de {@link CompraRepository#resumenPorPeriodo},
- * {@link CompraRepository#gastoPorProveedor} y {@link CompraRepository#buscarConDetalle} contra
- * MySQL (HU-15).
+ * {@link CompraRepository#gastoPorProveedor}, {@link CompraRepository#buscarConDetalle} y
+ * {@link CompraRepository#buscar} contra MySQL (HU-15).
  *
  * <p>El proyecto no usa Testcontainers ni H2: la única base soportada es la del
  * {@code docker-compose}. La prueba se conecta con los mismos parámetros que
@@ -47,12 +47,12 @@ import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
  *
  * <p>Cada prueba crea sus propios proveedores, materias primas y compras, y las elimina al
  * terminar. Las fechas propias viven en 1990 —marzo para el resumen, junio para el gasto por
- * proveedor, septiembre para el listado con detalle y octubre para la prueba de rendimiento—:
- * las consultas se pueden acotar solo por fecha, no por proveedor propio, así que un rango tan
- * remoto no puede cruzarse con la semilla ni con los datos de uso manual que las tablas ya
- * contienen, y el rango vacío de CP-17 (enero de 1991) está garantizado sin depender del estado
- * de la base. Septiembre y octubre se limpian por rango en {@code @AfterEach}, porque sus
- * siembras son de decenas o cientos de filas y no se registran id a id.
+ * proveedor, abril para el orden por total, septiembre para el listado con detalle y octubre
+ * para la prueba de rendimiento—: las consultas se pueden acotar solo por fecha, no por
+ * proveedor propio, así que un rango tan remoto no puede cruzarse con la semilla ni con los
+ * datos de uso manual que las tablas ya contienen, y el rango vacío de CP-17 (enero de 1991)
+ * está garantizado sin depender del estado de la base. Septiembre, octubre y abril se limpian
+ * por rango en {@code @AfterEach}, porque sus siembras no se registran todas id a id.
  */
 class CompraRepositoryTest {
 
@@ -81,6 +81,10 @@ class CompraRepositoryTest {
      */
     private static final LocalDate INICIO_RENDIMIENTO = LocalDate.of(1990, 10, 1);
     private static final LocalDate FIN_RENDIMIENTO = LocalDate.of(1990, 10, 31);
+
+    /** Rango propio del orden por total y del filtro de proveedor, separado de los otros. */
+    private static final LocalDate INICIO_ORDEN = LocalDate.of(1990, 4, 1);
+    private static final LocalDate FIN_ORDEN = LocalDate.of(1990, 4, 30);
 
     /** Umbral fijo de CP-18: la lectura de la página con detalle, en milisegundos. */
     private static final long UMBRAL_MILISEGUNDOS_CP18 = 2000L;
@@ -165,6 +169,7 @@ class CompraRepositoryTest {
         // primas y proveedores, que esas sí referencian estas filas.
         borrarRango(INICIO_DETALLE, FIN_DETALLE);
         borrarRango(INICIO_RENDIMIENTO, FIN_RENDIMIENTO);
+        borrarRango(INICIO_ORDEN, FIN_ORDEN);
         if (!idsMateriaPrima.isEmpty()) {
             jdbc.update("DELETE FROM materias_primas WHERE id_materia_prima IN (:ids)",
                     new MapSqlParameterSource().addValue("ids", idsMateriaPrima));
@@ -493,6 +498,86 @@ class CompraRepositoryTest {
         var todos = new ArrayList<>(ids0);
         todos.addAll(ids1);
         assertThat(todos).hasSize(28).doesNotHaveDuplicates();
+    }
+
+    @Test
+    @DisplayName("CP-05: buscar con el alias total_compra ordena por total ascendente y "
+            + "descendente")
+    void buscarPorTotalOrdenaAscYDesc() {
+        var esperados = sembrarComprasDelOrden();
+
+        var ascendente = repository.buscar(null, EstadoCompra.RECIBIDA, INICIO_ORDEN,
+                FIN_ORDEN, "total_compra", true, 20, 0);
+        var descendente = repository.buscar(null, EstadoCompra.RECIBIDA, INICIO_ORDEN,
+                FIN_ORDEN, "total_compra", false, 20, 0);
+
+        // La lista blanca del servicio traduce "total" a este alias: los ids salen en el orden
+        // de sus totales, sin empates que lo dejen indeterminado.
+        assertThat(ascendente).extracting(Compra::getIdCompra)
+                .containsExactlyElementsOf(esperados);
+        assertThat(descendente).extracting(Compra::getIdCompra)
+                .containsExactlyElementsOf(esperados.reversed());
+        var totales = ascendente.stream().map(Compra::getTotalCompra).toList();
+        var esperadosTotal = List.of("100.00", "200.00", "300.00", "400.00");
+        for (int i = 0; i < esperadosTotal.size(); i++) {
+            assertThat(totales.get(i)).as("total en la posición %s", i)
+                    .isEqualByComparingTo(esperadosTotal.get(i));
+        }
+    }
+
+    @Test
+    @DisplayName("buscarConDetalle ordena por el alias total_compra sin ERROR 1054: la "
+            + "subpágina proyecta el total que pide su ORDER BY")
+    void buscarConDetallePorTotalOrdenaSinError() {
+        var esperados = sembrarComprasDelOrden();
+
+        var descendente = repository.buscarConDetalle(null, EstadoCompra.RECIBIDA, INICIO_ORDEN,
+                FIN_ORDEN, "total_compra", false, 20, 0);
+        var ascendente = repository.buscarConDetalle(null, EstadoCompra.RECIBIDA, INICIO_ORDEN,
+                FIN_ORDEN, "total_compra", true, 20, 0);
+
+        // sort=total con incluirDetalle=true es la combinación que antes respondía 500.
+        assertThat(descendente).map(CompraDetalleFila::idCompra).containsExactly(
+                esperados.get(3), esperados.get(2), esperados.get(1), esperados.get(0));
+        assertThat(ascendente).map(CompraDetalleFila::idCompra).containsExactly(
+                esperados.get(0), esperados.get(1), esperados.get(2), esperados.get(3));
+    }
+
+    @Test
+    @DisplayName("Un idProveedor inexistente en el filtro no revienta la consulta y devuelve "
+            + "vacío: el 404 lo pone el servicio")
+    void buscarConProveedorInexistenteDevuelveVacia() {
+        // El rango sí tiene compras: lo que no existe es el proveedor del filtro.
+        sembrarComprasDelOrden();
+
+        var filas = repository.buscar(999999, null, INICIO_ORDEN, FIN_ORDEN, "c.fecha", true,
+                20, 0);
+
+        assertThat(filas).isEmpty();
+        assertThat(repository.contar(999999, null, INICIO_ORDEN, FIN_ORDEN)).isZero();
+    }
+
+    /**
+     * Siembra las cuatro compras RECIBIDA del rango propio del orden con líneas de totales
+     * distintos (100.00, 200.00, 300.00 y 400.00), para que el orden por total sea determinista
+     * sin empates; cada compra rota de materia prima para no repetir la {@code uk} de líneas.
+     *
+     * @return los ids sembrados, ordenados por total ascendente
+     */
+    private List<Integer> sembrarComprasDelOrden() {
+        var lineas = new String[][] {
+            {"1.00", "100.00"},
+            {"1.00", "200.00"},
+            {"2.00", "150.00"},
+            {"4.00", "100.00"},
+        };
+        var ids = new ArrayList<Integer>();
+        for (int i = 0; i < lineas.length; i++) {
+            var compra = insertarCompra(INICIO_ORDEN.plusDays(i + 1), EstadoCompra.RECIBIDA);
+            insertarLinea(compra, i % 2, lineas[i][0], lineas[i][1]);
+            ids.add(compra);
+        }
+        return ids;
     }
 
     /**
