@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.compra;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,6 +35,7 @@ import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CambiarEstadoCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.DetalleCompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.compra.dto.MovimientoGeneradoResponse;
 import co.edu.corposucre.productionfood.compra.dto.ProveedorRefResponse;
@@ -44,6 +46,7 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.config.SecurityConfig;
+import co.edu.corposucre.productionfood.receta.dto.MateriaPrimaRefResponse;
 import co.edu.corposucre.productionfood.security.AccesoDenegadoHandler;
 import co.edu.corposucre.productionfood.security.EntryPointNoAutenticado;
 import co.edu.corposucre.productionfood.security.JwtAuthenticationFilter;
@@ -89,11 +92,27 @@ class CompraControllerTest {
 
     /**
      * Compra de ejemplo en estado PENDIENTE, con total y detalle derivados (aún vacíos hasta que
-     * HU-14 agregue líneas).
+     * HU-14 agregue líneas). El componente detalle va en null: la respuesta no lo serializa.
      */
     private static CompraResponse compra(int id) {
         return new CompraResponse(id, new ProveedorRefResponse(1, "Distribuidora Norte"),
-                LocalDate.of(2026, 9, 18), "PENDIENTE", new BigDecimal("150.00"), 2, true);
+                LocalDate.of(2026, 9, 18), "PENDIENTE", new BigDecimal("150.00"), 2, true, null);
+    }
+
+    /**
+     * Compra de ejemplo con el detalle que el listado devuelve cuando se pide
+     * {@code incluirDetalle=true} (HU-15 R-06), en la forma exacta de HU-14: una línea con su
+     * materia prima, su subtotal y su comparativo de costo; el total de la línea va en null
+     * porque en un listado el total agregado viaja en la cabecera.
+     */
+    private static CompraResponse compraConDetalle(int id) {
+        var linea = new DetalleCompraResponse(101,
+                new MateriaPrimaRefResponse(5, "Harina de trigo", "kg"),
+                new BigDecimal("3.33"), new BigDecimal("10.01"), new BigDecimal("33.33"), null,
+                new BigDecimal("8.00"), new BigDecimal("2.01"));
+        return new CompraResponse(id, new ProveedorRefResponse(1, "Distribuidora Norte"),
+                LocalDate.of(2026, 9, 18), "PENDIENTE", new BigDecimal("63.33"), 1, true,
+                List.of(linea));
     }
 
     /**
@@ -311,7 +330,7 @@ class CompraControllerTest {
     @DisplayName("El listado con filtros los pasa al servicio tal cual")
     void listadoConFiltrosLosPasaAlServicio() throws Exception {
         when(compraService.listar(1, EstadoCompra.PENDIENTE,
-                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 0, 20, null))
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 0, 20, null, false))
                 .thenReturn(PageResponse.of(List.of(compra(41)), 0, 20, 1));
 
         mockMvc.perform(get("/api/v1/compras")
@@ -328,14 +347,14 @@ class CompraControllerTest {
                 .andExpect(jsonPath("$.totalElements").value(1));
 
         verify(compraService).listar(1, EstadoCompra.PENDIENTE,
-                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 0, 20, null);
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 0, 20, null, false);
     }
 
     @Test
     @WithMockUser(roles = "CONSULTA")
     @DisplayName("Un campo de orden fuera de la lista blanca responde 400 CAMPO_ORDEN_INVALIDO")
     void listadoConSortInvalidoResponde400() throws Exception {
-        when(compraService.listar(null, null, null, null, 0, 20, "nombre"))
+        when(compraService.listar(null, null, null, null, 0, 20, "nombre", false))
                 .thenThrow(new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
                         "El campo de ordenamiento 'nombre' no es válido."));
 
@@ -348,13 +367,72 @@ class CompraControllerTest {
     @WithMockUser(roles = "PRODUCCION")
     @DisplayName("Un size mayor que 100 responde 400 PARAMETRO_INVALIDO")
     void listadoConSizeDe101Responde400() throws Exception {
-        when(compraService.listar(null, null, null, null, 0, 101, null))
+        when(compraService.listar(null, null, null, null, 0, 101, null, false))
                 .thenThrow(new ParametroInvalidoException("PARAMETRO_INVALIDO",
                         "El parámetro 'size' debe estar entre 1 y 100."));
 
         mockMvc.perform(get("/api/v1/compras").param("size", "101"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("Con incluirDetalle=true cada compra del contenido añade el campo detalle")
+    void listadoConIncluirDetalleDevuelveElDetalle() throws Exception {
+        when(compraService.listar(null, null, null, null, 0, 20, null, true))
+                .thenReturn(PageResponse.of(List.of(compraConDetalle(41)), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/compras").param("incluirDetalle", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idCompra").value(41))
+                .andExpect(jsonPath("$.content[0].detalle").isArray())
+                .andExpect(jsonPath("$.content[0].detalle.length()").value(1))
+                .andExpect(jsonPath("$.content[0].detalle[0].idDetalleCompra").value(101))
+                .andExpect(jsonPath("$.content[0].detalle[0].materiaPrima.nombre")
+                        .value("Harina de trigo"))
+                .andExpect(jsonPath("$.content[0].detalle[0].materiaPrima.unidad").value("kg"))
+                .andExpect(jsonPath("$.content[0].detalle[0].cantidad").value(3.33))
+                .andExpect(jsonPath("$.content[0].detalle[0].precioUnitario").value(10.01))
+                .andExpect(jsonPath("$.content[0].detalle[0].subtotal").value(33.33))
+                .andExpect(jsonPath("$.content[0].detalle[0].costoReferencia").value(8.00))
+                .andExpect(jsonPath("$.content[0].detalle[0].diferenciaCosto").value(2.01))
+                .andExpect(jsonPath("$.content[0].totalCompra").value(63.33))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("Sin incluirDetalle el JSON no lleva el campo detalle (CP-10)")
+    void listadoSinIncluirDetalleNoSerializaElDetalle() throws Exception {
+        when(compraService.listar(null, null, null, null, 0, 20, null, false))
+                .thenReturn(PageResponse.of(List.of(compra(41)), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/compras"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idCompra").value(41))
+                .andExpect(jsonPath("$.content[0].detalle").doesNotExist());
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("CP-12: con incluirDetalle=true el tamaño de la respuesta refleja el recorte "
+            + "a 20")
+    void listadoConIncluirDetalleYSize100ReflejaElSizeRecortado() throws Exception {
+        // El controlador solo pasa el parámetro: el recorte de CP-12 lo aplica el servicio.
+        // Aquí se verifica que la respuesta refleja el size efectivo que el servicio devuelve.
+        when(compraService.listar(null, null, null, null, 0, 100, null, true))
+                .thenReturn(PageResponse.of(List.of(compraConDetalle(41)), 0, 20, 200));
+
+        mockMvc.perform(get("/api/v1/compras")
+                        .param("incluirDetalle", "true")
+                        .param("size", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.totalElements").value(200))
+                .andExpect(jsonPath("$.content[0].detalle.length()").value(1));
     }
 
     @Test
@@ -366,7 +444,7 @@ class CompraControllerTest {
                 .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
 
         verify(compraService, never()).listar(any(), any(), any(), any(), anyInt(), anyInt(),
-                any());
+                any(), anyBoolean());
     }
 
     @Test
@@ -634,7 +712,8 @@ class CompraControllerTest {
     void patchDestinoCanceladaDevuelveLaCompraCancelada() throws Exception {
         when(compraService.cancelar(41)).thenReturn(new CompraResponse(41,
                 new ProveedorRefResponse(1, "Distribuidora Norte"),
-                LocalDate.of(2026, 9, 18), "CANCELADA", new BigDecimal("150.00"), 2, false));
+                LocalDate.of(2026, 9, 18), "CANCELADA", new BigDecimal("150.00"), 2, false,
+                null));
 
         mockMvc.perform(patch("/api/v1/compras/41/estado")
                         .contentType(MediaType.APPLICATION_JSON)

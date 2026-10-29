@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.compra;
 
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
@@ -267,7 +268,8 @@ class CompraSeguridadTest {
     @ValueSource(strings = {"ADMIN", "COMPRAS", "PRODUCCION", "CONSULTA"})
     @DisplayName("Los roles con permiso de lectura listan las compras")
     void getColeccionConRolPermitidoResponde200(String rol) throws Exception {
-        when(compraService.listar(any(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(compraService.listar(any(), any(), any(), any(), anyInt(), anyInt(), any(),
+                anyBoolean()))
                 .thenReturn(PageResponse.of(List.of(compra(1)), 0, 20, 1));
         var token = tokenDeRol(rol);
 
@@ -410,7 +412,7 @@ class CompraSeguridadTest {
 
     private static CompraResponse compra(int id) {
         return new CompraResponse(id, new ProveedorRefResponse(1, "Distribuidora Norte"),
-                LocalDate.of(2026, 9, 18), "PENDIENTE", new BigDecimal("150.00"), 2, true);
+                LocalDate.of(2026, 9, 18), "PENDIENTE", new BigDecimal("150.00"), 2, true, null);
     }
 
     private static RecepcionResponse recepcion() {

@@ -86,6 +86,37 @@ public class CompraRepository {
             JOIN detalle_compra d ON d.id_compra = c.id_compra
             """;
 
+    /**
+     * Origen del listado con el detalle unido (HU-15 R-06), para {@link #buscarConDetalle}.
+     *
+     * <p>Trae la cabecera —las mismas subconsultas correlacionadas de {@link #SELECT}, que
+     * devuelven el mismo valor por cada fila de su compra— junto a las columnas de cada línea,
+     * con {@code LEFT JOIN} porque una compra sin líneas debe aparecer en el listado con el
+     * detalle vacío y no desaparecer.
+     *
+     * <p>El {@code %s} es la página de cabeceras, que se pagina <strong>antes</strong> de unir el
+     * detalle: un {@code LIMIT} aplicado sobre el {@code JOIN} cortaría por filas y una página
+     * de 20 devolvería menos de 20 compras.
+     */
+    private static final String SELECT_CON_DETALLE = """
+            SELECT c.id_compra, c.id_proveedor, c.fecha, c.estado,
+                   p.nombre AS nombre_proveedor,
+                   COALESCE((SELECT SUM(dc.cantidad * dc.precio_unitario)
+                             FROM detalle_compra dc
+                             WHERE dc.id_compra = c.id_compra), 0) AS total_compra,
+                   COALESCE((SELECT COUNT(*)
+                             FROM detalle_compra dc
+                             WHERE dc.id_compra = c.id_compra), 0) AS cantidad_items,
+                   d.id_materia_prima, d.id_detalle_compra, d.cantidad, d.precio_unitario,
+                   mp.nombre AS nombre_materia_prima, u.abreviatura AS abreviatura_unidad,
+                   mp.costo_unitario AS costo_referencia
+            FROM (%s) c
+            JOIN proveedores p ON p.id_proveedor = c.id_proveedor
+            LEFT JOIN detalle_compra d ON d.id_compra = c.id_compra
+            LEFT JOIN materias_primas mp ON mp.id_materia_prima = d.id_materia_prima
+            LEFT JOIN unidades_medida u ON u.id_unidad = mp.id_unidad
+            """;
+
     private final NamedParameterJdbcTemplate jdbc;
 
     public CompraRepository(NamedParameterJdbcTemplate jdbc) {
@@ -124,6 +155,59 @@ public class CompraRepository {
                 + " LIMIT :tamano OFFSET :desplazamiento";
 
         return jdbc.query(sql, params, new CompraRowMapper());
+    }
+
+    /**
+     * Devuelve una página de compras con sus líneas de detalle en una sola consulta (HU-15 R-06).
+     *
+     * <p>Es la contraparte de {@link #buscar} cuando el listado se pide con
+     * {@code incluirDetalle=true}: un {@code LEFT JOIN} a {@code detalle_compra},
+     * {@code materias_primas} y {@code unidades_medida} trae cabecera y líneas juntas, de modo
+     * que una página de 20 compras con líneas resuelve en <strong>una</strong> consulta y nunca
+     * en un bucle de consultas por compra (N+1). Los {@code LEFT JOIN} son interiores a propósito:
+     * una compra sin líneas debe devolverse con sus columnas de detalle en {@code null} para que
+     * el servicio responda {@code detalle: []}.
+     *
+     * <p>La página se calcula sobre la cabecera —la subconsulta interna filtra, ordena y aplica
+     * {@code LIMIT/OFFSET} sobre {@code compras}— y después se une el detalle, porque de otro
+     * modo el {@code LIMIT} contaría filas del {@code JOIN} y una página pedida de 20 compras
+     * llegaría con menos de 20. Las subconsultas correlacionadas de total e ítems se mantienen:
+     * son las mismas de {@link #SELECT} y devuelven la misma cifra en cada fila de su compra.
+     *
+     * <p>El {@code WHERE} es el de {@link #armarFiltros}, el mismo que usan {@link #buscar} y
+     * {@link #contar}, para que la página y el total no diverjan.
+     *
+     * <p>Devuelve una fila plana por combinación compra/línea —y una fila con el detalle a
+     * {@code null} por cada compra sin líneas—, sin agrupar: la agrupación en memoria por
+     * {@code id_compra}, preservando el orden de la primera aparición de cada compra, la hace el
+     * servicio al montar cada {@code CompraResponse} con su lista de detalle.
+     *
+     * @param idProveedor     proveedor a filtrar, o {@code null} para no filtrar
+     * @param estado          estado a filtrar, o {@code null} para no filtrar
+     * @param fechaInicio     primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin        último día incluido del rango, o {@code null} sin límite superior
+     * @param propiedadOrden  columna ya validada por la lista blanca del servicio
+     * @param ascendente      {@code true} para orden ascendente, {@code false} para descendente
+     * @param size            número de <strong>compras</strong> de la página
+     * @param offset          desplazamiento de la página; es {@code long} porque {@code page} no
+     *                        tiene cota superior y {@code page * size} desbordaría un int
+     * @return una fila por cada línea de cada compra de la página, y una fila sin detalle por
+     *         cada compra sin líneas, en el orden de la página
+     */
+    public List<CompraDetalleFila> buscarConDetalle(Integer idProveedor, EstadoCompra estado,
+                                                    LocalDate fechaInicio, LocalDate fechaFin,
+                                                    String propiedadOrden, boolean ascendente,
+                                                    int size, long offset) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(idProveedor, estado, fechaInicio, fechaFin, params);
+        params.addValue("tamano", size).addValue("desplazamiento", offset);
+
+        var orden = " ORDER BY " + propiedadOrden + (ascendente ? " ASC" : " DESC");
+        var pagina = "SELECT id_compra, id_proveedor, fecha, estado FROM compras c" + where
+                + orden + " LIMIT :tamano OFFSET :desplazamiento";
+
+        return jdbc.query(SELECT_CON_DETALLE.formatted(pagina) + orden, params,
+                new CompraDetalleFilaRowMapper());
     }
 
     /**
