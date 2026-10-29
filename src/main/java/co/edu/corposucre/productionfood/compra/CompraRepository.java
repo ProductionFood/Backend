@@ -203,7 +203,14 @@ public class CompraRepository {
         params.addValue("tamano", size).addValue("desplazamiento", offset);
 
         var orden = " ORDER BY " + propiedadOrden + (ascendente ? " ASC" : " DESC");
-        var pagina = "SELECT id_compra, id_proveedor, fecha, estado FROM compras c" + where
+        // La subpágina proyecta también total_compra porque su ORDER BY puede pedirlo
+        // (sort=total): el alias solo existiría en la proyección exterior y MySQL respondería
+        // ERROR 1054 Unknown column en la cláusula de orden de la subconsulta.
+        var pagina = "SELECT id_compra, id_proveedor, fecha, estado,"
+                + " COALESCE((SELECT SUM(dc.cantidad * dc.precio_unitario)"
+                + "          FROM detalle_compra dc WHERE dc.id_compra = c.id_compra), 0)"
+                + "   AS total_compra"
+                + " FROM compras c" + where
                 + orden + " LIMIT :tamano OFFSET :desplazamiento";
 
         return jdbc.query(SELECT_CON_DETALLE.formatted(pagina) + orden, params,

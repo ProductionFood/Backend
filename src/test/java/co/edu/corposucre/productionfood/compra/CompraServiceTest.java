@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpStatus;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
@@ -350,6 +351,9 @@ class CompraServiceTest {
         var fin = hoy.minusDays(1);
         var compra = fila(7, "Harinas SA", hoy.minusDays(5), EstadoCompra.PENDIENTE,
                 new BigDecimal("150.00"), 2);
+        // Con el filtro informado, listar exige que el proveedor exista (HU-15 §5): aquí pasa
+        // la validación y por eso el resto del listado se ejecuta con normalidad.
+        when(proveedorRepository.existsById(ID_PROVEEDOR)).thenReturn(true);
         when(compraRepository.buscar(eq(ID_PROVEEDOR), eq(EstadoCompra.PENDIENTE), eq(inicio),
                 eq(fin), eq("c.fecha"), eq(false), eq(10), eq(20L)))
                 .thenReturn(List.of(compra));
@@ -366,9 +370,27 @@ class CompraServiceTest {
         assertThat(r.size()).isEqualTo(10);
         assertThat(r.totalElements()).isEqualTo(21L);
         // Por defecto "fecha,desc": page 2 con size 10 es offset 20, calculado en long.
+        verify(proveedorRepository).existsById(ID_PROVEEDOR);
         verify(compraRepository).buscar(eq(ID_PROVEEDOR), eq(EstadoCompra.PENDIENTE), eq(inicio),
                 eq(fin), eq("c.fecha"), eq(false), eq(10), eq(20L));
         verify(compraRepository).contar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin);
+    }
+
+    @Test
+    @DisplayName("HU-15 §5: listar con un idProveedor inexistente responde 404 "
+            + "PROVEEDOR_INEXISTENTE sin consultar el historial")
+    void listarConProveedorInexistenteResponde404SinConsultar() {
+        when(proveedorRepository.existsById(99999)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.listar(99999, null, null, null, 0, 10, null, false))
+                .isInstanceOf(ProveedorInexistenteFiltroException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PROVEEDOR_INEXISTENTE")
+                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND);
+
+        // La validación es anterior a cualquier consulta: ni la página ni el conteo se piden.
+        verify(compraRepository, never()).buscar(any(), any(), any(), any(), any(), anyBoolean(),
+                anyInt(), anyLong());
+        verify(compraRepository, never()).contar(any(), any(), any(), any());
     }
 
     @Test
@@ -401,6 +423,35 @@ class CompraServiceTest {
     @DisplayName("listar con un campo de orden no listado responde 400 CAMPO_ORDEN_INVALIDO")
     void listarConCampoDeOrdenNoListadoResponde400() {
         assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "proveedor",
+                false))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("sort=total se traduce al alias total_compra del SELECT en ambos sentidos")
+    void listarPorTotalUsaElAliasDelSelectEnAmbosSentidos() {
+        when(compraRepository.buscar(any(), any(), any(), any(), eq("total_compra"), anyBoolean(),
+                anyInt(), anyLong())).thenReturn(List.of());
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(0L);
+
+        service.listar(null, null, null, null, 0, 20, "total", false);
+        service.listar(null, null, null, null, 0, 20, "total,desc", false);
+
+        // La lista blanca traduce "total" al alias del select; la dirección viaja aparte.
+        verify(compraRepository).buscar(any(), any(), any(), any(), eq("total_compra"),
+                eq(true), eq(20), eq(0L));
+        verify(compraRepository).buscar(any(), any(), any(), any(), eq("total_compra"),
+                eq(false), eq(20), eq(0L));
+    }
+
+    @Test
+    @DisplayName("sort=totalCompra, fuera de la lista blanca, responde 400 CAMPO_ORDEN_INVALIDO")
+    void listarConSortTotalCompraResponde400() {
+        // El nombre del DTO no es el de la lista blanca: solo fecha, estado, total e id.
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "totalCompra",
                 false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
