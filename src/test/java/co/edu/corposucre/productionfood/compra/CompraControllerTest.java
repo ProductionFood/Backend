@@ -37,6 +37,7 @@ import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.MovimientoGeneradoResponse;
 import co.edu.corposucre.productionfood.compra.dto.ProveedorRefResponse;
 import co.edu.corposucre.productionfood.compra.dto.RecepcionResponse;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
@@ -58,14 +59,14 @@ import tools.jackson.databind.ObjectMapper;
  * sustituyen las dos piezas que tocarían la base de datos: el servicio de compras y el
  * repositorio de usuarios. No hace falta MySQL para ejecutar estas pruebas.
  *
- * <p>Cubre el contrato de los cinco endpoints: el alta con su Location y sus campos derivados,
+ * <p>Cubre el contrato de los seis endpoints: el alta con su Location y sus campos derivados,
  * la validación de forma del POST, los errores de negocio de la especificación (CA-01, CA-02,
- * CA-03), el listado con filtros y su validación, la edición de cabecera, el despacho del PATCH
- * de estado por destino (RECIBIDA con su recepción, CANCELADA con su CompraResponse y PENDIENTE
- * con TRANSICION_INVALIDA) y el 400 de un id no numérico. El efecto transaccional de la
- * recepción (inventario y kardex) se comprueba en {@code CompraServiceTest}; aquí se verifica
- * que el controlador no añade ni quita nada y que los errores de negocio llegan al cliente con
- * su código.
+ * CA-03), el listado con filtros y su validación, el resumen por período con sus gastos (HU-15),
+ * la edición de cabecera, el despacho del PATCH de estado por destino (RECIBIDA con su
+ * recepción, CANCELADA con su CompraResponse y PENDIENTE con TRANSICION_INVALIDA) y el 400 de
+ * un id no numérico. El efecto transaccional de la recepción (inventario y kardex) se comprueba
+ * en {@code CompraServiceTest}; aquí se verifica que el controlador no añade ni quita nada y que
+ * los errores de negocio llegan al cliente con su código.
  */
 @WebMvcTest(CompraController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, JwtService.class,
@@ -107,6 +108,34 @@ class CompraControllerTest {
 
     private static CrearCompraRequest pedidoDeCreacionValido() {
         return new CrearCompraRequest(1, LocalDate.of(2026, 9, 18), EstadoCompra.PENDIENTE);
+    }
+
+    /**
+     * Resumen de ejemplo de septiembre 2026, con la forma exacta del contrato de HU-15 §4 y
+     * valores distintos por estado para poder comprobar que cada bloque es el que dice ser.
+     */
+    private static ResumenComprasResponse resumen() {
+        return new ResumenComprasResponse(
+                new ResumenComprasResponse.Periodo(LocalDate.of(2026, 9, 1),
+                        LocalDate.of(2026, 9, 30)),
+                new ResumenComprasResponse.TotalesEstado(8, new BigDecimal("4850000.00")),
+                new ResumenComprasResponse.TotalesEstado(2, new BigDecimal("620000.00")),
+                new ResumenComprasResponse.TotalesEstado(1, new BigDecimal("85000.00")),
+                new BigDecimal("4850000.00"),
+                new BigDecimal("620000.00"));
+    }
+
+    /**
+     * Resumen de un período sin compras (CP-17): todo en cero y el periodo con los campos nulos.
+     */
+    private static ResumenComprasResponse resumenVacio() {
+        var cero = new BigDecimal("0.00");
+        return new ResumenComprasResponse(
+                new ResumenComprasResponse.Periodo(null, null),
+                new ResumenComprasResponse.TotalesEstado(0, cero),
+                new ResumenComprasResponse.TotalesEstado(0, cero),
+                new ResumenComprasResponse.TotalesEstado(0, cero),
+                cero, cero);
     }
 
     @Test
@@ -325,6 +354,90 @@ class CompraControllerTest {
 
         verify(compraService, never()).listar(any(), any(), any(), any(), anyInt(), anyInt(),
                 any());
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("El resumen devuelve la forma completa del contrato con los gastos por estado")
+    void resumenDevuelveLaFormaCompleta() throws Exception {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        when(compraService.resumen(inicio, fin)).thenReturn(resumen());
+
+        mockMvc.perform(get("/api/v1/compras/resumen")
+                        .param("fechaInicio", "2026-09-01")
+                        .param("fechaFin", "2026-09-30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.periodo.desde").value("2026-09-01"))
+                .andExpect(jsonPath("$.periodo.hasta").value("2026-09-30"))
+                .andExpect(jsonPath("$.recibidas.cantidad").value(8))
+                .andExpect(jsonPath("$.recibidas.total").value(4850000.00))
+                .andExpect(jsonPath("$.pendientes.cantidad").value(2))
+                .andExpect(jsonPath("$.pendientes.total").value(620000.00))
+                .andExpect(jsonPath("$.canceladas.cantidad").value(1))
+                .andExpect(jsonPath("$.canceladas.total").value(85000.00))
+                // R-04: ejecutado es solo el de las RECIBIDA (4850000.00, no 4935000.00 con el
+                // bloque de canceladas) y comprometido solo el de las PENDIENTE.
+                .andExpect(jsonPath("$.gastoEjecutado").value(4850000.00))
+                .andExpect(jsonPath("$.gastoComprometido").value(620000.00));
+
+        verify(compraService).resumen(inicio, fin);
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("El resumen sin parámetros pasa fechas nulas y el periodo sale con null")
+    void resumenSinParametrosPasaFechasNulas() throws Exception {
+        when(compraService.resumen(null, null)).thenReturn(resumenVacio());
+
+        // La inclusión global non_null omite los campos nulos del JSON: el periodo existe pero
+        // sin desde ni hasta, que es como el contrato expresa "sin filtros".
+        mockMvc.perform(get("/api/v1/compras/resumen"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.periodo.desde").doesNotExist())
+                .andExpect(jsonPath("$.periodo.hasta").doesNotExist())
+                .andExpect(jsonPath("$.recibidas.cantidad").value(0))
+                .andExpect(jsonPath("$.recibidas.total").value(0.00))
+                .andExpect(jsonPath("$.gastoEjecutado").value(0.00))
+                .andExpect(jsonPath("$.gastoComprometido").value(0.00));
+
+        verify(compraService).resumen(null, null);
+    }
+
+    @Test
+    @WithMockUser(roles = "COMPRAS")
+    @DisplayName("Un rango invertido en el resumen responde 400 RANGO_FECHAS_INVALIDO")
+    void resumenConRangoInvertidoResponde400() throws Exception {
+        when(compraService.resumen(LocalDate.of(2026, 9, 30), LocalDate.of(2026, 9, 1)))
+                .thenThrow(new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                        "La fecha de inicio no puede ser posterior a la fecha de fin."));
+
+        mockMvc.perform(get("/api/v1/compras/resumen")
+                        .param("fechaInicio", "2026-09-30")
+                        .param("fechaFin", "2026-09-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("RANGO_FECHAS_INVALIDO"));
+    }
+
+    @Test
+    @DisplayName("El resumen sin token responde 401 NO_AUTENTICADO")
+    void resumenSinTokenResponde401() throws Exception {
+        mockMvc.perform(get("/api/v1/compras/resumen"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("NO_AUTENTICADO"));
+
+        verify(compraService, never()).resumen(any(), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("El resumen con un rol sin permiso responde 403 SIN_PERMISO")
+    void resumenConRolSinPermisoResponde403() throws Exception {
+        mockMvc.perform(get("/api/v1/compras/resumen"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("SIN_PERMISO"));
+
+        verify(compraService, never()).resumen(any(), any());
     }
 
     @Test
