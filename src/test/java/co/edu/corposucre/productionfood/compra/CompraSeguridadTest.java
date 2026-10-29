@@ -95,6 +95,7 @@ class CompraSeguridadTest {
     private static final String RECURSO = "/api/v1/compras/1";
     private static final String ESTADO = "/api/v1/compras/1/estado";
     private static final String RESUMEN = "/api/v1/compras/resumen";
+    private static final String POR_PROVEEDOR = "/api/v1/compras/por-proveedor";
     private static final String CUERPO_CREAR = "crear";
     private static final String CUERPO_ACTUALIZAR = "actualizar";
     private static final String CUERPO_ESTADO = "estado";
@@ -118,16 +119,18 @@ class CompraSeguridadTest {
     UsuarioRepository usuarioRepository;
 
     /**
-     * Los seis endpoints de la historia: colección, recurso por id, resumen, alta, edición de
-     * cabecera y transición de estado. Los cuerpos de las peticiones de escritura son válidos a
-     * propósito: si la autorización no cortara la petición, el resultado sería 200 o 201 y no un
-     * 400 que enmascararía el fallo de seguridad.
+     * Los siete endpoints de la historia: colección, recurso por id, resumen, gasto por
+     * proveedor, alta, edición de cabecera y transición de estado. Los cuerpos de las
+     * peticiones de escritura son válidos a propósito: si la autorización no cortara la
+     * petición, el resultado sería 200 o 201 y no un 400 que enmascararía el fallo de
+     * seguridad.
      */
     private static Stream<Arguments> endpoints() {
         return Stream.of(
                 arguments(HttpMethod.GET, COLECCION, null),
                 arguments(HttpMethod.GET, RECURSO, null),
                 arguments(HttpMethod.GET, RESUMEN, null),
+                arguments(HttpMethod.GET, POR_PROVEEDOR, null),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR),
                 arguments(HttpMethod.PUT, RECURSO, CUERPO_ACTUALIZAR),
                 arguments(HttpMethod.PATCH, ESTADO, CUERPO_ESTADO));
@@ -136,8 +139,9 @@ class CompraSeguridadTest {
     /**
      * Cada endpoint con un rol al que se le niega el permiso. VENTAS no lee ni escribe compras
      * (gestiona el punto de venta, no el aprovisionamiento); en las escrituras tampoco CONSULTA,
-     * que nunca escribe, ni PRODUCCION, que solo lee. El resumen (HU-15) es más restrictivo que
-     * el resto de lecturas: ni PRODUCCION ni CONSULTA lo consultan, solo ADMIN y COMPRAS.
+     * que nunca escribe, ni PRODUCCION, que solo lee. El resumen y el gasto por proveedor
+     * (HU-15) son más restrictivos que el resto de lecturas: ni PRODUCCION ni CONSULTA los
+     * consultan, solo ADMIN y COMPRAS.
      */
     private static Stream<Arguments> endpointsSinPermiso() {
         return Stream.of(
@@ -146,6 +150,9 @@ class CompraSeguridadTest {
                 arguments(HttpMethod.GET, RESUMEN, null, "VENTAS"),
                 arguments(HttpMethod.GET, RESUMEN, null, "PRODUCCION"),
                 arguments(HttpMethod.GET, RESUMEN, null, "CONSULTA"),
+                arguments(HttpMethod.GET, POR_PROVEEDOR, null, "VENTAS"),
+                arguments(HttpMethod.GET, POR_PROVEEDOR, null, "PRODUCCION"),
+                arguments(HttpMethod.GET, POR_PROVEEDOR, null, "CONSULTA"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "VENTAS"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "CONSULTA"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "PRODUCCION"),
@@ -292,6 +299,21 @@ class CompraSeguridadTest {
         mockMvc.perform(conToken(peticion(HttpMethod.GET, RESUMEN, null), token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recibidas.cantidad").value(8));
+    }
+
+    @ParameterizedTest(name = "GET por-proveedor con rol {0} responde 200")
+    @ValueSource(strings = {"ADMIN", "COMPRAS"})
+    @DisplayName("Solo ADMIN y COMPRAS obtienen el gasto de compras por proveedor")
+    void getPorProveedorConRolPermitidoResponde200(String rol) throws Exception {
+        // Una lista vacía es un resultado válido del endpoint (período sin recibidas): lo que
+        // se comprueba aquí es que el rol autenticado supera la autorización y llega al servicio.
+        when(compraService.gastoPorProveedor(any(), any())).thenReturn(List.of());
+        var token = tokenDeRol(rol);
+
+        mockMvc.perform(conToken(peticion(HttpMethod.GET, POR_PROVEEDOR, null), token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$.length()").value(0));
     }
 
     /**

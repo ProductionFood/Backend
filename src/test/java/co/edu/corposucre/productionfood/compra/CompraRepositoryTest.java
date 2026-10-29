@@ -22,11 +22,13 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 
+import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
 
 /**
- * Pruebas de integración de {@link CompraRepository#resumenPorPeriodo} contra MySQL (HU-15).
+ * Pruebas de integración de {@link CompraRepository#resumenPorPeriodo} y
+ * {@link CompraRepository#gastoPorProveedor} contra MySQL (HU-15).
  *
  * <p>El proyecto no usa Testcontainers ni H2: la única base soportada es la del
  * {@code docker-compose}. La prueba se conecta con los mismos parámetros que
@@ -34,11 +36,12 @@ import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
  * con {@code assumeTrue} si la base o la tabla no están disponibles, para no fallar en un
  * entorno sin el contenedor levantado.
  *
- * <p>Cada prueba crea su propio proveedor, materias primas y compras, y las elimina al terminar.
- * Las fechas propias viven en marzo de 1990: el resumen no se puede acotar por proveedor —agrupa
- * todas las compras del rango—, así que un rango tan remoto no puede cruzarse con la semilla ni
- * con los datos de uso manual que la tabla ya contiene, y el rango vacío de CP-17 (enero de
- * 1991) está garantizado sin depender del estado de la base.
+ * <p>Cada prueba crea sus propios proveedores, materias primas y compras, y las elimina al
+ * terminar. Las fechas propias viven en 1990 —marzo para el resumen y junio para el gasto por
+ * proveedor—: ambas consultas se pueden acotar solo por fecha, no por proveedor propio, así que
+ * un rango tan remoto no puede cruzarse con la semilla ni con los datos de uso manual que las
+ * tablas ya contienen, y el rango vacío de CP-17 (enero de 1991) está garantizado sin depender
+ * del estado de la base.
  */
 class CompraRepositoryTest {
 
@@ -53,6 +56,10 @@ class CompraRepositoryTest {
     private static final LocalDate INICIO = LocalDate.of(1990, 3, 1);
     private static final LocalDate FIN = LocalDate.of(1990, 3, 31);
 
+    /** Rango propio del gasto por proveedor, separado del del resumen para no cruzarlos. */
+    private static final LocalDate INICIO_GASTO = LocalDate.of(1990, 6, 1);
+    private static final LocalDate FIN_GASTO = LocalDate.of(1990, 6, 30);
+
     private NamedParameterJdbcTemplate jdbc;
     private CompraRepository repository;
 
@@ -60,6 +67,7 @@ class CompraRepositoryTest {
     private Integer idUnidad;
     private final List<Integer> idsMateriaPrima = new ArrayList<>();
     private Integer idProveedor;
+    private final List<Integer> idsProveedorExtra = new ArrayList<>();
     private final List<Integer> idsCompra = new ArrayList<>();
 
     private static String entorno(String nombre, String defecto) {
@@ -116,6 +124,10 @@ class CompraRepositoryTest {
         if (!idsMateriaPrima.isEmpty()) {
             jdbc.update("DELETE FROM materias_primas WHERE id_materia_prima IN (:ids)",
                     new MapSqlParameterSource().addValue("ids", idsMateriaPrima));
+        }
+        if (!idsProveedorExtra.isEmpty()) {
+            jdbc.update("DELETE FROM proveedores WHERE id_proveedor IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsProveedorExtra));
         }
         if (idProveedor != null) {
             jdbc.update("DELETE FROM proveedores WHERE id_proveedor = :id",
@@ -233,6 +245,57 @@ class CompraRepositoryTest {
         assertThat(vacio.gastoComprometido()).isEqualByComparingTo("0.00");
     }
 
+    @Test
+    @DisplayName("CP-15/COUNT(DISTINCT): el gasto por proveedor ordena por total descendente, "
+            + "cuenta compras distintas y excluye las que no son RECIBIDA")
+    void gastoPorProveedorOrdenaPorTotalDescYExcluyeLasNoRecibidas() {
+        var nombres = sembrarComprasDelGasto();
+
+        var filas = repository.gastoPorProveedor(INICIO_GASTO, FIN_GASTO);
+
+        assertThat(filas).hasSize(2);
+        // CP-15: el mayor total va primero.
+        assertThat(filas.get(0).proveedor()).isEqualTo(nombres[0]);
+        // COUNT(DISTINCT): la RECIBIDA del primer proveedor tiene dos líneas y aun así es una
+        // sola compra; el total se recalcula del detalle: 10 × 3200.00 + 5 × 1500.00.
+        assertThat(filas.get(0).cantidadCompras()).isEqualTo(1);
+        assertThat(filas.get(0).total()).isEqualByComparingTo("39500.00");
+        assertThat(filas.get(0).total().scale()).isEqualTo(2);
+        assertThat(filas.get(1).proveedor()).isEqualTo(nombres[1]);
+        assertThat(filas.get(1).cantidadCompras()).isEqualTo(1);
+        assertThat(filas.get(1).total()).isEqualByComparingTo("200.00");
+        // El tercer proveedor solo tiene PENDIENTE y CANCELADA en el rango: no es gasto
+        // ejecutado y por eso no aparece.
+        assertThat(filas).extracting(GastoProveedorFila::proveedor)
+                .doesNotContain(nombres[2]);
+    }
+
+    @Test
+    @DisplayName("CP-16 sobre el servicio: los porcentajes del gasto por proveedor suman 100 "
+            + "con su residuo de redondeo")
+    void gastoPorProveedorDelServicioSumaCien() {
+        var nombres = sembrarComprasDelGasto();
+        // gastoPorProveedor() no usa ni el proveedor ni el inventario: esas dos dependencias
+        // del servicio se dejan simuladas, igual que en la prueba del resumen sobre base real.
+        var servicio = new CompraService(repository, mock(ProveedorRepository.class),
+                mock(InventarioService.class));
+
+        var r = servicio.gastoPorProveedor(INICIO_GASTO, FIN_GASTO);
+
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).proveedor()).isEqualTo(nombres[0]);
+        assertThat(r.get(0).total()).isEqualByComparingTo("39500.00");
+        // 39500 / 39700 × 100 = 99.4962… → 99.50 y 200 / 39700 × 100 = 0.5038… → 0.50.
+        assertThat(r.get(0).porcentaje()).isEqualByComparingTo("99.50");
+        assertThat(r.get(0).porcentaje().scale()).isEqualTo(2);
+        assertThat(r.get(1).proveedor()).isEqualTo(nombres[1]);
+        assertThat(r.get(1).porcentaje()).isEqualByComparingTo("0.50");
+        assertThat(r.get(1).porcentaje().scale()).isEqualTo(2);
+        var suma = r.stream().map(GastoProveedorResponse::porcentaje)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(suma).isBetween(new BigDecimal("99.99"), new BigDecimal("100.01"));
+    }
+
     /**
      * Siembra las tres compras del período propio: una RECIBIDA con dos líneas, una PENDIENTE
      * con una y una CANCELADA con otra.
@@ -251,6 +314,47 @@ class CompraRepositoryTest {
         insertarLinea(cancelada, 1, "1.00", "85.00");
     }
 
+    /**
+     * Siembra las compras del período de gasto propio contra tres proveedores: el primero con
+     * una RECIBIDA de dos líneas, el segundo con una RECIBIDA de una sola línea, y el tercero
+     * solo con una PENDIENTE y una CANCELADA, que no deben aparecer en el gasto ejecutado.
+     *
+     * @return los tres nombres sembrados, en el orden en que los dos primeros deben aparecer
+     *         en la respuesta y con el tercero que debe quedar fuera
+     */
+    private String[] sembrarComprasDelGasto() {
+        var nombreA = "Gasto A HU-15 test" + sufijo;
+        var nombreB = "Gasto B HU-15 test" + sufijo;
+        var nombreC = "Gasto C HU-15 test" + sufijo;
+        var proveedorA = insertarProveedorExtra(nombreA);
+        var proveedorB = insertarProveedorExtra(nombreB);
+        var proveedorC = insertarProveedorExtra(nombreC);
+
+        var recibidaA = insertarCompraEn(proveedorA, LocalDate.of(1990, 6, 5),
+                EstadoCompra.RECIBIDA);
+        insertarLinea(recibidaA, 0, "10.00", "3200.00");
+        insertarLinea(recibidaA, 1, "5.00", "1500.00");
+        var recibidaB = insertarCompraEn(proveedorB, LocalDate.of(1990, 6, 8),
+                EstadoCompra.RECIBIDA);
+        insertarLinea(recibidaB, 0, "2.00", "100.00");
+        var pendienteC = insertarCompraEn(proveedorC, LocalDate.of(1990, 6, 10),
+                EstadoCompra.PENDIENTE);
+        insertarLinea(pendienteC, 0, "2.00", "100.00");
+        var canceladaC = insertarCompraEn(proveedorC, LocalDate.of(1990, 6, 12),
+                EstadoCompra.CANCELADA);
+        insertarLinea(canceladaC, 1, "1.00", "85.00");
+
+        return new String[] {nombreA, nombreB, nombreC};
+    }
+
+    private Integer insertarProveedorExtra(String nombre) {
+        var id = insertarConId("""
+                INSERT INTO proveedores (nombre, estado) VALUES (:nombre, 1)
+                """, new MapSqlParameterSource().addValue("nombre", nombre));
+        idsProveedorExtra.add(id);
+        return id;
+    }
+
     private static ResumenEstadoFila fila(List<ResumenEstadoFila> filas, EstadoCompra estado) {
         return filas.stream()
                 .filter(fila -> fila.estado() == estado)
@@ -259,11 +363,15 @@ class CompraRepositoryTest {
     }
 
     private Integer insertarCompra(LocalDate fecha, EstadoCompra estado) {
+        return insertarCompraEn(idProveedor, fecha, estado);
+    }
+
+    private Integer insertarCompraEn(Integer proveedor, LocalDate fecha, EstadoCompra estado) {
         var id = insertarConId("""
                 INSERT INTO compras (id_proveedor, fecha, estado)
                 VALUES (:idProveedor, :fecha, :estado)
                 """, new MapSqlParameterSource()
-                        .addValue("idProveedor", idProveedor)
+                        .addValue("idProveedor", proveedor)
                         .addValue("fecha", fecha)
                         .addValue("estado", estado.name()));
         idsCompra.add(id);
