@@ -1,6 +1,8 @@
 package co.edu.corposucre.productionfood.inventario;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -75,6 +77,72 @@ public class InventarioPtRepository {
                 INSERT INTO inventario_producto_terminado (id_lote, cantidad_disponible)
                 VALUES (:idLote, :cantidad)
                 """, params);
+    }
+
+    /**
+     * Devuelve los lotes vendibles de un producto en orden FEFO.
+     *
+     * <p>El {@code ORDER BY} va aquí y no en la vista porque <strong>MySQL ignora el
+     * {@code ORDER BY} declarado dentro de una vista</strong>, sin avisar: las filas salen, las
+     * cifras cuadran y el orden es arbitrario. Si se confiara en la vista, FEFO dejaría de
+     * aplicarse y el lote viejo caducaría en el estante mientras se vende el nuevo (R-02 de
+     * HU-17). El desempate por {@code id_lote} hace determinista dos lotes que vencen el mismo
+     * día.
+     *
+     * <p>La vista ya excluye lotes vencidos y saldos en cero, así que esta lista es el stock
+     * vendible real, no el inventario bruto (R-03).
+     *
+     * @param idProducto producto terminado cuyos lotes se consultan
+     * @return lotes con saldo, del que vence antes al que vence después; vacía si no hay stock
+     */
+    public List<LoteDisponible> lotesDisponiblesFefo(Integer idProducto) {
+        var params = new MapSqlParameterSource().addValue("idProducto", idProducto);
+
+        return jdbc.query("""
+                SELECT id_lote, codigo_lote, fecha_vencimiento, cantidad_disponible
+                FROM v_lotes_disponibles_fefo
+                WHERE id_producto = :idProducto
+                ORDER BY fecha_vencimiento ASC, id_lote ASC
+                """, params, (rs, fila) -> new LoteDisponible(
+                        rs.getObject("id_lote", Integer.class),
+                        rs.getString("codigo_lote"),
+                        rs.getObject("fecha_vencimiento", LocalDate.class),
+                        rs.getBigDecimal("cantidad_disponible")));
+    }
+
+    /**
+     * Bloquea los saldos de varios lotes hasta el final de la transacción del llamador.
+     *
+     * <p>{@code FOR UPDATE} solo surte efecto dentro de una transacción abierta por el
+     * llamador; fuera de ella se comporta como una lectura normal y dos ventas simultáneas
+     * podrían vender el mismo último pan (R-05 de HU-17).
+     *
+     * <p>El orden {@code id_lote ASC} no es cosmético: dos transacciones que bloqueen los mismos
+     * lotes en el mismo orden no pueden quedar esperándose en cruz (deadlock). Si cada una
+     * tomara sus filas en el orden en que le conviniera, una podría retener el lote A y esperar
+     * el B mientras la otra retiene el B y espera el A.
+     *
+     * <p>Una colección vacía devuelve una lista vacía en vez de ejecutar {@code IN ()}, que es
+     * SQL inválido.
+     *
+     * @param idsLote lotes cuyos saldos se bloquean
+     * @return saldos bloqueados, ordenados por {@code id_lote}; solo los lotes que aún tienen fila
+     */
+    public List<SaldoLote> bloquearSaldos(Collection<Integer> idsLote) {
+        if (idsLote.isEmpty()) {
+            return List.of();
+        }
+        var params = new MapSqlParameterSource().addValue("ids", idsLote);
+
+        return jdbc.query("""
+                SELECT id_lote, cantidad_disponible
+                FROM inventario_producto_terminado
+                WHERE id_lote IN (:ids)
+                ORDER BY id_lote ASC
+                FOR UPDATE
+                """, params, (rs, fila) -> new SaldoLote(
+                        rs.getObject("id_lote", Integer.class),
+                        rs.getBigDecimal("cantidad_disponible")));
     }
 
     /**
@@ -165,6 +233,52 @@ public class InventarioPtRepository {
                 VALUES (:idLote, :tipo, :cantidad, :saldoAnterior, :saldoPosterior,
                         :tablaOrigen, :idOrigen, :observacion)
                 """, params);
+    }
+
+    /**
+     * Calcula cuánto queda pendiente de devolver a cada lote de un origen del kardex.
+     *
+     * <p>Netear es la clave para no devolver-y-redescontar (R-07 de HU-17). Una línea que vendió
+     * 12 del lote A y luego devolvió 4 tiene en el kardex un {@code SALIDA_VENTA} de 12 y una
+     * {@code ENTRADA_DEVOLUCION} de 4; lo que aún debe reponerse son 8, no 12. Sumar solo las
+     * salidas duplicaría stock en cada edición.
+     *
+     * <p>La suma resta la cantidad de toda entrada distinta de {@code SALIDA_VENTA}: el
+     * {@code WHERE} ya restringe los tipos a salida y devolución, así que el {@code ELSE} solo
+     * puede ser una devolución. El {@code HAVING > 0} descarta los lotes saldados: ya no hay
+     * nada que reponer en ellos.
+     *
+     * <p>El orden es FEFO ascendente; {@link InventarioPtService#registrarDevolucion} lo invierte
+     * para devolver primero a los lotes que vencen más tarde, que son los que más vida útil
+     * conservan.
+     *
+     * @param tablaOrigen tabla que originó los movimientos, por ejemplo {@code detalle_pedido}
+     * @param idOrigen    fila de esa tabla
+     * @return neto pendiente por lote, del que vence antes al que vence después; vacía si no hay
+     *         nada que devolver
+     */
+    public List<LoteConsumido> movimientosNetosDeOrigen(String tablaOrigen, Integer idOrigen) {
+        var params = new MapSqlParameterSource()
+                .addValue("tablaOrigen", tablaOrigen)
+                .addValue("idOrigen", idOrigen);
+
+        return jdbc.query("""
+                SELECT m.id_lote, l.codigo_lote, l.fecha_vencimiento,
+                       SUM(CASE WHEN m.tipo_movimiento = 'SALIDA_VENTA'
+                                THEN m.cantidad ELSE -m.cantidad END) AS cantidad_neta
+                FROM movimientos_inventario_pt m
+                JOIN lotes l ON l.id_lote = m.id_lote
+                WHERE m.tabla_origen = :tablaOrigen
+                  AND m.id_origen = :idOrigen
+                  AND m.tipo_movimiento IN ('SALIDA_VENTA', 'ENTRADA_DEVOLUCION')
+                GROUP BY m.id_lote, l.codigo_lote, l.fecha_vencimiento
+                HAVING cantidad_neta > 0
+                ORDER BY l.fecha_vencimiento ASC, m.id_lote ASC
+                """, params, (rs, fila) -> new LoteConsumido(
+                        rs.getObject("id_lote", Integer.class),
+                        rs.getString("codigo_lote"),
+                        rs.getObject("fecha_vencimiento", LocalDate.class),
+                        rs.getBigDecimal("cantidad_neta")));
     }
 
     /**
