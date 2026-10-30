@@ -71,6 +71,7 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-13 | Registro de compras | 2026-10-26 · [`HU-13-registro-compras.md`](HU-13-registro-compras.md) |
 | HU-14 | Detalle de compra | 2026-10-28 · [`HU-14-detalle-compra.md`](HU-14-detalle-compra.md) |
 | HU-15 | Historial de compras | 2026-10-29 · [`HU-15-historial-compras.md`](HU-15-historial-compras.md) |
+| HU-16 | Creación de pedidos | 2026-10-30 · [`HU-16-creacion-pedidos.md`](HU-16-creacion-pedidos.md) |
 | HU-19 | Lotes de producto terminado | 2026-10-25 · [`HU-19-lotes-producto-terminado.md`](HU-19-lotes-producto-terminado.md) |
 
 > HU-09 quedó verificada en caliente contra MySQL el 2026-10-23 (CP-01…CP-20 y SEC-01…05).
