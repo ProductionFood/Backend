@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -24,7 +25,10 @@ import co.edu.corposucre.productionfood.cliente.ClienteRepository;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.inventario.InventarioPtService;
+import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
+import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
 
 class PedidoServiceTest {
@@ -33,13 +37,15 @@ class PedidoServiceTest {
 
     private PedidoRepository pedidoRepository;
     private ClienteRepository clienteRepository;
+    private InventarioPtService inventarioPtService;
     private PedidoService service;
 
     @BeforeEach
     void setUp() {
         pedidoRepository = mock(PedidoRepository.class);
         clienteRepository = mock(ClienteRepository.class);
-        service = new PedidoService(pedidoRepository, clienteRepository);
+        inventarioPtService = mock(InventarioPtService.class);
+        service = new PedidoService(pedidoRepository, clienteRepository, inventarioPtService);
     }
 
     private void dadoClienteActivo(Integer idCliente) {
@@ -348,5 +354,181 @@ class PedidoServiceTest {
         assertThat(service.esEditable(2)).isFalse();
         // Un pedido inexistente no es editable y no lanza: HU-17 consulta esto antes de actuar.
         assertThat(service.esEditable(9)).isFalse();
+    }
+
+    @Test
+    @DisplayName("cambiarEstado PENDIENTE -> EN_PREPARACION aplica la transición y relee")
+    void cambiarEstadoPendienteAEnPreparacion() {
+        dadoPedidoEnEstado(7, EstadoPedido.PENDIENTE);
+        cuandoReleeraEnEstado(7, EstadoPedido.PENDIENTE, EstadoPedido.EN_PREPARACION);
+
+        var r = service.cambiarEstado(7,
+                new CambiarEstadoPedidoRequest(EstadoPedido.EN_PREPARACION));
+
+        assertThat(r.estado()).isEqualTo("EN_PREPARACION");
+        assertThat(r.editable()).isFalse();
+        verify(pedidoRepository).cambiarEstado(7, EstadoPedido.PENDIENTE, EstadoPedido.EN_PREPARACION);
+        // Solo la cancelación devuelve stock.
+        verifyNoInteractions(inventarioPtService);
+    }
+
+    @Test
+    @DisplayName("cambiarEstado EN_PREPARACION -> ENTREGADO aplica la transición y relee")
+    void cambiarEstadoEnPreparacionAEntregado() {
+        dadoPedidoEnEstado(7, EstadoPedido.EN_PREPARACION);
+        cuandoReleeraEnEstado(7, EstadoPedido.EN_PREPARACION, EstadoPedido.ENTREGADO);
+
+        var r = service.cambiarEstado(7, new CambiarEstadoPedidoRequest(EstadoPedido.ENTREGADO));
+
+        assertThat(r.estado()).isEqualTo("ENTREGADO");
+        assertThat(r.editable()).isFalse();
+        verify(pedidoRepository).cambiarEstado(7, EstadoPedido.EN_PREPARACION, EstadoPedido.ENTREGADO);
+        verifyNoInteractions(inventarioPtService);
+    }
+
+    @Test
+    @DisplayName("cambiarEstado ENTREGADO -> PENDIENTE responde 409 TRANSICION_INVALIDA")
+    void cambiarEstadoEntregadoAPendienteResponde409() {
+        dadoPedidoEnEstado(7, EstadoPedido.ENTREGADO);
+
+        assertThatThrownBy(() -> service.cambiarEstado(7,
+                new CambiarEstadoPedidoRequest(EstadoPedido.PENDIENTE)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        verify(pedidoRepository, never()).cambiarEstado(any(), any(), any());
+        verifyNoInteractions(inventarioPtService);
+    }
+
+    @Test
+    @DisplayName("cambiarEstado ENTREGADO -> CANCELADO responde 409 y no devuelve stock")
+    void cambiarEstadoEntregadoACanceladoResponde409() {
+        dadoPedidoEnEstado(7, EstadoPedido.ENTREGADO);
+
+        assertThatThrownBy(() -> service.cambiarEstado(7,
+                new CambiarEstadoPedidoRequest(EstadoPedido.CANCELADO)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        verify(pedidoRepository, never()).cambiarEstado(any(), any(), any());
+        verify(pedidoRepository, never()).lineasParaDevolucion(any());
+        verifyNoInteractions(inventarioPtService);
+    }
+
+    @Test
+    @DisplayName("cambiarEstado PENDIENTE -> ENTREGADO (salto) responde 409 TRANSICION_INVALIDA")
+    void cambiarEstadoConSaltoResponde409() {
+        dadoPedidoEnEstado(7, EstadoPedido.PENDIENTE);
+
+        assertThatThrownBy(() -> service.cambiarEstado(7,
+                new CambiarEstadoPedidoRequest(EstadoPedido.ENTREGADO)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        verify(pedidoRepository, never()).cambiarEstado(any(), any(), any());
+        verifyNoInteractions(inventarioPtService);
+    }
+
+    @Test
+    @DisplayName("CP-18: cancelar devuelve cada línea al lote con ENTRADA_DEVOLUCION")
+    void cancelarConLineasDevuelveStockPorLote() {
+        var idLoteA = 11;
+        var idLoteB = 12;
+        dadoPedidoEnEstado(7, EstadoPedido.PENDIENTE);
+        cuandoReleeraEnEstado(7, EstadoPedido.PENDIENTE, EstadoPedido.CANCELADO);
+        when(pedidoRepository.lineasParaDevolucion(7)).thenReturn(List.of(
+                new LineaDevolucion(idLoteA, new BigDecimal("3.00")),
+                new LineaDevolucion(idLoteB, new BigDecimal("2.00"))));
+
+        var r = service.cambiarEstado(7, new CambiarEstadoPedidoRequest(EstadoPedido.CANCELADO));
+
+        assertThat(r.estado()).isEqualTo("CANCELADO");
+        verify(inventarioPtService).registrarEntrada(eq(idLoteA), eq(new BigDecimal("3.00")),
+                eq(TipoMovimientoPt.ENTRADA_DEVOLUCION), eq("pedidos"), eq(7),
+                eq("Devolucion por cancelacion del pedido 7"));
+        verify(inventarioPtService).registrarEntrada(eq(idLoteB), eq(new BigDecimal("2.00")),
+                eq(TipoMovimientoPt.ENTRADA_DEVOLUCION), eq("pedidos"), eq(7),
+                eq("Devolucion por cancelacion del pedido 7"));
+        verify(inventarioPtService, times(2)).registrarEntrada(any(), any(), any(), any(),
+                any(), any());
+        verify(pedidoRepository).cambiarEstado(7, EstadoPedido.PENDIENTE, EstadoPedido.CANCELADO);
+    }
+
+    @Test
+    @DisplayName("CP-18: cancelar un pedido sin líneas no genera movimientos de inventario")
+    void cancelarSinLineasNoTocaInventario() {
+        dadoPedidoEnEstado(7, EstadoPedido.PENDIENTE);
+        cuandoReleeraEnEstado(7, EstadoPedido.PENDIENTE, EstadoPedido.CANCELADO);
+        when(pedidoRepository.lineasParaDevolucion(7)).thenReturn(List.of());
+
+        var r = service.cambiarEstado(7, new CambiarEstadoPedidoRequest(EstadoPedido.CANCELADO));
+
+        assertThat(r.estado()).isEqualTo("CANCELADO");
+        verifyNoInteractions(inventarioPtService);
+        verify(pedidoRepository).cambiarEstado(7, EstadoPedido.PENDIENTE, EstadoPedido.CANCELADO);
+    }
+
+    @Test
+    @DisplayName("carrera: si el UPDATE condicional afecta 0 filas responde 409 sin tocar stock")
+    void cambiarEstadoPierdeLaCarreraResponde409SinTocarInventario() {
+        dadoPedidoEnEstado(7, EstadoPedido.PENDIENTE);
+        when(pedidoRepository.cambiarEstado(7, EstadoPedido.PENDIENTE, EstadoPedido.CANCELADO))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> service.cambiarEstado(7,
+                new CambiarEstadoPedidoRequest(EstadoPedido.CANCELADO)))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "TRANSICION_INVALIDA");
+
+        // La transición perdió la carrera: no se leen líneas ni se repone stock.
+        verify(pedidoRepository, never()).lineasParaDevolucion(any());
+        verifyNoInteractions(inventarioPtService);
+    }
+
+    @Test
+    @DisplayName("cambiarEstado de un pedido inexistente responde 404")
+    void cambiarEstadoInexistenteResponde404() {
+        when(pedidoRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.cambiarEstado(9999,
+                new CambiarEstadoPedidoRequest(EstadoPedido.EN_PREPARACION)))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró el pedido con id 9999.");
+
+        verify(pedidoRepository, never()).cambiarEstado(any(), any(), any());
+        verifyNoInteractions(inventarioPtService);
+    }
+
+    @Test
+    @DisplayName("transicionInvalida devuelve la excepción con el estado actual y los permitidos")
+    void transicionInvalidaDevuelveLaExcepcionConstruida() {
+        dadoPedidoEnEstado(7, EstadoPedido.ENTREGADO);
+
+        var excepcion = service.transicionInvalida(7, EstadoPedido.PENDIENTE);
+
+        assertThat(excepcion.getCodigo()).isEqualTo("TRANSICION_INVALIDA");
+        assertThat(excepcion.getMessage())
+                .contains("ENTREGADO", "PENDIENTE")
+                .contains("no hay transiciones disponibles");
+    }
+
+    /**
+     * Deja la primera lectura de {@code buscarPorId} en el estado dado.
+     */
+    private void dadoPedidoEnEstado(Integer id, EstadoPedido estado) {
+        when(pedidoRepository.buscarPorId(id)).thenReturn(Optional.of(
+                fila(id, estado, null, BigDecimal.ZERO, 0)));
+    }
+
+    /**
+     * Encadena la carga inicial y la relectura posterior a {@code cambiarEstado}, con la que el
+     * servicio monta la respuesta.
+     */
+    private void cuandoReleeraEnEstado(Integer id, EstadoPedido antes, EstadoPedido despues) {
+        when(pedidoRepository.buscarPorId(id)).thenReturn(
+                Optional.of(fila(id, antes, null, BigDecimal.ZERO, 0)),
+                Optional.of(fila(id, despues, null, BigDecimal.ZERO, 0)));
+        // El UPDATE condicional por estado afecta una fila cuando la transición gana la carrera.
+        when(pedidoRepository.cambiarEstado(id, antes, despues)).thenReturn(1);
     }
 }
