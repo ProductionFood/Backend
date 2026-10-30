@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.inventario;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -73,6 +74,55 @@ public class InventarioPtRepository {
         jdbc.update("""
                 INSERT INTO inventario_producto_terminado (id_lote, cantidad_disponible)
                 VALUES (:idLote, :cantidad)
+                """, params);
+    }
+
+    /**
+     * Lee la fila de inventario de un lote bloqueándola hasta el final de la transacción.
+     *
+     * <p>{@code FOR UPDATE} solo tiene efecto dentro de una transacción abierta por el
+     * llamador. Es lo que serializa dos movimientos simultáneos sobre el mismo lote: sin él,
+     * ambos leerían el mismo saldo anterior y uno de los dos cambios se perdería.
+     *
+     * <p>Devuelve solo {@code id_lote} y {@code cantidad_disponible} porque no hay entidad para
+     * esta tabla y esos son los dos datos que necesita el cálculo de saldos.
+     *
+     * @param idLote lote cuyo inventario se bloquea
+     * @return el saldo bloqueado, o vacío si el lote no tiene fila de inventario
+     */
+    public Optional<SaldoLote> bloquearYObtener(Integer idLote) {
+        var params = new MapSqlParameterSource().addValue("idLote", idLote);
+
+        return jdbc.query("""
+                SELECT id_lote, cantidad_disponible
+                FROM inventario_producto_terminado
+                WHERE id_lote = :idLote
+                FOR UPDATE
+                """, params, (rs, fila) -> new SaldoLote(
+                        rs.getInt("id_lote"), rs.getBigDecimal("cantidad_disponible")))
+                .stream().findFirst();
+    }
+
+    /**
+     * Reemplaza el saldo disponible de un lote.
+     *
+     * <p>No exige que la fila exista: {@link InventarioPtService} ya la leyó con bloqueo y, si
+     * faltaba, lanzó 404 antes. No lleva {@code @Transactional}: el bloqueo y esta escritura
+     * deben compartir la transacción del llamador para que no se pierda ninguna suma.
+     *
+     * @param idLote   lote cuyo saldo cambia
+     * @param cantidad saldo nuevo, con escala 2
+     * @return filas afectadas
+     */
+    public int actualizarSaldo(Integer idLote, BigDecimal cantidad) {
+        var params = new MapSqlParameterSource()
+                .addValue("idLote", idLote)
+                .addValue("cantidad", cantidad);
+
+        return jdbc.update("""
+                UPDATE inventario_producto_terminado
+                SET cantidad_disponible = :cantidad
+                WHERE id_lote = :idLote
                 """, params);
     }
 
