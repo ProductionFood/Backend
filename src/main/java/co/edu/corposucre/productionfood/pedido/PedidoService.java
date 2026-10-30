@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.pedido;
 
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,17 +14,20 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.inventario.InventarioPtService;
+import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
+import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoClienteRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
 
 /**
- * Ciclo de vida de la cabecera de un pedido (HU-16): alta, edición, consulta y paginación.
+ * Ciclo de vida de la cabecera de un pedido (HU-16): alta, edición, consulta, paginación y
+ * cambio de estado.
  *
- * <p>Este componente solo cubre la cabecera. El detalle y el cambio de estado —con la
- * devolución de stock al cancelar (R-04)— son de historias posteriores; aquí no se implementa
- * ninguna transición.
+ * <p>Este componente cubre la cabecera y sus transiciones de estado. El detalle del pedido es de
+ * HU-17; aquí solo se lee, a través del kardex, al cancelar para devolver el stock (R-04).
  *
  * <p>Los códigos de error son los de la especificación §5 y no el genérico
  * {@code VALIDACION_FALLIDA}: una regla de negocio violada responde 409
@@ -54,9 +58,13 @@ public class PedidoService {
 
     private final ClienteRepository clienteRepository;
 
-    public PedidoService(PedidoRepository pedidoRepository, ClienteRepository clienteRepository) {
+    private final InventarioPtService inventarioPtService;
+
+    public PedidoService(PedidoRepository pedidoRepository, ClienteRepository clienteRepository,
+                         InventarioPtService inventarioPtService) {
         this.pedidoRepository = pedidoRepository;
         this.clienteRepository = clienteRepository;
+        this.inventarioPtService = inventarioPtService;
     }
 
     /**
@@ -223,6 +231,106 @@ public class PedidoService {
         return pedidoRepository.buscarPorId(id)
                 .map(PedidoService::aResponse)
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
+    }
+
+    /**
+     * Cambia el estado de un pedido validando la máquina de transiciones (R-02).
+     *
+     * <p>Orden exacto de la operación, dentro de una única transacción:
+     *
+     * <ol>
+     *   <li>El pedido debe existir; si no, 404.</li>
+     *   <li>La transición se valida con la máquina de {@link EstadoPedido} <strong>antes</strong>
+     *       de tocar el inventario ({@code TRANSICION_INVALIDA}, 409): un salto prohibido —por
+     *       ejemplo {@code ENTREGADO} a {@code CANCELADO}— no debe devolver stock.</li>
+     *   <li>Si el destino es {@code CANCELADO}, por cada línea devuelta por
+     *       {@link PedidoRepository#lineasParaDevolucion} se repone su cantidad al lote con
+     *       {@link InventarioPtService#registrarEntrada}, tipo {@code ENTRADA_DEVOLUCION} y
+     *       origen {@code pedidos}/{@code idPedido} (R-04, R-10 de HU-17). Un pedido sin líneas
+     *       vendidas no genera ningún movimiento (CP-18).</li>
+     *   <li>Se cambia el estado y se relee el pedido para montar la respuesta.</li>
+     * </ol>
+     *
+     * <p>Si una devolución falla, la excepción se propaga sin atraparla: la transacción revierte
+     * las entradas anteriores y el estado. Una cancelación a medias dejaría un kardex que nadie
+     * puede explicar.
+     *
+     * @param id  identificador del pedido
+     * @param req estado destino
+     * @return el pedido releído de la base con su estado nuevo
+     * @throws RecursoNoEncontradoException si el pedido no existe (también si desaparece entre la
+     *                                      escritura y la relectura)
+     * @throws ConflictoNegocioException si la transición no está permitida
+     */
+    @Transactional
+    @Auditable(accion = "CAMBIAR_ESTADO", tabla = "pedidos",
+            detalle = "'Pedido ' + #id + ' a ' + #req.estado")
+    public PedidoResponse cambiarEstado(Integer id, CambiarEstadoPedidoRequest req) {
+        var pedido = pedidoRepository.buscarPorId(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
+
+        // Antes del inventario: un pedido terminal no puede volver a mover stock.
+        if (!pedido.getEstado().puedeTransicionarA(req.estado())) {
+            throw transicionInvalida(id, req.estado());
+        }
+
+        // El UPDATE va antes de devolver stock y condicionado al estado leído: si otra
+        // transacción cambió el pedido entre la lectura y la escritura, afecta cero filas y se
+        // aborta sin tocar inventario. Así una doble cancelación concurrente no repone dos veces.
+        var afectadas = pedidoRepository.cambiarEstado(id, pedido.getEstado(), req.estado());
+        if (afectadas == 0) {
+            throw transicionInvalida(id, req.estado());
+        }
+
+        if (req.estado() == EstadoPedido.CANCELADO) {
+            for (var linea : pedidoRepository.lineasParaDevolucion(id)) {
+                inventarioPtService.registrarEntrada(linea.idLote(), linea.cantidad(),
+                        TipoMovimientoPt.ENTRADA_DEVOLUCION, "pedidos", id,
+                        "Devolucion por cancelacion del pedido " + id);
+            }
+        }
+
+        return pedidoRepository.buscarPorId(id)
+                .map(PedidoService::aResponse)
+                .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
+    }
+
+    /**
+     * Construye la excepción {@code TRANSICION_INVALIDA} lista para lanzar, sin lanzarla aquí.
+     *
+     * <p>Sigue el patrón de {@code CompraService.transicionInvalida}: devolver la excepción deja
+     * el {@code throw} —y por tanto la decisión de responder 409— en quien conoce todos los
+     * destinos, sin duplicar la construcción del mensaje.
+     *
+     * @param id      identificador del pedido
+     * @param destino estado al que se intentó transicionar
+     * @return la excepción, ya construida con el mensaje del contrato §7, lista para lanzar
+     * @throws RecursoNoEncontradoException si el pedido no existe
+     */
+    @Transactional(readOnly = true)
+    public ConflictoNegocioException transicionInvalida(Integer id, EstadoPedido destino) {
+        var pedido = pedidoRepository.buscarPorId(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
+        return new ConflictoNegocioException("TRANSICION_INVALIDA",
+                mensajeTransicion(pedido.getEstado(), destino));
+    }
+
+    /**
+     * Mensaje único de {@code TRANSICION_INVALIDA} (contrato §7), compartido por
+     * {@link #cambiarEstado(Integer, CambiarEstadoPedidoRequest)} y
+     * {@link #transicionInvalida(Integer, EstadoPedido)} para que la misma regla se lea igual
+     * venga del endpoint que venga.
+     */
+    private static String mensajeTransicion(EstadoPedido actual, EstadoPedido destino) {
+        var permitidas = actual.transicionesValidas().stream()
+                .map(EstadoPedido::name)
+                .sorted()
+                .collect(Collectors.joining(", "));
+        var disponibles = permitidas.isEmpty()
+                ? "no hay transiciones disponibles"
+                : "las transiciones disponibles son: " + permitidas;
+        return String.format("No se puede pasar de %s a %s. Desde %s %s.",
+                actual, destino, actual, disponibles);
     }
 
     /**

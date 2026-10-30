@@ -57,6 +57,7 @@ class PedidoRepositoryTest {
     private Integer idCliente;
     private final List<Integer> idsClienteExtra = new ArrayList<>();
     private final List<Integer> idsPedido = new ArrayList<>();
+    private final List<Integer> idsLote = new ArrayList<>();
 
     private static String entorno(String nombre, String defecto) {
         String valor = System.getenv(nombre);
@@ -105,6 +106,15 @@ class PedidoRepositoryTest {
 
     @AfterEach
     void tearDown() {
+        // El kardex y el inventario de un lote son FK de lotes: se borran antes que el lote.
+        if (!idsLote.isEmpty()) {
+            jdbc.update("DELETE FROM movimientos_inventario_pt WHERE id_lote IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsLote));
+            jdbc.update("DELETE FROM inventario_producto_terminado WHERE id_lote IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsLote));
+            jdbc.update("DELETE FROM lotes WHERE id_lote IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsLote));
+        }
         // El detalle primero que la cabecera: detalle_pedido → pedidos es FK.
         if (!idsPedido.isEmpty()) {
             jdbc.update("DELETE FROM detalle_pedido WHERE id_pedido IN (:ids)",
@@ -219,14 +229,48 @@ class PedidoRepositoryTest {
     }
 
     @Test
-    @DisplayName("cambiarEstado actualiza el estado de la fila")
+    @DisplayName("cambiarEstado actualiza la fila solo si sigue en el estado esperado")
     void cambiarEstadoActualizaLaFila() {
         var id = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);
 
-        repository.cambiarEstado(id, EstadoPedido.EN_PREPARACION);
+        var afectadas = repository.cambiarEstado(id, EstadoPedido.PENDIENTE,
+                EstadoPedido.EN_PREPARACION);
+        // La segunda vez el pedido ya no está PENDIENTE: cero filas, sin doble transición.
+        var repetida = repository.cambiarEstado(id, EstadoPedido.PENDIENTE,
+                EstadoPedido.CANCELADO);
 
+        assertThat(afectadas).isEqualTo(1);
+        assertThat(repetida).isZero();
         var leido = repository.buscarPorId(id).orElseThrow();
         assertThat(leido.getEstado()).isEqualTo(EstadoPedido.EN_PREPARACION);
+    }
+
+    @Test
+    @DisplayName("R-10: lineasParaDevolucion toma solo los SALIDA_VENTA del kardex de este pedido")
+    void lineasParaDevolucionDevuelveSoloLasSalidasDeVentaDelPedido() {
+        var pedido = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.EN_PREPARACION);
+        var otroPedido = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.EN_PREPARACION);
+        var loteA = insertarLote(idsProducto.get(0), "3.00");
+        var loteB = insertarLote(idsProducto.get(1), "2.00");
+        var detalleA = insertarLinea(pedido, idsProducto.get(0), "3.00", "1250.50");
+        var detalleB = insertarLinea(pedido, idsProducto.get(1), "2.00", "800.00");
+        var detalleOtro = insertarLinea(otroPedido, idsProducto.get(0), "1.00", "1250.50");
+
+        // Dos salidas de venta del pedido, una salida de otro pedido y una entrada de devolución
+        // del propio pedido: solo las dos primeras deben reponerse.
+        insertarMovimiento(loteA, "SALIDA_VENTA", "3.00", "detalle_pedido", detalleA);
+        insertarMovimiento(loteB, "SALIDA_VENTA", "2.00", "detalle_pedido", detalleB);
+        insertarMovimiento(loteA, "SALIDA_VENTA", "1.00", "detalle_pedido", detalleOtro);
+        insertarMovimiento(loteA, "ENTRADA_DEVOLUCION", "3.00", "pedidos", pedido);
+
+        var lineas = repository.lineasParaDevolucion(pedido);
+
+        // Orden id_movimiento DESC: la última salida sembrada del pedido va primero.
+        assertThat(lineas)
+                .extracting(LineaDevolucion::idLote, LineaDevolucion::cantidad)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(loteB, new BigDecimal("2.00")),
+                        org.assertj.core.groups.Tuple.tuple(loteA, new BigDecimal("3.00")));
     }
 
     @Test
@@ -317,9 +361,9 @@ class PedidoRepositoryTest {
         return id;
     }
 
-    private void insertarLinea(Integer idPedido, Integer idProducto, String cantidad,
-                               String precio) {
-        jdbc.update("""
+    private Integer insertarLinea(Integer idPedido, Integer idProducto, String cantidad,
+                                  String precio) {
+        return insertarConId("""
                 INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad, precio_unitario)
                 VALUES (:idPedido, :idProducto, :cantidad, :precio)
                 """, new MapSqlParameterSource()
@@ -327,6 +371,47 @@ class PedidoRepositoryTest {
                         .addValue("idProducto", idProducto)
                         .addValue("cantidad", new BigDecimal(cantidad))
                         .addValue("precio", new BigDecimal(precio)));
+    }
+
+    /**
+     * Siembra un lote de producto terminado y lo registra para que la limpieza lo borre después
+     * de su kardex y su fila de inventario.
+     */
+    private Integer insertarLote(Integer idProducto, String cantidad) {
+        var id = insertarConId("""
+                INSERT INTO lotes (codigo_lote, id_producto, fecha_produccion, fecha_vencimiento,
+                                   cantidad)
+                VALUES (:codigo, :idProducto, :produccion, :vencimiento, :cantidad)
+                """, new MapSqlParameterSource()
+                        .addValue("codigo", "LH16" + sufijo + "-"
+                                + UUID.randomUUID().toString().substring(0, 8))
+                        .addValue("idProducto", idProducto)
+                        .addValue("produccion", LocalDate.now().minusDays(1))
+                        .addValue("vencimiento", LocalDate.now().plusDays(30))
+                        .addValue("cantidad", new BigDecimal(cantidad)));
+        idsLote.add(id);
+        return id;
+    }
+
+    /**
+     * Siembra una salida del kardex de producto terminado ligada a una línea de pedido.
+     */
+    private void insertarMovimiento(Integer idLote, String tipo, String cantidad,
+                                    String tablaOrigen, Integer idOrigen) {
+        jdbc.update("""
+                INSERT INTO movimientos_inventario_pt
+                    (id_lote, tipo_movimiento, cantidad, saldo_anterior, saldo_posterior,
+                     tabla_origen, id_origen)
+                VALUES (:idLote, :tipo, :cantidad, :anterior, :posterior, :tablaOrigen,
+                        :idOrigen)
+                """, new MapSqlParameterSource()
+                        .addValue("idLote", idLote)
+                        .addValue("tipo", tipo)
+                        .addValue("cantidad", new BigDecimal(cantidad))
+                        .addValue("anterior", new BigDecimal("10.00"))
+                        .addValue("posterior", new BigDecimal("7.00"))
+                        .addValue("tablaOrigen", tablaOrigen)
+                        .addValue("idOrigen", idOrigen));
     }
 
     private Integer insertarClienteExtra(String nombre) {

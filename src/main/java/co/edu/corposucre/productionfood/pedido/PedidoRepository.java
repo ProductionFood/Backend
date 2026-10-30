@@ -165,7 +165,7 @@ public class PedidoRepository {
      * Actualiza los campos editables de la cabecera: el cliente y la fecha de entrega.
      *
      * <p>No toca {@code fecha_pedido}, que es inmutable una vez registrado (R-01), ni
-     * {@code estado}: para eso está {@link #cambiarEstado(Integer, EstadoPedido)}, que es el
+     * {@code estado}: para eso está {@link #cambiarEstado(Integer, EstadoPedido, EstadoPedido)}, que es el
      * único camino que la máquina de estados de {@link EstadoPedido} permite auditar.
      *
      * @param pedido pedido con los valores nuevos; debe traer id, cliente y fecha de entrega
@@ -185,21 +185,62 @@ public class PedidoRepository {
     }
 
     /**
-     * Cambia el estado de un pedido.
+     * Cambia el estado de un pedido solo si sigue en el estado esperado.
      *
-     * <p>El repositorio solo escribe el valor: la máquina de transiciones de
-     * {@link EstadoPedido} la valida el servicio antes de llegar aquí, porque un
-     * {@code UPDATE} directo no puede saber si el pedido estaba en un estado que admite el salto.
+     * <p>La máquina de transiciones de {@link EstadoPedido} la valida el servicio; aquí se añade
+     * la condición {@code estado = :esperado} para cerrar la ventana de carrera entre dos
+     * transiciones simultáneas. El {@code UPDATE} bloquea la fila del pedido hasta el commit, de
+     * modo que una segunda cancelación concurrente no puede volver a devolver stock: encuentra
+     * la fila ya en {@code CANCELADO} y actualiza cero filas.
      *
-     * @param id     identificador del pedido
-     * @param estado estado nuevo
+     * @param id       identificador del pedido
+     * @param esperado estado en el que el pedido debe estar para que el cambio se aplique
+     * @param nuevo    estado nuevo
+     * @return filas afectadas: {@code 1} si el pedido estaba en {@code esperado}; {@code 0} si
+     *         otro proceso lo cambió antes
      */
-    public void cambiarEstado(Integer id, EstadoPedido estado) {
+    public int cambiarEstado(Integer id, EstadoPedido esperado, EstadoPedido nuevo) {
         var params = new MapSqlParameterSource()
                 .addValue("id", id)
-                .addValue("estado", estado.name());
+                .addValue("esperado", esperado.name())
+                .addValue("nuevo", nuevo.name());
 
-        jdbc.update("UPDATE pedidos SET estado = :estado WHERE id_pedido = :id", params);
+        return jdbc.update("""
+                UPDATE pedidos SET estado = :nuevo
+                WHERE id_pedido = :id AND estado = :esperado
+                """, params);
+    }
+
+    /**
+     * Devuelve los pares (lote, cantidad) que hay que reponer al cancelar un pedido.
+     *
+     * <p>La trazabilidad entre cada línea de {@code detalle_pedido} y el lote del que salió su
+     * mercancía <strong>no</strong> vive en el detalle: vive en el kardex de producto terminado
+     * (R-10 de HU-17). Cada {@code SALIDA_VENTA} guarda {@code id_lote}, la cantidad consumida y
+     * {@code tabla_origen = 'detalle_pedido'} con {@code id_origen = id_detalle_pedido}. Esta
+     * consulta recorre esos movimientos y devuelve exactamente lo que hay que devolver, sin
+     * reconstruir el reparto FEFO en memoria.
+     *
+     * <p>Solo considera los {@code SALIDA_VENTA} ligados a líneas de este pedido: las entradas
+     * de devolución de una cancelación anterior no vuelven a contarse. El orden es
+     * {@code id_movimiento DESC}, del movimiento más reciente al más antiguo.
+     *
+     * @param idPedido pedido cuyas salidas de venta se reponen
+     * @return pares lote-cantidad de las ventas del pedido; vacía si no tiene ninguna
+     */
+    public List<LineaDevolucion> lineasParaDevolucion(Integer idPedido) {
+        var params = new MapSqlParameterSource().addValue("idPedido", idPedido);
+
+        return jdbc.query("""
+                SELECT m.id_lote, m.cantidad
+                FROM movimientos_inventario_pt m
+                JOIN detalle_pedido dp ON dp.id_detalle_pedido = m.id_origen
+                WHERE m.tabla_origen = 'detalle_pedido'
+                  AND dp.id_pedido = :idPedido
+                  AND m.tipo_movimiento = 'SALIDA_VENTA'
+                ORDER BY m.id_movimiento DESC
+                """, params, (rs, fila) -> new LineaDevolucion(
+                        rs.getInt("id_lote"), rs.getBigDecimal("cantidad")));
     }
 
     /**
