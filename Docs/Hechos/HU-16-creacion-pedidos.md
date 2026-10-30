@@ -202,6 +202,34 @@ movimiento (CP-18).
   carrera del `UPDATE` condicional y la matriz de roles de lectura y escritura.
 - El estado de QA va en la fila `Estado QA` de la cabecera, no aquí.
 
+## QA ciego (2026-10-30)
+
+Ejecutado contra la API viva en `:8085` y MySQL 8.4, sin leer el código Java ni la colección
+Postman; solo especificación, tarea de QA y contrato.
+
+| Batería | Resultado |
+|---|---|
+| CP-01…CP-23 | 23/23 ejecutados · 22 PASA · 1 PASA con salvedad (CP-21, por la regla configurable de HU-05) |
+| SEC-01…SEC-05 × 5 endpoints | 25/25 PASA (SEC-04 confirma `@EnableMethodSecurity`) |
+| Casos adversariales propios | 26/26 PASA (ids no numéricos, `size`/`page` fuera de rango, `sort` inválido, rango invertido, cuerpo vacío, campos desconocidos, doble cancelación y cancelación concurrente, `415`, `405`) |
+| Verificación SQL | `@@time_zone = -05:00`, `CURDATE()` correcto, `fecha_pedido` con `DEFAULT (curdate())` y `CHECK` de estados presentes |
+| CP-16/CP-17 | Saldos de lote `45.00/47.00 → 50.00/50.00` y dos `ENTRADA_DEVOLUCION` con origen `pedidos` |
+| Latencia máxima | 20.7 ms (límite 2 000 ms) |
+| Defectos críticos/altos | 0 |
+
+Hallazgos sin cambio de código:
+
+- **DEF-H16-001 (Media, no es defecto de HU-16):** desactivar un cliente con pedidos en curso
+  responde `409 CLIENTE_CON_PEDIDOS_ACTIVOS`. Es la regla documentada por HU-05 (error del
+  contrato §5) y configurable por `app.clientes.bloquear-desactivacion-con-pedidos`; el pedido
+  existente sigue su curso (R-07) en cuanto el cliente queda inactivo.
+- **DEF-H16-002 (Baja, dato de prueba):** el ejemplo de CP-01 en `tarea-qa.md` usa una fecha de
+  entrega fija (`2026-09-20`) que ya quedó en el pasado; el producto responde correctamente
+  `400 FECHA_ENTREGA_INVALIDA`. La prueba debe usar una fecha relativa a hoy.
+
+Los datos de prueba se limpiaron al terminar (pedidos, líneas, movimientos, lotes, usuarios y
+clientes del sufijo de QA).
+
 ## Desviaciones vs especificación
 
 - **`GET /pedidos/{id}` no devuelve las líneas.** La tabla de endpoints de la especificación
