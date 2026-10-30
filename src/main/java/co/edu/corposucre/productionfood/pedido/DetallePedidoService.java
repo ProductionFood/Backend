@@ -230,8 +230,25 @@ public class DetallePedidoService {
 
         // El kardex necesita id_origen = id_detalle_pedido (R-10); si la salida FEFO falla, la
         // excepción revierte el INSERT y la transacción entera.
-        inventarioPtService.registrarSalidaFefo(req.idProducto(), cantidad, TABLA_ORIGEN,
-                idDetalle);
+        try {
+            inventarioPtService.registrarSalidaFefo(req.idProducto(), cantidad, TABLA_ORIGEN,
+                    idDetalle);
+        } catch (ConflictoNegocioException ex) {
+            if (!"STOCK_INSUFICIENTE".equals(ex.getCodigo())) {
+                throw ex;
+            }
+            // Otra petición consumió el stock entre el pre-chequeo y el bloqueo FEFO (CP-09): se
+            // relee el saldo para responder el mismo mensaje legible, con nombre y sin decimales
+            // sobrantes, en vez del texto genérico del inventario.
+            var disponible = inventarioPtService.stockDisponible(req.idProducto());
+            if (disponible.compareTo(cantidad) < 0) {
+                throw stockInsuficiente(producto.getNombre(), disponible, cantidad);
+            }
+            // Una devolución concurrente repuso el stock: la solicitud puede reintentarse.
+            throw new ConflictoNegocioException("STOCK_INSUFICIENTE",
+                    "El stock cambió mientras se procesaba la solicitud. Disponible ahora: "
+                            + cifra(disponible) + ". Intente nuevamente.");
+        }
 
         var guardada = detallePedidoRepository.obtenerPorId(idDetalle)
                 .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
@@ -397,10 +414,21 @@ public class DetallePedidoService {
     private void exigirStock(Integer idProducto, String nombre, BigDecimal cantidad) {
         var disponible = inventarioPtService.stockDisponible(idProducto);
         if (disponible.compareTo(cantidad) < 0) {
-            throw new ConflictoNegocioException("STOCK_INSUFICIENTE",
-                    "Solo hay " + cifra(disponible) + " unidades disponibles de " + nombre
-                            + ". Se solicitaron " + cifra(cantidad) + ".");
+            throw stockInsuficiente(nombre, disponible, cantidad);
         }
+    }
+
+    /**
+     * Construye el 409 de CA-04 con el nombre del producto y las cifras legibles.
+     *
+     * <p>Lo usan tanto el pre-chequeo como la relectura posterior a la carrera con el FEFO, de modo
+     * que el consumidor recibe exactamente el mismo texto por cualquiera de los dos caminos.
+     */
+    private static ConflictoNegocioException stockInsuficiente(String nombre, BigDecimal disponible,
+                                                               BigDecimal solicitado) {
+        return new ConflictoNegocioException("STOCK_INSUFICIENTE",
+                "Solo hay " + cifra(disponible) + " unidades disponibles de " + nombre
+                        + ". Se solicitaron " + cifra(solicitado) + ".");
     }
 
     /**
