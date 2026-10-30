@@ -54,4 +54,5 @@ Docs/
 | HU-12 Gestión de recetas | Backend verificado en caliente 2026-10-25 · frontend pendiente |
 | HU-13 Registro de compras | Entregada 2026-10-26 (backend verificado en caliente; frontend pendiente) |
 | HU-14 Detalle de compra | Entregada 2026-10-28 (backend verificado en caliente; frontend pendiente) |
+| HU-15 Historial de compras | Entregada 2026-10-29 (backend verificado en caliente; frontend pendiente) |
 | HU-19 Lotes de producto terminado | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
