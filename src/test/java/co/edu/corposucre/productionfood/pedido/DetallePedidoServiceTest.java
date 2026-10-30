@@ -363,6 +363,35 @@ class DetallePedidoServiceTest {
     }
 
     @Test
+    @DisplayName("CP-09: stock agotado entre el pre-chequeo y el FEFO responde el mensaje legible")
+    void agregarConStockAgotadoPorCarreraResponde409Legible() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var producto = producto("Pan francés", "1200.00", true);
+        when(productoRepository.buscarConDetalle(ID_PRODUCTO))
+                .thenReturn(Optional.of(producto));
+        when(detallePedidoRepository.existeProducto(ID_PEDIDO, ID_PRODUCTO)).thenReturn(false);
+        // Primera lectura: el pre-chequeo ve stock; segunda: la relectura tras la excepción ve 0.
+        when(inventarioPtService.stockDisponible(ID_PRODUCTO))
+                .thenReturn(new BigDecimal("10.00"), new BigDecimal("0.00"));
+        when(detallePedidoRepository.insertar(any(DetallePedido.class))).thenReturn(ID_DETALLE);
+        when(inventarioPtService.registrarSalidaFefo(ID_PRODUCTO, new BigDecimal("1.00"),
+                "detalle_pedido", ID_DETALLE))
+                .thenThrow(new ConflictoNegocioException("STOCK_INSUFICIENTE", "mensaje generico"));
+
+        assertThatThrownBy(() -> service.agregar(ID_PEDIDO,
+                new AgregarDetallePedidoRequest(ID_PRODUCTO, new BigDecimal("1.00"))))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "STOCK_INSUFICIENTE")
+                .hasMessage("Solo hay 0 unidades disponibles de Pan francés. "
+                        + "Se solicitaron 1.");
+
+        // El INSERT ocurrió antes de la salida FEFO y la excepción se propaga para revertirlo.
+        verify(detallePedidoRepository).insertar(any(DetallePedido.class));
+        // El mensaje sale de la relectura de stock, no de volver a leer la línea insertada.
+        verify(detallePedidoRepository, never()).obtenerPorId(any());
+    }
+
+    @Test
     @DisplayName("R-06: una carrera que viola uk_detalle_pedido se traduce a PRODUCTO_DUPLICADO")
     void agregarConDuplicateKeyResponde409() {
         dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
