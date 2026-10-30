@@ -51,4 +51,16 @@ public interface ClienteRepository extends JpaRepository<Cliente, Integer> {
           and estado in ('PENDIENTE', 'EN_PREPARACION')
         """, nativeQuery = true)
     long contarPedidosEnCurso(@Param("idCliente") Integer idCliente);
+
+    /**
+     * Indica si existe un cliente activo con el identificador dado.
+     *
+     * <p>Lo usará HU-16 para validar que el cliente de un pedido esté activo; el estado del
+     * cliente no debe consultarse por otra vía para no duplicar la regla.
+     *
+     * @param id identificador del cliente
+     * @return {@code true} si el cliente existe y está activo
+     */
+    @Query("select count(c) > 0 from Cliente c where c.idCliente = :id and c.estado = true")
+    boolean existeActivo(@Param("id") Integer id);
 }

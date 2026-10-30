@@ -149,6 +149,18 @@ class PedidoRepositoryTest {
     }
 
     @Test
+    @DisplayName("CA-03: insertar persiste la fecha de entrega en la misma sentencia")
+    void insertarPersisteLaFechaDeEntrega() {
+        var pedido = pedidoNuevo();
+        pedido.setFechaEntrega(LocalDate.now().plusDays(3));
+
+        var id = insertarConRepositorio(pedido);
+
+        var leido = repository.buscarPorId(id).orElseThrow();
+        assertThat(leido.getFechaEntrega()).isEqualTo(pedido.getFechaEntrega());
+    }
+
+    @Test
     @DisplayName("buscarPorId devuelve el pedido con el nombre del cliente del JOIN")
     void buscarPorIdTraeElNombreDelCliente() {
         var id = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);

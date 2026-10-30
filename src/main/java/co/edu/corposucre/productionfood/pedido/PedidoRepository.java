@@ -130,11 +130,11 @@ public class PedidoRepository {
     /**
      * Inserta la cabecera de un pedido y devuelve el identificador que asignó la base.
      *
-     * <p>El {@code INSERT} solo lleva cliente y estado: {@code fecha_pedido} no se envía para que
-     * actúe el {@code DEFAULT (curdate())} de la base (R-01), y la aplicación nunca debe fijar la
-     * fecha de registro. El estado viaja como su nombre canónico, que es el literal del
-     * {@code CHECK ck_pedidos_estado}; la inserción siempre es {@code PENDIENTE} (R-02), valor
-     * que fija el servicio.
+     * <p>El {@code INSERT} lleva cliente, estado y la fecha de entrega, pero nunca
+     * {@code fecha_pedido}: no se envía para que actúe el {@code DEFAULT (curdate())} de la base
+     * (R-01), y la aplicación nunca debe fijar la fecha de registro. El estado viaja como su
+     * nombre canónico, que es el literal del {@code CHECK ck_pedidos_estado}; la inserción
+     * siempre es {@code PENDIENTE} (R-02), valor que fija el servicio.
      *
      * <p>No lleva {@code @Transactional}: la transacción la abre el servicio que crea la cabecera
      * y su detalle, para que un fallo en una línea no deje un pedido a medias.
@@ -145,12 +145,13 @@ public class PedidoRepository {
     public Integer insertar(Pedido pedido) {
         var params = new MapSqlParameterSource()
                 .addValue("idCliente", pedido.getIdCliente())
-                .addValue("estado", pedido.getEstado().name());
+                .addValue("estado", pedido.getEstado().name())
+                .addValue("fechaEntrega", pedido.getFechaEntrega());
 
         var generadas = new GeneratedKeyHolder();
         jdbc.update("""
-                INSERT INTO pedidos (id_cliente, estado)
-                VALUES (:idCliente, :estado)
+                INSERT INTO pedidos (id_cliente, estado, fecha_entrega)
+                VALUES (:idCliente, :estado, :fechaEntrega)
                 """, params, generadas, new String[] {"id_pedido"});
 
         Integer id = claveGenerada(generadas);
