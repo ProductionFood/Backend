@@ -1,8 +1,11 @@
 package co.edu.corposucre.productionfood.compra;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -18,12 +21,18 @@ import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
 import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.DetalleCompraResponse;
+import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.compra.dto.MovimientoGeneradoResponse;
 import co.edu.corposucre.productionfood.compra.dto.ProveedorRefResponse;
 import co.edu.corposucre.productionfood.compra.dto.RecepcionResponse;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse.Periodo;
+import co.edu.corposucre.productionfood.compra.dto.ResumenComprasResponse.TotalesEstado;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
 import co.edu.corposucre.productionfood.proveedor.ProveedorRepository;
+import co.edu.corposucre.productionfood.receta.dto.MateriaPrimaRefResponse;
 
 /**
  * Ciclo de vida de una compra (HU-13): alta, edición de cabecera, consulta, recepción y
@@ -48,11 +57,24 @@ public class CompraService {
      * de columna SQL de {@code compras} (alias {@code c}). {@code PageRequest.of} rechaza
      * cualquier campo que no esté aquí, y la columna resuelta es la única que llega al
      * repositorio, de modo que el orden nunca es SQL arbitrario.
+     *
+     * <p>{@code total} es el alias {@code total_compra} del {@code SELECT} base, no una columna
+     * de la tabla: el total se calcula con una subconsulta correlada sobre
+     * {@code detalle_compra} y MySQL admite ordenar por el alias del select.
      */
     private static final Map<String, String> ORDEN = Map.of(
-            "fecha", "c.fecha", "estado", "c.estado", "id", "c.id_compra");
+            "fecha", "c.fecha", "estado", "c.estado", "total", "total_compra",
+            "id", "c.id_compra");
 
     private static final String ORDEN_POR_DEFECTO = "fecha,desc";
+
+    /**
+     * Tope de página cuando el listado se pide con detalle (HU-15 CP-12): el {@code JOIN} con
+     * {@code detalle_compra} multiplica las filas por línea, así que con detalle el tamaño se
+     * recorta a este máximo en vez de responder un error, y la respuesta refleja el tamaño
+     * recortado. Sin detalle la cota sigue siendo la de {@link PageRequest} (100).
+     */
+    private static final int TAMANO_MAXIMO_CON_DETALLE = 20;
 
     private final CompraRepository compraRepository;
 
@@ -139,7 +161,7 @@ public class CompraService {
 
         return new CompraResponse(idCompra,
                 new ProveedorRefResponse(proveedor.getIdProveedor(), proveedor.getNombre()),
-                fecha, estado.name(), new BigDecimal("0.00"), 0, true);
+                fecha, estado.name(), new BigDecimal("0.00"), 0, true, null);
     }
 
     /**
@@ -216,26 +238,55 @@ public class CompraService {
      *
      * <p>El rango de fechas se valida antes de tocar la base (contrato §4): un rango invertido no
      * tiene resultados posibles y responder 400 explica el error mejor que una página vacía.
+     * Con el mismo criterio, un filtro {@code idProveedor} que apunte a un proveedor inexistente
+     * responde 404 ({@code PROVEEDOR_INEXISTENTE}, HU-15 §5) en lugar de una página vacía que
+     * parecería «ese proveedor no tiene compras». Solo se comprueba <strong>existencia</strong>,
+     * no actividad: el historial de una compra ya registrada no se bloquea por desactivar a su
+     * proveedor, igual que el {@code PUT} de HU-13; el alta y la edición siguen respondiendo
+     * 409 con el mismo código.
      *
      * <p>Los cuatro filtros son opcionales y viajan tal cual al repositorio; un valor nulo no
      * restringe. El total sale de {@link CompraRepository#contar} y no del tamaño de la página:
      * el listado puede traer una página y haber miles.
      *
-     * @param idProveedor proveedor a filtrar, o {@code null} sin filtrar
-     * @param estado      estado a filtrar, o {@code null} sin filtrar
-     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
-     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
-     * @param page        página solicitada, desde 0
-     * @param size        tamaño de página, entre 1 y 100
-     * @param sort        orden "campo,direccion"; por defecto "fecha,desc"
-     * @return página de compras con su proveedor y sus totales
+     * <p>Con {@code incluirDetalle=true} (HU-15 R-06) cada compra de la página trae además sus
+     * líneas en la forma de HU-14, resueltas con <strong>una sola consulta</strong>
+     * ({@link CompraRepository#buscarConDetalle}, con {@code LEFT JOIN} a {@code detalle_compra})
+     * y agrupadas en memoria por {@code id_compra} preservando el orden de la primera aparición
+     * de cada compra: nunca hay una consulta por compra (N+1). Una compra sin líneas responde
+     * {@code detalle: []}. En este modo el tamaño de página se recorta a 20
+     * ({@code TAMANO_MAXIMO_CON_DETALLE}) si lo excede (CP-12, sin error) y la respuesta refleja
+     * el tamaño recortado; sin detalle nada cambia y la cota sigue en 100.
+     *
+     * <p><strong>Condición de carrera (HU-15, deliberado):</strong> la página de compras, el
+     * detalle y el conteo del total se leen dentro de esta misma
+     * {@code @Transactional(readOnly = true)}. En REPEATABLE READ las tres consultas ven el
+     * mismo snapshot de la base, de modo que una compra insertada mientras se construye la
+     * página no puede hacer que {@code totalElements} mienta sobre el contenido de la página que
+     * se devuelve: o la ve el snapshot entero o no lo ve ninguno.
+     *
+     * @param idProveedor    proveedor a filtrar, o {@code null} sin filtrar
+     * @param estado         estado a filtrar, o {@code null} sin filtrar
+     * @param fechaInicio    primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin       último día incluido del rango, o {@code null} sin límite superior
+     * @param page           página solicitada, desde 0
+     * @param size           tamaño de página, entre 1 y 100; con {@code incluirDetalle} se
+     *                       recorta a 20 si lo excede
+     * @param sort           orden "campo,direccion", con campos de la lista blanca
+     *                       {@code fecha}, {@code estado}, {@code total} e {@code id};
+     *                       por defecto "fecha,desc"
+     * @param incluirDetalle {@code true} para añadir a cada compra su lista de líneas de detalle
+     * @return página de compras con su proveedor y sus totales, y con {@code detalle} relleno
+     *         solo cuando se pidió incluirlo
      * @throws ParametroInvalidoException si el rango de fechas está invertido, o la paginación o
      *                                    el campo de orden son inválidos
+     * @throws ProveedorInexistenteFiltroException si {@code idProveedor} no existe
      */
     @Transactional(readOnly = true)
     public PageResponse<CompraResponse> listar(Integer idProveedor, EstadoCompra estado,
                                                LocalDate fechaInicio, LocalDate fechaFin,
-                                               int page, int size, String sort) {
+                                               int page, int size, String sort,
+                                               boolean incluirDetalle) {
         if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
             // Código del contrato transversal (04-CONTRATO-API.md §4), no el genérico
             // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
@@ -243,17 +294,143 @@ public class CompraService {
                     "La fecha de inicio no puede ser posterior a la fecha de fin.");
         }
 
-        var orden = PageRequest.of(page, size, sort, ORDEN, ORDEN_POR_DEFECTO);
+        // HU-15 §5: validación barata (un EXISTS por id) antes de cualquier consulta del
+        // historial; solo en listar, que es el único endpoint con este filtro. Aquí no se
+        // comprueba actividad por la misma razón que el PUT de HU-13.
+        if (idProveedor != null && !proveedorRepository.existsById(idProveedor)) {
+            throw new ProveedorInexistenteFiltroException(idProveedor);
+        }
+
+        // CP-12: el recorte va antes de PageRequest.of para que un size sobre la cota de detalle
+        // se recorte y no responda 400; un size igual a 0 o negativo sigue rechazándose allí.
+        var sizeEfectivo = incluirDetalle ? Math.min(size, TAMANO_MAXIMO_CON_DETALLE) : size;
+        var orden = PageRequest.of(page, sizeEfectivo, sort, ORDEN, ORDEN_POR_DEFECTO);
         // El offset se calcula en long: page no tiene cota superior, así que page * size
         // desbordaría int a un valor negativo y el OFFSET del SQL fallaría.
         long offset = (long) orden.page() * orden.size();
-        var filas = compraRepository.buscar(idProveedor, estado, fechaInicio, fechaFin,
-                orden.propiedad(), orden.ascendente(), orden.size(), offset);
+
+        List<CompraResponse> contenido;
+        if (incluirDetalle) {
+            var filas = compraRepository.buscarConDetalle(idProveedor, estado, fechaInicio,
+                    fechaFin, orden.propiedad(), orden.ascendente(), orden.size(), offset);
+            contenido = agruparConDetalle(filas);
+        } else {
+            var filas = compraRepository.buscar(idProveedor, estado, fechaInicio, fechaFin,
+                    orden.propiedad(), orden.ascendente(), orden.size(), offset);
+            contenido = filas.stream().map(CompraService::aResponse).toList();
+        }
         var total = compraRepository.contar(idProveedor, estado, fechaInicio, fechaFin);
 
-        return PageResponse.of(
-                filas.stream().map(CompraService::aResponse).toList(),
-                orden.page(), orden.size(), total);
+        return PageResponse.of(contenido, orden.page(), orden.size(), total);
+    }
+
+    /**
+     * Resume las compras de un período por estado, con sus gastos ejecutado y comprometido
+     * (HU-15 §2).
+     *
+     * <p>El rango se valida igual que en {@link #listar(Integer, EstadoCompra, LocalDate,
+     * LocalDate, int, int, String)}: un rango invertido no tiene resultados posibles y responde
+     * 400 {@code RANGO_FECHAS_INVALIDO} antes de tocar la base.
+     *
+     * <p>Los totales llegan del repositorio ya agrupados por estado y siempre recalculados desde
+     * {@code detalle_compra} (R-05). Un estado sin compras en el rango —y también un rango vacío
+     * (CP-17)— responde cantidad {@code 0} y total {@code 0.00}, no un error. Por R-04 el gasto
+     * ejecutado es solo el total de las RECIBIDA y el comprometido solo el de las PENDIENTE: las
+     * CANCELADA se contabilizan en su bloque y quedan fuera de ambos.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return el resumen del período; el periodo de la respuesta recoge los filtros tal cual,
+     *         con ambos campos {@code null} cuando no se envió ninguno
+     * @throws ParametroInvalidoException si el rango de fechas está invertido
+     */
+    @Transactional(readOnly = true)
+    public ResumenComprasResponse resumen(LocalDate fechaInicio, LocalDate fechaFin) {
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            // Mismo código del contrato transversal que en listar: el frontend distingue el
+            // rango invertido de un query mal formado.
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        var porEstado = compraRepository.resumenPorPeriodo(fechaInicio, fechaFin).stream()
+                .collect(Collectors.toMap(ResumenEstadoFila::estado, fila -> fila));
+
+        var recibidas = totalesDe(porEstado.get(EstadoCompra.RECIBIDA));
+        var pendientes = totalesDe(porEstado.get(EstadoCompra.PENDIENTE));
+        var canceladas = totalesDe(porEstado.get(EstadoCompra.CANCELADA));
+
+        // R-04: canceladas se contabiliza aparte; ninguno de los dos gastos la financia.
+        return new ResumenComprasResponse(new Periodo(fechaInicio, fechaFin),
+                recibidas, pendientes, canceladas,
+                recibidas.total(), pendientes.total());
+    }
+
+    /**
+     * Resume las compras recibidas de un período agrupadas por proveedor (HU-15 §2).
+     *
+     * <p>El rango se valida igual que en {@link #resumen(LocalDate, LocalDate)}: un rango
+     * invertido no tiene resultados posibles y responde 400 {@code RANGO_FECHAS_INVALIDO} antes
+     * de tocar la base.
+     *
+     * <p>El repositorio devuelve solo las compras RECIBIDA —el gasto ejecutado—, ordenadas por
+     * total descendente (CP-15), y ese orden se preserva en la respuesta. Cada fila recibe su
+     * porcentaje sobre la suma global de los totales del período, a escala 2 con redondeo
+     * HALF_UP (CP-16): la suma de los porcentajes es 100.00 con el residuo de redondeo
+     * permitido, sin ajustar el último. Un proveedor sin recibidas en el rango no aparece; un
+     * rango vacío responde la lista vacía, no un error.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return gasto por proveedor, ordenado por total descendente; vacía si no hay recibidas
+     * @throws ParametroInvalidoException si el rango de fechas está invertido
+     */
+    @Transactional(readOnly = true)
+    public List<GastoProveedorResponse> gastoPorProveedor(LocalDate fechaInicio,
+                                                           LocalDate fechaFin) {
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            // Mismo código del contrato transversal que en listar y en resumen.
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        var filas = compraRepository.gastoPorProveedor(fechaInicio, fechaFin);
+        var sumaGlobal = filas.stream()
+                .map(GastoProveedorFila::total)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return filas.stream()
+                .map(fila -> new GastoProveedorResponse(
+                        fila.proveedor(),
+                        fila.cantidadCompras(),
+                        fila.total(),
+                        porcentajeDe(fila.total(), sumaGlobal)))
+                .toList();
+    }
+
+    /**
+     * Peso de un total sobre la suma global, a escala 2 con redondeo HALF_UP (CP-16).
+     *
+     * <p>Una suma global en cero solo cabe un período cuyas recibidas suman todos {@code 0.00}
+     * —precios o cantidades a cero—: en ese caso el porcentaje de cada fila es {@code 0.00},
+     * porque no hay nada sobre lo que calcular una fracción.
+     */
+    private static BigDecimal porcentajeDe(BigDecimal total, BigDecimal sumaGlobal) {
+        if (sumaGlobal.signum() == 0) {
+            return new BigDecimal("0.00");
+        }
+        return total.multiply(new BigDecimal(100))
+                .divide(sumaGlobal, 2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Totales de un estado del resumen; un estado sin compras en el rango responde {@code 0} y
+     * {@code 0.00} (CP-17), con la escala 2 del contrato monetario.
+     */
+    private static TotalesEstado totalesDe(ResumenEstadoFila fila) {
+        return fila == null
+                ? new TotalesEstado(0L, new BigDecimal("0.00"))
+                : new TotalesEstado(fila.cantidad(), fila.total());
     }
 
     /**
@@ -440,6 +617,16 @@ public class CompraService {
      * compra {@code PENDIENTE} admite cambios.
      */
     private static CompraResponse aResponse(Compra compra) {
+        return aResponse(compra, null);
+    }
+
+    /**
+     * Versión de {@link #aResponse(Compra)} con la lista de líneas del modo
+     * {@code incluirDetalle=true} (HU-15 R-06); en el resto de respuestas el detalle va en
+     * {@code null} y el campo ni siquiera se serializa.
+     */
+    private static CompraResponse aResponse(Compra compra,
+                                            List<DetalleCompraResponse> detalle) {
         return new CompraResponse(
                 compra.getIdCompra(),
                 new ProveedorRefResponse(compra.getIdProveedor(), compra.getNombreProveedor()),
@@ -447,6 +634,87 @@ public class CompraService {
                 compra.getEstado().name(),
                 compra.getTotalCompra(),
                 compra.getCantidadItems(),
-                compra.getEstado() == EstadoCompra.PENDIENTE);
+                compra.getEstado() == EstadoCompra.PENDIENTE,
+                detalle);
+    }
+
+    /**
+     * Agrupa las filas planas de {@link CompraRepository#buscarConDetalle} en una respuesta por
+     * compra (HU-15 R-06), preservando el orden de la primera aparición de cada una.
+     *
+     * <p>La agrupación es en memoria y sobre las filas de una única consulta: nunca se consulta
+     * una compra por compra. Cada compra recibe su lista de líneas —la fila sin línea no aporta
+     * nada al grupo, que queda como lista vacía— y su cabecera se lee de la primera fila de ese
+     * grupo, cuyas columnas de cabecera se repiten idénticas en todas las filas de la compra.
+     */
+    private static List<CompraResponse> agruparConDetalle(List<CompraDetalleFila> filas) {
+        var compras = new LinkedHashMap<Integer, Compra>();
+        var detalles = new LinkedHashMap<Integer, List<DetalleCompraResponse>>();
+        for (var fila : filas) {
+            compras.putIfAbsent(fila.idCompra(), cabeceraDe(fila));
+            var lineas = detalles.computeIfAbsent(fila.idCompra(), id -> new ArrayList<>());
+            if (fila.conDetalle()) {
+                lineas.add(aDetalle(fila));
+            }
+        }
+
+        var respuestas = new ArrayList<CompraResponse>(compras.size());
+        for (var compra : compras.values()) {
+            respuestas.add(aResponse(compra, detalles.get(compra.getIdCompra())));
+        }
+        return respuestas;
+    }
+
+    /**
+     * Reconstruye la cabecera de una compra a partir de la primera fila que la trajo: las
+     * columnas de cabecera son las mismas en todas las filas de su grupo.
+     */
+    private static Compra cabeceraDe(CompraDetalleFila fila) {
+        var compra = new Compra();
+        compra.setIdCompra(fila.idCompra());
+        compra.setIdProveedor(fila.idProveedor());
+        compra.setFecha(fila.fecha());
+        compra.setEstado(fila.estado());
+        compra.setNombreProveedor(fila.nombreProveedor());
+        compra.setTotalCompra(fila.totalCompra());
+        compra.setCantidadItems(fila.cantidadItems());
+        return compra;
+    }
+
+    /**
+     * Convierte la parte de detalle de una fila plana en la línea del contrato de HU-14.
+     *
+     * <p>El subtotal es {@code cantidad * precioUnitario} a escala 2 con {@code HALF_UP}
+     * (R-03/R-07), nunca una cifra que entregue el cliente. {@code totalCompra} va en
+     * {@code null}: en un listado el total agregado viaja una sola vez en la cabecera de su
+     * compra, y un {@code null} ni siquiera se serializa. El comparativo de HU-14 R-04 sale de
+     * la misma fila: {@code costoReferencia} es {@code materias_primas.costo_unitario} vigente y
+     * {@code diferenciaCosto} es el precio pagado menos ese costo; sin costo, ambos en
+     * {@code null}.
+     */
+    private static DetalleCompraResponse aDetalle(CompraDetalleFila fila) {
+        return new DetalleCompraResponse(
+                fila.idDetalleCompra(),
+                new MateriaPrimaRefResponse(fila.idMateriaPrima(), fila.nombreMateriaPrima(),
+                        fila.abreviaturaUnidad()),
+                fila.cantidad(),
+                fila.precioUnitario(),
+                fila.cantidad().multiply(fila.precioUnitario()).setScale(2, RoundingMode.HALF_UP),
+                null,
+                fila.costoReferencia(),
+                diferenciaDeCosto(fila.precioUnitario(), fila.costoReferencia()));
+    }
+
+    /**
+     * Comparativo de HU-14 R-04: lo pagado menos el costo de referencia, a escala 2 con
+     * {@code HALF_UP}. Sin costo de referencia no hay comparativo posible: {@code null} y el
+     * campo no se serializa.
+     */
+    private static BigDecimal diferenciaDeCosto(BigDecimal precioUnitario,
+                                                BigDecimal costoReferencia) {
+        if (costoReferencia == null) {
+            return null;
+        }
+        return precioUnitario.subtract(costoReferencia).setScale(2, RoundingMode.HALF_UP);
     }
 }

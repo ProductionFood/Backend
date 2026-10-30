@@ -3,6 +3,9 @@ package co.edu.corposucre.productionfood.compra;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -21,12 +24,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpStatus;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.compra.dto.ActualizarCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.CompraResponse;
 import co.edu.corposucre.productionfood.compra.dto.CrearCompraRequest;
+import co.edu.corposucre.productionfood.compra.dto.GastoProveedorResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.SaldosInventario;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
@@ -73,6 +79,22 @@ class CompraServiceTest {
         compra.setTotalCompra(total);
         compra.setCantidadItems(items);
         return compra;
+    }
+
+    /**
+     * Fila plana de {@link CompraRepository#buscarConDetalle}: {@code null} en cualquier campo
+     * de detalle equivale a la fila de una compra sin líneas que devuelve el {@code LEFT JOIN}.
+     */
+    private static CompraDetalleFila filaDetalle(Integer idCompra, EstadoCompra estado,
+                                                 String total, int items, Integer idDetalle,
+                                                 Integer idMateriaPrima, String cantidad,
+                                                 String precio, String nombreMateriaPrima,
+                                                 String unidad, String costo) {
+        return new CompraDetalleFila(idCompra, ID_PROVEEDOR, LocalDate.of(2026, 9, 18), estado,
+                "Harinas SA", new BigDecimal(total), items, idMateriaPrima, idDetalle,
+                cantidad == null ? null : new BigDecimal(cantidad),
+                precio == null ? null : new BigDecimal(precio),
+                nombreMateriaPrima, unidad, costo == null ? null : new BigDecimal(costo));
     }
 
     private static CrearCompraRequest alta(LocalDate fecha, EstadoCompra estado) {
@@ -329,13 +351,17 @@ class CompraServiceTest {
         var fin = hoy.minusDays(1);
         var compra = fila(7, "Harinas SA", hoy.minusDays(5), EstadoCompra.PENDIENTE,
                 new BigDecimal("150.00"), 2);
+        // Con el filtro informado, listar exige que el proveedor exista (HU-15 §5): aquí pasa
+        // la validación y por eso el resto del listado se ejecuta con normalidad.
+        when(proveedorRepository.existsById(ID_PROVEEDOR)).thenReturn(true);
         when(compraRepository.buscar(eq(ID_PROVEEDOR), eq(EstadoCompra.PENDIENTE), eq(inicio),
                 eq(fin), eq("c.fecha"), eq(false), eq(10), eq(20L)))
                 .thenReturn(List.of(compra));
         when(compraRepository.contar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin))
                 .thenReturn(21L);
 
-        var r = service.listar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin, 2, 10, null);
+        var r = service.listar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin, 2, 10, null,
+                false);
 
         assertThat(r.content()).hasSize(1);
         assertThat(r.content().get(0).idCompra()).isEqualTo(7);
@@ -344,9 +370,27 @@ class CompraServiceTest {
         assertThat(r.size()).isEqualTo(10);
         assertThat(r.totalElements()).isEqualTo(21L);
         // Por defecto "fecha,desc": page 2 con size 10 es offset 20, calculado en long.
+        verify(proveedorRepository).existsById(ID_PROVEEDOR);
         verify(compraRepository).buscar(eq(ID_PROVEEDOR), eq(EstadoCompra.PENDIENTE), eq(inicio),
                 eq(fin), eq("c.fecha"), eq(false), eq(10), eq(20L));
         verify(compraRepository).contar(ID_PROVEEDOR, EstadoCompra.PENDIENTE, inicio, fin);
+    }
+
+    @Test
+    @DisplayName("HU-15 §5: listar con un idProveedor inexistente responde 404 "
+            + "PROVEEDOR_INEXISTENTE sin consultar el historial")
+    void listarConProveedorInexistenteResponde404SinConsultar() {
+        when(proveedorRepository.existsById(99999)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.listar(99999, null, null, null, 0, 10, null, false))
+                .isInstanceOf(ProveedorInexistenteFiltroException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PROVEEDOR_INEXISTENTE")
+                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND);
+
+        // La validación es anterior a cualquier consulta: ni la página ni el conteo se piden.
+        verify(compraRepository, never()).buscar(any(), any(), any(), any(), any(), anyBoolean(),
+                anyInt(), anyLong());
+        verify(compraRepository, never()).contar(any(), any(), any(), any());
     }
 
     @Test
@@ -356,7 +400,7 @@ class CompraServiceTest {
                 eq(20), eq(0L))).thenReturn(List.of());
         when(compraRepository.contar(any(), any(), any(), any())).thenReturn(0L);
 
-        var r = service.listar(null, null, null, null, 0, 20, null);
+        var r = service.listar(null, null, null, null, 0, 20, null, false);
 
         assertThat(r.content()).isEmpty();
         assertThat(r.totalElements()).isZero();
@@ -367,7 +411,8 @@ class CompraServiceTest {
     void listarConRangoInvertidoResponde400() {
         var hoy = LocalDate.now();
 
-        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null))
+        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null,
+                false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
 
@@ -377,7 +422,37 @@ class CompraServiceTest {
     @Test
     @DisplayName("listar con un campo de orden no listado responde 400 CAMPO_ORDEN_INVALIDO")
     void listarConCampoDeOrdenNoListadoResponde400() {
-        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "proveedor"))
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "proveedor",
+                false))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("sort=total se traduce al alias total_compra del SELECT en ambos sentidos")
+    void listarPorTotalUsaElAliasDelSelectEnAmbosSentidos() {
+        when(compraRepository.buscar(any(), any(), any(), any(), eq("total_compra"), anyBoolean(),
+                anyInt(), anyLong())).thenReturn(List.of());
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(0L);
+
+        service.listar(null, null, null, null, 0, 20, "total", false);
+        service.listar(null, null, null, null, 0, 20, "total,desc", false);
+
+        // La lista blanca traduce "total" al alias del select; la dirección viaja aparte.
+        verify(compraRepository).buscar(any(), any(), any(), any(), eq("total_compra"),
+                eq(true), eq(20), eq(0L));
+        verify(compraRepository).buscar(any(), any(), any(), any(), eq("total_compra"),
+                eq(false), eq(20), eq(0L));
+    }
+
+    @Test
+    @DisplayName("sort=totalCompra, fuera de la lista blanca, responde 400 CAMPO_ORDEN_INVALIDO")
+    void listarConSortTotalCompraResponde400() {
+        // El nombre del DTO no es el de la lista blanca: solo fecha, estado, total e id.
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "totalCompra",
+                false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
 
@@ -387,11 +462,304 @@ class CompraServiceTest {
     @Test
     @DisplayName("listar con size mayor a 100 responde 400 PARAMETRO_INVALIDO")
     void listarConSizeGrandeResponde400() {
-        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 101, null))
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 101, null, false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "PARAMETRO_INVALIDO");
 
         verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("listar sin incluirDetalle responde con el detalle a null y nunca consulta el "
+            + "detalle")
+    void listarSinIncluirDetalleNoTraeDetalle() {
+        when(compraRepository.buscar(any(), any(), any(), any(), eq("c.fecha"), eq(false),
+                eq(20), eq(0L))).thenReturn(List.of(
+                        fila(7, "Harinas SA", LocalDate.now(), EstadoCompra.PENDIENTE,
+                                new BigDecimal("150.00"), 2)));
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(1L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null, false);
+
+        assertThat(r.content()).hasSize(1);
+        // CP-10: sin incluirDetalle el componente detalle va en null y no se serializa.
+        assertThat(r.content().get(0).detalle()).isNull();
+        // El camino sin detalle sigue siendo buscar() + contar(), sin tocar buscarConDetalle.
+        verify(compraRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                anyBoolean(), anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("R-06: con incluirDetalle agrupa las líneas de cada compra con sus subtotales "
+            + "y el comparativo de costo")
+    void listarConIncluirDetalleAgrupaLasLineasDeCadaCompra() {
+        when(compraRepository.buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(20), eq(0L))).thenReturn(List.of(
+                // La cabecera se repite en las dos filas de la compra 7.
+                filaDetalle(7, EstadoCompra.PENDIENTE, "63.33", 2, 101, 5, "3.33", "10.01",
+                        "Harina de trigo", "kg", "8.00"),
+                filaDetalle(7, EstadoCompra.PENDIENTE, "63.33", 2, 102, 6, "2.00", "15.00",
+                        "Azúcar", "kg", null),
+                // La compra 8 no tiene líneas: el LEFT JOIN la trae con el detalle a null.
+                filaDetalle(8, EstadoCompra.RECIBIDA, "0.00", 0, null, null, null, null, null,
+                        null, null)));
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(2L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null, true);
+
+        assertThat(r.content()).extracting(CompraResponse::idCompra).containsExactly(7, 8);
+        var conLineas = r.content().get(0);
+        assertThat(conLineas.detalle()).hasSize(2);
+        assertThat(conLineas.detalle().get(0).idDetalleCompra()).isEqualTo(101);
+        assertThat(conLineas.detalle().get(0).materiaPrima().nombre()).isEqualTo("Harina de trigo");
+        assertThat(conLineas.detalle().get(0).materiaPrima().unidad()).isEqualTo("kg");
+        // 3.33 × 10.01 = 33.3333 → subtotal a escala 2 con HALF_UP, nunca el producto crudo.
+        assertThat(conLineas.detalle().get(0).subtotal()).isEqualByComparingTo("33.33");
+        assertThat(conLineas.detalle().get(0).subtotal().scale()).isEqualTo(2);
+        assertThat(conLineas.detalle().get(1).subtotal()).isEqualByComparingTo("30.00");
+        // Comparativo de HU-14 R-04: precio pagado menos costo de referencia.
+        assertThat(conLineas.detalle().get(0).costoReferencia()).isEqualByComparingTo("8.00");
+        assertThat(conLineas.detalle().get(0).diferenciaCosto()).isEqualByComparingTo("2.01");
+        // Sin costo de referencia no hay comparativo: ambos campos en null (no se serializan).
+        assertThat(conLineas.detalle().get(1).costoReferencia()).isNull();
+        assertThat(conLineas.detalle().get(1).diferenciaCosto()).isNull();
+        // En un listado el total de cada línea va en null: el agregado está en la cabecera.
+        assertThat(conLineas.detalle()).allSatisfy(linea -> assertThat(linea.totalCompra())
+                .isNull());
+        // CP-11: el total de la cabecera concuerda con la suma de los subtotales de su detalle.
+        assertThat(conLineas.totalCompra()).isEqualByComparingTo("63.33");
+
+        var sinLineas = r.content().get(1);
+        assertThat(sinLineas.totalCompra()).isEqualByComparingTo("0.00");
+        assertThat(sinLineas.cantidadItems()).isZero();
+        // CP-10/R-06: una compra sin líneas responde lista vacía, nunca null.
+        assertThat(sinLineas.detalle()).isNotNull().isEmpty();
+
+        // Una sola consulta de detalle y el conteo del total; el listado sin detalle no se usa.
+        verify(compraRepository).contar(any(), any(), any(), any());
+        verify(compraRepository, never()).buscar(any(), any(), any(), any(), any(), anyBoolean(),
+                anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("CP-12: con incluirDetalle un size mayor que 20 se recorta a 20 sin error y la "
+            + "respuesta refleja el tamaño recortado")
+    void listarConIncluirDetalleRecortaElSizeA20() {
+        when(compraRepository.buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(20), eq(0L))).thenReturn(List.of(
+                filaDetalle(7, EstadoCompra.PENDIENTE, "0.00", 0, null, null, null, null, null,
+                        null, null)));
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(150L);
+
+        var r = service.listar(null, null, null, null, 0, 100, null, true);
+
+        assertThat(r.size()).isEqualTo(20);
+        assertThat(r.page()).isZero();
+        assertThat(r.totalElements()).isEqualTo(150L);
+        // La página efectiva es la recortada: el repositorio recibe size 20 y offset 0.
+        verify(compraRepository).buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(20), eq(0L));
+
+        // El recorte es una cota, no un límite de validación: 101 también acaba en 20.
+        var grande = service.listar(null, null, null, null, 0, 101, null, true);
+        assertThat(grande.size()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("CP-12: con incluirDetalle un size menor o igual que 20 no se modifica")
+    void listarConIncluirDetalleConservaElSizeMenorQueLaCota() {
+        when(compraRepository.buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(7), eq(0L))).thenReturn(List.of());
+        when(compraRepository.contar(any(), any(), any(), any())).thenReturn(0L);
+
+        var r = service.listar(null, null, null, null, 0, 7, null, true);
+
+        assertThat(r.size()).isEqualTo(7);
+        verify(compraRepository).buscarConDetalle(any(), any(), any(), any(), eq("c.fecha"),
+                eq(false), eq(7), eq(0L));
+    }
+
+    private static ResumenEstadoFila filaResumen(EstadoCompra estado, long cantidad,
+                                                 String total) {
+        return new ResumenEstadoFila(estado, cantidad, new BigDecimal(total));
+    }
+
+    @Test
+    @DisplayName("RANGO_FECHAS_INVALIDO: resumen con el rango invertido no consulta la base")
+    void resumenConRangoInvertidoResponde400() {
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.resumen(hoy, hoy.minusDays(1)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("R-04: el resumen agrupa por estado y excluye las canceladas de ambos gastos")
+    void resumenAgrupaPorEstadoYExcluyeCanceladasDeLosGastos() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        // El total llega con escala 4 del SUM de MySQL; la respuesta lo fija a 2.
+        when(compraRepository.resumenPorPeriodo(inicio, fin)).thenReturn(List.of(
+                filaResumen(EstadoCompra.RECIBIDA, 8, "4850000.0000"),
+                filaResumen(EstadoCompra.PENDIENTE, 2, "620000.00"),
+                filaResumen(EstadoCompra.CANCELADA, 1, "85000.00")));
+
+        var r = service.resumen(inicio, fin);
+
+        assertThat(r.periodo().desde()).isEqualTo(inicio);
+        assertThat(r.periodo().hasta()).isEqualTo(fin);
+        assertThat(r.recibidas().cantidad()).isEqualTo(8);
+        assertThat(r.recibidas().total()).isEqualByComparingTo("4850000.00");
+        assertThat(r.recibidas().total().scale()).isEqualTo(2);
+        assertThat(r.pendientes().cantidad()).isEqualTo(2);
+        assertThat(r.pendientes().total()).isEqualByComparingTo("620000.00");
+        assertThat(r.canceladas().cantidad()).isEqualTo(1);
+        assertThat(r.canceladas().total()).isEqualByComparingTo("85000.00");
+        // R-04: ejecutado solo RECIBIDA, comprometido solo PENDIENTE; 85000.00 de canceladas
+        // no financia ninguno de los dos.
+        assertThat(r.gastoEjecutado()).isEqualByComparingTo("4850000.00");
+        assertThat(r.gastoEjecutado().scale()).isEqualTo(2);
+        assertThat(r.gastoComprometido()).isEqualByComparingTo("620000.00");
+        assertThat(r.gastoComprometido().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("CP-17: un estado sin compras en el rango responde 0 y 0.00, no un error")
+    void resumenConEstadosAusentesRespondeCeros() {
+        var hoy = LocalDate.now();
+        when(compraRepository.resumenPorPeriodo(hoy, hoy))
+                .thenReturn(List.of(filaResumen(EstadoCompra.RECIBIDA, 1, "150.00")));
+
+        var r = service.resumen(hoy, hoy);
+
+        assertThat(r.recibidas().cantidad()).isEqualTo(1);
+        assertThat(r.recibidas().total()).isEqualByComparingTo("150.00");
+        assertThat(r.pendientes().cantidad()).isZero();
+        assertThat(r.pendientes().total()).isEqualByComparingTo("0.00");
+        assertThat(r.pendientes().total().scale()).isEqualTo(2);
+        assertThat(r.canceladas().cantidad()).isZero();
+        assertThat(r.canceladas().total()).isEqualByComparingTo("0.00");
+        assertThat(r.canceladas().total().scale()).isEqualTo(2);
+        assertThat(r.gastoEjecutado()).isEqualByComparingTo("150.00");
+        assertThat(r.gastoComprometido()).isEqualByComparingTo("0.00");
+        assertThat(r.gastoComprometido().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("resumen sin filtros pasa las fechas nulas y el periodo responde null")
+    void resumenSinFiltrosDevuelvePeriodoNulo() {
+        when(compraRepository.resumenPorPeriodo(null, null)).thenReturn(List.of());
+
+        var r = service.resumen(null, null);
+
+        verify(compraRepository).resumenPorPeriodo(null, null);
+        assertThat(r.periodo().desde()).isNull();
+        assertThat(r.periodo().hasta()).isNull();
+        // CP-17: un rango sin compras responde 200 con todo en cero, no un 404 ni un 400.
+        assertThat(r.recibidas().cantidad()).isZero();
+        assertThat(r.recibidas().total()).isEqualByComparingTo("0.00");
+        assertThat(r.recibidas().total().scale()).isEqualTo(2);
+        assertThat(r.gastoEjecutado()).isEqualByComparingTo("0.00");
+        assertThat(r.gastoEjecutado().scale()).isEqualTo(2);
+        assertThat(r.gastoComprometido()).isEqualByComparingTo("0.00");
+        assertThat(r.gastoComprometido().scale()).isEqualTo(2);
+    }
+
+    private static GastoProveedorFila filaGasto(String proveedor, long cantidad, String total) {
+        return new GastoProveedorFila(proveedor, cantidad, new BigDecimal(total));
+    }
+
+    @Test
+    @DisplayName("RANGO_FECHAS_INVALIDO: el gasto por proveedor con rango invertido no consulta "
+            + "la base")
+    void gastoPorProveedorConRangoInvertidoResponde400() {
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.gastoPorProveedor(hoy, hoy.minusDays(1)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+
+        verifyNoInteractions(compraRepository);
+    }
+
+    @Test
+    @DisplayName("CP-15: el gasto por proveedor preserva el orden por total descendente del "
+            + "repositorio y solo trae RECIBIDA")
+    void gastoPorProveedorPreservaElOrdenYSoloAgrupaRecibidas() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        // El repositorio ya filtra RECIBIDA y ordena por total descendente (se comprueba en
+        // CompraRepositoryTest); el servicio no reordena ni reinterpreta las filas.
+        when(compraRepository.gastoPorProveedor(inicio, fin)).thenReturn(List.of(
+                filaGasto("Harinas del Caribe S.A.S.", 4, "2340000.00"),
+                filaGasto("Distribuidora Lácteos", 3, "1810000.00")));
+
+        var r = service.gastoPorProveedor(inicio, fin);
+
+        assertThat(r).extracting(GastoProveedorResponse::proveedor)
+                .containsExactly("Harinas del Caribe S.A.S.", "Distribuidora Lácteos");
+        assertThat(r.get(0).total()).isEqualByComparingTo("2340000.00");
+        assertThat(r.get(1).total()).isEqualByComparingTo("1810000.00");
+        assertThat(r.get(0).cantidadCompras()).isEqualTo(4);
+        assertThat(r.get(1).cantidadCompras()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("CP-16: el porcentaje de cada proveedor se calcula sobre la suma global del "
+            + "período, con HALF_UP a escala 2")
+    void gastoPorProveedorCalculaElPorcentajeSobreElTotalGlobal() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        when(compraRepository.gastoPorProveedor(inicio, fin)).thenReturn(List.of(
+                filaGasto("Harinas del Caribe S.A.S.", 4, "2340000.00"),
+                filaGasto("Distribuidora Lácteos", 3, "1810000.00")));
+
+        var r = service.gastoPorProveedor(inicio, fin);
+
+        // Suma global 4150000.00: 2340000/4150000 × 100 = 56.3855… → 56.39 y
+        // 1810000/4150000 × 100 = 43.6144… → 43.61; los dos suman exactamente 100.00.
+        assertThat(r.get(0).porcentaje()).isEqualByComparingTo("56.39");
+        assertThat(r.get(0).porcentaje().scale()).isEqualTo(2);
+        assertThat(r.get(1).porcentaje()).isEqualByComparingTo("43.61");
+        assertThat(r.get(1).porcentaje().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("CP-16: los porcentajes con residuo de redondeo suman 100 ± 0.01 sin ajuste "
+            + "del último")
+    void gastoPorProveedorAdmiteElResiduoDeRedondeo() {
+        var hoy = LocalDate.now();
+        // Tres totales iguales: cada uno es 33.333…% y HALF_UP deja 33.33; la suma es 99.99,
+        // dentro del residuo que CP-16 permite y sin inflar artificialmente el último.
+        when(compraRepository.gastoPorProveedor(hoy, hoy)).thenReturn(List.of(
+                filaGasto("Proveedor A", 1, "1.00"),
+                filaGasto("Proveedor B", 1, "1.00"),
+                filaGasto("Proveedor C", 1, "1.00")));
+
+        var r = service.gastoPorProveedor(hoy, hoy);
+
+        assertThat(r).extracting(GastoProveedorResponse::porcentaje)
+                .allSatisfy(porcentaje -> {
+                    assertThat(porcentaje).isEqualByComparingTo("33.33");
+                    assertThat(porcentaje.scale()).isEqualTo(2);
+                });
+        var suma = r.stream().map(GastoProveedorResponse::porcentaje)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(suma).isBetween(new BigDecimal("99.99"), new BigDecimal("100.01"));
+    }
+
+    @Test
+    @DisplayName("CP-17: un rango sin compras recibidas devuelve la lista vacía, no un error")
+    void gastoPorProveedorDeUnRangoVacioDevuelveListaVacia() {
+        when(compraRepository.gastoPorProveedor(null, null)).thenReturn(List.of());
+
+        var r = service.gastoPorProveedor(null, null);
+
+        verify(compraRepository).gastoPorProveedor(null, null);
+        assertThat(r).isEmpty();
     }
 
     @Test
