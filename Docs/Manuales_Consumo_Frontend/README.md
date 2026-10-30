@@ -22,6 +22,7 @@ quien consume, complemento de `../../../PFDocs/00-base/04-CONTRATO-API.md`.
 | [HU-12 — Gestión de recetas](HU-12-gestion-recetas.md) | Recetas (cabecera, ingredientes, costos y estado) | Backend verificado en caliente 2026-10-25 · frontend pendiente |
 | [HU-13 — Registro de compras](HU-13-registro-compras.md) | Compras (cabecera, estados y recepción con entrada de stock) | Backend verificado en caliente 2026-10-26 · frontend pendiente |
 | [HU-14 — Detalle de compra](HU-14-detalle-compra.md) | Detalle de compra (líneas, totales y comparativo de costo) | Backend verificado en caliente 2026-10-28 · frontend pendiente |
+| [HU-15 — Historial de compras](HU-15-historial-compras.md) | Historial de compras (filtros, resumen del período y gasto por proveedor) | Backend verificado en caliente 2026-10-29 · frontend pendiente |
 | [HU-19 — Lotes de producto terminado](HU-19-lotes-producto-terminado.md) | Lotes de producto (listado con filtros, alta, detalle y kardex) | Backend verificado en caliente 2026-10-25 · frontend pendiente |
 
 ## Qué debe tener un manual
