@@ -13,12 +13,15 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.inventario.InventarioPtRepository;
 import co.edu.corposucre.productionfood.inventario.InventarioPtService;
+import co.edu.corposucre.productionfood.inventario.LoteDisponible;
 import co.edu.corposucre.productionfood.lote.dto.ProductoRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarCantidadRequest;
 import co.edu.corposucre.productionfood.pedido.dto.AgregarDetallePedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.DetallePedidoListaResponse;
 import co.edu.corposucre.productionfood.pedido.dto.DetallePedidoResponse;
 import co.edu.corposucre.productionfood.pedido.dto.LoteConsumidoResponse;
+import co.edu.corposucre.productionfood.pedido.dto.LoteDisponibleResponse;
+import co.edu.corposucre.productionfood.pedido.dto.StockProductoResponse;
 import co.edu.corposucre.productionfood.producto.ProductoConDetalle;
 import co.edu.corposucre.productionfood.producto.ProductoRepository;
 
@@ -118,6 +121,48 @@ public class DetallePedidoService {
                 detalles,
                 totalPedido(idPedido),
                 detalles.size());
+    }
+
+    /**
+     * Stock vendible de un producto terminado, agregado por lote y en orden FEFO (HU-17).
+     *
+     * <p>{@code cantidadDisponible} es la suma de los lotes vendibles que devuelve
+     * {@link InventarioPtRepository#lotesDisponiblesFefo(Integer)}, que ya excluye los vencidos y
+     * los saldos en cero (R-03): es exactamente lo que se puede vender, no el inventario bruto.
+     * {@code proximoVencimiento} es la fecha del primer lote de esa lista, el que FEFO consumiría
+     * antes (R-02); la lista no se reordena aquí porque la consulta ya aplica el orden.
+     *
+     * <p>No exige que el producto esté activo: el stock de un producto desactivado sigue
+     * existiendo físicamente y debe poder consultarse aunque ya no pueda agregarse a un pedido.
+     *
+     * @param idProducto producto terminado consultado
+     * @return el stock agregado, el número de lotes activos, el próximo vencimiento y el detalle
+     *         FEFO
+     * @throws RecursoNoEncontradoException si el producto no existe (404)
+     */
+    @Transactional(readOnly = true)
+    public StockProductoResponse obtenerStock(Integer idProducto) {
+        var producto = productoRepository.buscarConDetalle(idProducto)
+                .orElseThrow(() -> new RecursoNoEncontradoException("el producto", idProducto));
+
+        var lotes = inventarioPtRepository.lotesDisponiblesFefo(idProducto);
+        var cantidadDisponible = lotes.stream()
+                .map(LoteDisponible::cantidadDisponible)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        var proximoVencimiento = lotes.isEmpty() ? null : lotes.getFirst().fechaVencimiento();
+
+        return new StockProductoResponse(
+                producto.getIdProducto(),
+                producto.getNombre(),
+                cantidadDisponible,
+                lotes.size(),
+                proximoVencimiento,
+                lotes.stream()
+                        .map(lote -> new LoteDisponibleResponse(lote.codigoLote(),
+                                lote.fechaVencimiento(),
+                                lote.cantidadDisponible().setScale(2, RoundingMode.HALF_UP)))
+                        .toList());
     }
 
     /**

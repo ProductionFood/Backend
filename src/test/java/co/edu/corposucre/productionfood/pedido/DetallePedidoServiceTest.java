@@ -31,6 +31,7 @@ import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoExceptio
 import co.edu.corposucre.productionfood.inventario.InventarioPtRepository;
 import co.edu.corposucre.productionfood.inventario.InventarioPtService;
 import co.edu.corposucre.productionfood.inventario.LoteConsumido;
+import co.edu.corposucre.productionfood.inventario.LoteDisponible;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarCantidadRequest;
 import co.edu.corposucre.productionfood.pedido.dto.AgregarDetallePedidoRequest;
 import co.edu.corposucre.productionfood.producto.ProductoConDetalle;
@@ -629,5 +630,52 @@ class DetallePedidoServiceTest {
 
         verify(inventarioPtService, never()).registrarDevolucion(any(), any(), any());
         verify(detallePedidoRepository, never()).eliminar(any());
+    }
+
+    @Test
+    @DisplayName("obtener el stock de un producto inexistente responde 404 sin consultar lotes")
+    void obtenerStockDeProductoInexistenteResponde404() {
+        when(productoRepository.buscarConDetalle(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.obtenerStock(9999))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
+                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND)
+                .hasMessageContaining("9999");
+
+        verifyNoInteractions(inventarioPtRepository);
+    }
+
+    @Test
+    @DisplayName("obtener el stock suma los lotes, cuenta los activos y conserva el orden FEFO")
+    void obtenerStockSumaLotesCuentaActivosYConservaFefo() {
+        // Un producto desactivado sigue teniendo stock consultable: la regla de actividad solo
+        // aplica al agregar una línea (CA-02), no a consultar el inventario.
+        var producto = producto("Pan francés", "1200.00", false);
+        when(productoRepository.buscarConDetalle(ID_PRODUCTO)).thenReturn(Optional.of(producto));
+        when(inventarioPtRepository.lotesDisponiblesFefo(ID_PRODUCTO)).thenReturn(List.of(
+                new LoteDisponible(10, "PF-0915", LocalDate.parse("2026-09-19"),
+                        new BigDecimal("12.00")),
+                new LoteDisponible(11, "PF-0917", LocalDate.parse("2026-09-21"),
+                        new BigDecimal("65.50"))));
+
+        var r = service.obtenerStock(ID_PRODUCTO);
+
+        assertThat(r.idProducto()).isEqualTo(ID_PRODUCTO);
+        assertThat(r.nombre()).isEqualTo("Pan francés");
+        assertThat(r.cantidadDisponible()).isEqualByComparingTo("77.50");
+        assertThat(r.cantidadDisponible().scale()).isEqualTo(2);
+        assertThat(r.lotesActivos()).isEqualTo(2);
+        assertThat(r.proximoVencimiento()).isEqualTo(LocalDate.parse("2026-09-19"));
+
+        assertThat(r.lotes()).hasSize(2);
+        // El orden FEFO lo garantiza la consulta; el servicio no lo reordena.
+        assertThat(r.lotes().get(0).codigoLote()).isEqualTo("PF-0915");
+        assertThat(r.lotes().get(0).vence()).isEqualTo(LocalDate.parse("2026-09-19"));
+        assertThat(r.lotes().get(0).disponible()).isEqualByComparingTo("12.00");
+        assertThat(r.lotes().get(0).disponible().scale()).isEqualTo(2);
+        assertThat(r.lotes().get(1).codigoLote()).isEqualTo("PF-0917");
+        assertThat(r.lotes().get(1).vence()).isEqualTo(LocalDate.parse("2026-09-21"));
+        assertThat(r.lotes().get(1).disponible()).isEqualByComparingTo("65.50");
     }
 }
