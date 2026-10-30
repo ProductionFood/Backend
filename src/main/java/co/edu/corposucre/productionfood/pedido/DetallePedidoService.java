@@ -14,6 +14,7 @@ import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoExceptio
 import co.edu.corposucre.productionfood.inventario.InventarioPtRepository;
 import co.edu.corposucre.productionfood.inventario.InventarioPtService;
 import co.edu.corposucre.productionfood.lote.dto.ProductoRefResponse;
+import co.edu.corposucre.productionfood.pedido.dto.ActualizarCantidadRequest;
 import co.edu.corposucre.productionfood.pedido.dto.AgregarDetallePedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.DetallePedidoListaResponse;
 import co.edu.corposucre.productionfood.pedido.dto.DetallePedidoResponse;
@@ -191,6 +192,102 @@ public class DetallePedidoService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
                         idDetalle));
         return aResponse(guardada, totalPedido(idPedido));
+    }
+
+    /**
+     * Ajusta la cantidad de una línea moviendo el stock solo por la diferencia (R-07, R-09).
+     *
+     * <p>Aumentar de 10 a 15 descuenta 5 más; reducir de 10 a 6 devuelve 4 a los lotes de origen.
+     * No se devuelve todo y se vuelve a descontar: eso dejaría en el kardex movimientos que no
+     * corresponden a ningún hecho real (R-07).
+     *
+     * <p>Cada rama mueve stock solo si la diferencia no es cero, de modo que repetir la misma
+     * cantidad es idempotente. El aumento se apoya en la validación de
+     * {@link InventarioPtService#registrarSalidaFefo}, que bloquea los lotes y recalcula el saldo
+     * dentro de la transacción (R-05); el pre-chequeo de {@link #exigirStock} solo aporta el
+     * mensaje legible con el nombre del producto.
+     *
+     * <p>La línea se obtiene con {@code SELECT ... FOR UPDATE}: el bloqueo serializa dos ediciones
+     * de la misma línea y evita que ambas calculen la diferencia sobre el mismo saldo.
+     *
+     * @param idPedido  pedido al que pertenece la línea
+     * @param idDetalle línea que se edita
+     * @param req       cantidad nueva
+     * @return la línea releída con su total y los lotes netos que le quedan en el kardex
+     * @throws PedidoInexistenteException  si el pedido no existe (404)
+     * @throws RecursoNoEncontradoException si la línea no existe o es de otro pedido (404)
+     * @throws ConflictoNegocioException   si el pedido no admite cambios o no hay stock para el
+     *                                     aumento
+     * @throws ParametroInvalidoException  si la cantidad no es mayor que cero
+     */
+    @Transactional
+    @Auditable(accion = "EDITAR", tabla = "detalle_pedido",
+            detalle = "'Detalle ' + #idDetalle + ' del pedido ' + #idPedido + ' actualizado'")
+    public DetallePedidoResponse actualizarCantidad(Integer idPedido, Integer idDetalle,
+                                                    ActualizarCantidadRequest req) {
+        var pedido = buscarPedido(idPedido);
+        exigirEditable(pedido);
+
+        var linea = buscarLineaDelPedido(idPedido, idDetalle);
+        var nueva = validarCantidad(req.cantidad());
+        var actual = linea.cantidad().setScale(2, RoundingMode.HALF_UP);
+        var diferencia = nueva.subtract(actual);
+
+        if (diferencia.signum() > 0) {
+            exigirStock(linea.idProducto(), linea.nombreProducto(), diferencia);
+            inventarioPtService.registrarSalidaFefo(linea.idProducto(), diferencia, TABLA_ORIGEN,
+                    idDetalle);
+        } else if (diferencia.signum() < 0) {
+            // Solo la diferencia vuelve a los lotes de origen; nunca la cantidad completa.
+            inventarioPtService.registrarDevolucion(TABLA_ORIGEN, idDetalle, diferencia.abs());
+        }
+
+        detallePedidoRepository.actualizarCantidad(idDetalle, nueva);
+
+        var guardada = detallePedidoRepository.obtenerPorId(idDetalle)
+                .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
+                        idDetalle));
+        return aResponse(guardada, totalPedido(idPedido));
+    }
+
+    /**
+     * Quita una línea del pedido devolviendo toda su cantidad neta a los lotes de origen (R-08).
+     *
+     * <p>La devolución se apoya en el kardex y en el neto por lote: si la línea se había reducido
+     * antes, solo vuelve lo que aún estaba descontado, no la cantidad original. Al eliminar la
+     * línea, sus movimientos dejan de unirse a {@code detalle_pedido} y una cancelación posterior
+     * del pedido no los devuelve otra vez.
+     *
+     * @param idPedido  pedido al que pertenece la línea
+     * @param idDetalle línea que se elimina
+     * @throws PedidoInexistenteException  si el pedido no existe (404)
+     * @throws RecursoNoEncontradoException si la línea no existe o es de otro pedido (404)
+     * @throws ConflictoNegocioException   si el pedido no admite cambios (R-09)
+     */
+    @Transactional
+    @Auditable(accion = "ELIMINAR", tabla = "detalle_pedido",
+            detalle = "'Detalle ' + #idDetalle + ' eliminado del pedido ' + #idPedido")
+    public void eliminar(Integer idPedido, Integer idDetalle) {
+        var pedido = buscarPedido(idPedido);
+        exigirEditable(pedido);
+
+        var linea = buscarLineaDelPedido(idPedido, idDetalle);
+        inventarioPtService.registrarDevolucion(TABLA_ORIGEN, idDetalle,
+                linea.cantidad().setScale(2, RoundingMode.HALF_UP));
+        detallePedidoRepository.eliminar(idDetalle);
+    }
+
+    /**
+     * Carga y bloquea la línea comprobando que pertenezca al pedido de la ruta.
+     *
+     * <p>Una línea de otro pedido se trata como inexistente: informar que existe pero no
+     * pertenece al pedido filtraría datos de otro documento y daría un remedio equivocado.
+     */
+    private DetallePedido buscarLineaDelPedido(Integer idPedido, Integer idDetalle) {
+        return detallePedidoRepository.obtenerPorIdParaActualizar(idDetalle)
+                .filter(linea -> idPedido.equals(linea.idPedido()))
+                .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
+                        idDetalle));
     }
 
     /**

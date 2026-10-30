@@ -212,33 +212,44 @@ public class PedidoRepository {
     }
 
     /**
-     * Devuelve los pares (lote, cantidad) que hay que reponer al cancelar un pedido.
+     * Devuelve los pares (lote, cantidad neta) que hay que reponer al cancelar un pedido.
      *
      * <p>La trazabilidad entre cada línea de {@code detalle_pedido} y el lote del que salió su
      * mercancía <strong>no</strong> vive en el detalle: vive en el kardex de producto terminado
      * (R-10 de HU-17). Cada {@code SALIDA_VENTA} guarda {@code id_lote}, la cantidad consumida y
-     * {@code tabla_origen = 'detalle_pedido'} con {@code id_origen = id_detalle_pedido}. Esta
-     * consulta recorre esos movimientos y devuelve exactamente lo que hay que devolver, sin
-     * reconstruir el reparto FEFO en memoria.
+     * {@code tabla_origen = 'detalle_pedido'} con {@code id_origen = id_detalle_pedido}.
      *
-     * <p>Solo considera los {@code SALIDA_VENTA} ligados a líneas de este pedido: las entradas
-     * de devolución de una cancelación anterior no vuelven a contarse. El orden es
-     * {@code id_movimiento DESC}, del movimiento más reciente al más antiguo.
+     * <p>La cantidad que se repone es el <strong>neto por lote</strong>, no la suma bruta de las
+     * salidas: una línea que vendió 10 y luego se redujo a 6 ya devolvió 4 en su momento, así que
+     * al cancelar solo faltan 6. Sumar todas las {@code SALIDA_VENTA} devolvería de más y
+     * duplicaría stock con cada edición (R-07/R-08 de HU-17).
      *
-     * @param idPedido pedido cuyas salidas de venta se reponen
-     * @return pares lote-cantidad de las ventas del pedido; vacía si no tiene ninguna
+     * <p>Solo netean los movimientos ligados a líneas de este pedido: las
+     * {@code ENTRADA_DEVOLUCION} de una cancelación anterior tienen
+     * {@code tabla_origen = 'pedidos'} y quedan fuera del filtro. Si una línea se eliminó, sus
+     * movimientos dejan de unirse a {@code detalle_pedido} y no se reponen otra vez. Los lotes
+     * saldados se descartan con {@code HAVING > 0}. El orden es el del movimiento más reciente de
+     * cada lote, de más nuevo a más antiguo.
+     *
+     * @param idPedido pedido cuyas ventas netas se reponen
+     * @return pares lote-cantidad neta pendiente de reponer; vacía si no queda nada
      */
     public List<LineaDevolucion> lineasParaDevolucion(Integer idPedido) {
         var params = new MapSqlParameterSource().addValue("idPedido", idPedido);
 
         return jdbc.query("""
-                SELECT m.id_lote, m.cantidad
+                SELECT m.id_lote,
+                       SUM(CASE WHEN m.tipo_movimiento = 'SALIDA_VENTA'
+                                THEN m.cantidad ELSE -m.cantidad END) AS cantidad
                 FROM movimientos_inventario_pt m
                 JOIN detalle_pedido dp ON dp.id_detalle_pedido = m.id_origen
                 WHERE m.tabla_origen = 'detalle_pedido'
                   AND dp.id_pedido = :idPedido
-                  AND m.tipo_movimiento = 'SALIDA_VENTA'
-                ORDER BY m.id_movimiento DESC
+                  AND m.tipo_movimiento IN ('SALIDA_VENTA', 'ENTRADA_DEVOLUCION')
+                GROUP BY m.id_lote
+                HAVING SUM(CASE WHEN m.tipo_movimiento = 'SALIDA_VENTA'
+                                THEN m.cantidad ELSE -m.cantidad END) > 0
+                ORDER BY MAX(m.id_movimiento) DESC
                 """, params, (rs, fila) -> new LineaDevolucion(
                         rs.getInt("id_lote"), rs.getBigDecimal("cantidad")));
     }
