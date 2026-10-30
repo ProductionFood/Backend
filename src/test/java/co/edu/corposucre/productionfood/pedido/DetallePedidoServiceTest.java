@@ -27,9 +27,11 @@ import org.springframework.http.HttpStatus;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
+import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.inventario.InventarioPtRepository;
 import co.edu.corposucre.productionfood.inventario.InventarioPtService;
 import co.edu.corposucre.productionfood.inventario.LoteConsumido;
+import co.edu.corposucre.productionfood.pedido.dto.ActualizarCantidadRequest;
 import co.edu.corposucre.productionfood.pedido.dto.AgregarDetallePedidoRequest;
 import co.edu.corposucre.productionfood.producto.ProductoConDetalle;
 import co.edu.corposucre.productionfood.producto.ProductoRepository;
@@ -39,6 +41,7 @@ class DetallePedidoServiceTest {
     private static final Integer ID_PEDIDO = 47;
     private static final Integer ID_PRODUCTO = 3;
     private static final Integer ID_CLIENTE = 7;
+    private static final Integer ID_DETALLE = 88;
 
     private PedidoRepository pedidoRepository;
     private DetallePedidoRepository detallePedidoRepository;
@@ -380,5 +383,251 @@ class DetallePedidoServiceTest {
         verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
         verify(detallePedidoRepository, never()).obtenerPorId(any());
         verify(detallePedidoRepository, never()).calcularTotal(any());
+    }
+
+    @Test
+    @DisplayName("CP-16/R-07: aumentar la cantidad descuenta solo la diferencia y actualiza la línea")
+    void actualizarCantidadAlAumentarDescuentaSoloLaDiferencia() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var actual = linea(ID_DETALLE, ID_PRODUCTO, "10.00", "1200.00", "Pan francés", "und");
+        var editada = linea(ID_DETALLE, ID_PRODUCTO, "15.00", "1200.00", "Pan francés", "und");
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.of(actual));
+        when(inventarioPtService.stockDisponible(ID_PRODUCTO))
+                .thenReturn(new BigDecimal("100.00"));
+        when(detallePedidoRepository.obtenerPorId(ID_DETALLE)).thenReturn(Optional.of(editada));
+        when(detallePedidoRepository.calcularTotal(ID_PEDIDO))
+                .thenReturn(new BigDecimal("18000.0000"));
+
+        var r = service.actualizarCantidad(ID_PEDIDO, ID_DETALLE,
+                new ActualizarCantidadRequest(new BigDecimal("15")));
+
+        var orden = inOrder(inventarioPtService, detallePedidoRepository);
+        orden.verify(inventarioPtService).registrarSalidaFefo(ID_PRODUCTO,
+                new BigDecimal("5.00"), "detalle_pedido", ID_DETALLE);
+        orden.verify(detallePedidoRepository).actualizarCantidad(ID_DETALLE,
+                new BigDecimal("15.00"));
+        verify(inventarioPtService, never()).registrarDevolucion(any(), any(), any());
+
+        assertThat(r.idDetallePedido()).isEqualTo(ID_DETALLE);
+        assertThat(r.cantidad()).isEqualByComparingTo("15.00");
+        assertThat(r.cantidad().scale()).isEqualTo(2);
+        assertThat(r.subtotal()).isEqualByComparingTo("18000.00");
+        assertThat(r.totalPedido()).isEqualByComparingTo("18000.00");
+        assertThat(r.totalPedido().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("CP-17/R-07: reducir la cantidad devuelve solo la diferencia a los lotes de origen")
+    void actualizarCantidadAlReducirDevuelveSoloLaDiferencia() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var actual = linea(ID_DETALLE, ID_PRODUCTO, "10.00", "1200.00", "Pan francés", "und");
+        var editada = linea(ID_DETALLE, ID_PRODUCTO, "6.00", "1200.00", "Pan francés", "und");
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.of(actual));
+        when(detallePedidoRepository.obtenerPorId(ID_DETALLE)).thenReturn(Optional.of(editada));
+        when(detallePedidoRepository.calcularTotal(ID_PEDIDO))
+                .thenReturn(new BigDecimal("7200.00"));
+
+        var r = service.actualizarCantidad(ID_PEDIDO, ID_DETALLE,
+                new ActualizarCantidadRequest(new BigDecimal("6")));
+
+        var orden = inOrder(inventarioPtService, detallePedidoRepository);
+        orden.verify(inventarioPtService).registrarDevolucion("detalle_pedido", ID_DETALLE,
+                new BigDecimal("4.00"));
+        orden.verify(detallePedidoRepository).actualizarCantidad(ID_DETALLE,
+                new BigDecimal("6.00"));
+        verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
+        verify(inventarioPtService, never()).stockDisponible(any());
+
+        assertThat(r.cantidad()).isEqualByComparingTo("6.00");
+        assertThat(r.subtotal()).isEqualByComparingTo("7200.00");
+    }
+
+    @Test
+    @DisplayName("R-07: repetir la misma cantidad no mueve stock y la operación es idempotente")
+    void actualizarCantidadSinDiferenciaNoMueveStock() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var actual = linea(ID_DETALLE, ID_PRODUCTO, "10.00", "1200.00", "Pan francés", "und");
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.of(actual));
+        when(detallePedidoRepository.obtenerPorId(ID_DETALLE)).thenReturn(Optional.of(actual));
+        when(detallePedidoRepository.calcularTotal(ID_PEDIDO))
+                .thenReturn(new BigDecimal("12000.00"));
+
+        service.actualizarCantidad(ID_PEDIDO, ID_DETALLE,
+                new ActualizarCantidadRequest(new BigDecimal("10.00")));
+
+        verify(inventarioPtService, never()).stockDisponible(any());
+        verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
+        verify(inventarioPtService, never()).registrarDevolucion(any(), any(), any());
+        verify(detallePedidoRepository).actualizarCantidad(ID_DETALLE, new BigDecimal("10.00"));
+    }
+
+    @Test
+    @DisplayName("actualizar la cantidad de un pedido inexistente responde 404 sin escribir")
+    void actualizarCantidadDePedidoInexistenteResponde404() {
+        when(pedidoRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.actualizarCantidad(9999, ID_DETALLE,
+                new ActualizarCantidadRequest(new BigDecimal("15.00"))))
+                .isInstanceOf(PedidoInexistenteException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PEDIDO_INEXISTENTE")
+                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND);
+
+        verifyNoInteractions(detallePedidoRepository, productoRepository, inventarioPtService,
+                inventarioPtRepository);
+    }
+
+    @Test
+    @DisplayName("R-09: editar la cantidad de un pedido ENTREGADO o CANCELADO responde 409 sin escribir")
+    void actualizarCantidadDePedidoCerradoResponde409() {
+        dadoPedido(7, EstadoPedido.ENTREGADO);
+        dadoPedido(8, EstadoPedido.CANCELADO);
+
+        for (var id : List.of(7, 8)) {
+            assertThatThrownBy(() -> service.actualizarCantidad(id, ID_DETALLE,
+                    new ActualizarCantidadRequest(new BigDecimal("15.00"))))
+                    .isInstanceOf(ConflictoNegocioException.class)
+                    .hasFieldOrPropertyWithValue("codigo", "PEDIDO_NO_EDITABLE");
+        }
+
+        verify(detallePedidoRepository, never()).obtenerPorIdParaActualizar(any());
+        verify(detallePedidoRepository, never()).actualizarCantidad(any(), any());
+        verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
+        verify(inventarioPtService, never()).registrarDevolucion(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("actualizar una línea inexistente responde 404 sin escribir")
+    void actualizarCantidadDeLineaInexistenteResponde404() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.actualizarCantidad(ID_PEDIDO, ID_DETALLE,
+                new ActualizarCantidadRequest(new BigDecimal("15.00"))))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO")
+                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND)
+                .hasMessageContaining("88");
+
+        verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
+        verify(inventarioPtService, never()).registrarDevolucion(any(), any(), any());
+        verify(detallePedidoRepository, never()).actualizarCantidad(any(), any());
+    }
+
+    @Test
+    @DisplayName("actualizar una línea de otro pedido responde 404 sin escribir")
+    void actualizarCantidadDeLineaDeOtroPedidoResponde404() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var ajena = new DetallePedido(ID_DETALLE, 999, ID_PRODUCTO, "Pan francés", "und",
+                new BigDecimal("10.00"), new BigDecimal("1200.00"));
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.of(ajena));
+
+        assertThatThrownBy(() -> service.actualizarCantidad(ID_PEDIDO, ID_DETALLE,
+                new ActualizarCantidadRequest(new BigDecimal("15.00"))))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO");
+
+        verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
+        verify(detallePedidoRepository, never()).actualizarCantidad(any(), any());
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"0", "-5", "0.001"})
+    @DisplayName("una cantidad nueva nula, cero o negativa responde 400 sin mover stock")
+    void actualizarCantidadConCantidadInvalidaResponde400(BigDecimal cantidad) {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var actual = linea(ID_DETALLE, ID_PRODUCTO, "10.00", "1200.00", "Pan francés", "und");
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.of(actual));
+
+        assertThatThrownBy(() -> service.actualizarCantidad(ID_PEDIDO, ID_DETALLE,
+                new ActualizarCantidadRequest(cantidad)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CANTIDAD_INVALIDA");
+
+        verifyNoInteractions(inventarioPtService, inventarioPtRepository);
+        verify(detallePedidoRepository, never()).actualizarCantidad(any(), any());
+    }
+
+    @Test
+    @DisplayName("CP-18: aumentar sin stock responde 409 con el nombre y no toca ni stock ni línea")
+    void actualizarCantidadAlAumentarSinStockResponde409() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var actual = linea(ID_DETALLE, ID_PRODUCTO, "10.00", "1200.00", "Pan francés", "und");
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.of(actual));
+        when(inventarioPtService.stockDisponible(ID_PRODUCTO))
+                .thenReturn(new BigDecimal("3.00"));
+
+        assertThatThrownBy(() -> service.actualizarCantidad(ID_PEDIDO, ID_DETALLE,
+                new ActualizarCantidadRequest(new BigDecimal("15.00"))))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "STOCK_INSUFICIENTE")
+                .hasMessage("Solo hay 3 unidades disponibles de Pan francés. "
+                        + "Se solicitaron 5.");
+
+        verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
+        verify(detallePedidoRepository, never()).actualizarCantidad(any(), any());
+        verify(detallePedidoRepository, never()).obtenerPorId(any());
+        verify(detallePedidoRepository, never()).calcularTotal(any());
+    }
+
+    @Test
+    @DisplayName("CP-19/R-08: eliminar devuelve la cantidad completa y borra la línea")
+    void eliminarDevuelveLaCantidadCompletaYBorraLaLinea() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var actual = linea(ID_DETALLE, ID_PRODUCTO, "10.00", "1200.00", "Pan francés", "und");
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.of(actual));
+
+        service.eliminar(ID_PEDIDO, ID_DETALLE);
+
+        var orden = inOrder(inventarioPtService, detallePedidoRepository);
+        orden.verify(inventarioPtService).registrarDevolucion("detalle_pedido", ID_DETALLE,
+                new BigDecimal("10.00"));
+        orden.verify(detallePedidoRepository).eliminar(ID_DETALLE);
+        verify(inventarioPtService, never()).registrarSalidaFefo(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("R-09: eliminar una línea de un pedido ENTREGADO o CANCELADO responde 409")
+    void eliminarLineaDePedidoCerradoResponde409() {
+        dadoPedido(7, EstadoPedido.ENTREGADO);
+        dadoPedido(8, EstadoPedido.CANCELADO);
+
+        for (var id : List.of(7, 8)) {
+            assertThatThrownBy(() -> service.eliminar(id, ID_DETALLE))
+                    .isInstanceOf(ConflictoNegocioException.class)
+                    .hasFieldOrPropertyWithValue("codigo", "PEDIDO_NO_EDITABLE");
+        }
+
+        verify(detallePedidoRepository, never()).obtenerPorIdParaActualizar(any());
+        verify(detallePedidoRepository, never()).eliminar(any());
+        verify(inventarioPtService, never()).registrarDevolucion(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("eliminar una línea inexistente o de otro pedido responde 404 sin escribir")
+    void eliminarLineaInexistenteODeOtroPedidoResponde404() {
+        dadoPedido(ID_PEDIDO, EstadoPedido.PENDIENTE);
+        var ajena = new DetallePedido(ID_DETALLE, 999, ID_PRODUCTO, "Pan francés", "und",
+                new BigDecimal("10.00"), new BigDecimal("1200.00"));
+        when(detallePedidoRepository.obtenerPorIdParaActualizar(ID_DETALLE))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(ajena));
+
+        for (var intento = 0; intento < 2; intento++) {
+            assertThatThrownBy(() -> service.eliminar(ID_PEDIDO, ID_DETALLE))
+                    .isInstanceOf(RecursoNoEncontradoException.class)
+                    .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO");
+        }
+
+        verify(inventarioPtService, never()).registrarDevolucion(any(), any(), any());
+        verify(detallePedidoRepository, never()).eliminar(any());
     }
 }

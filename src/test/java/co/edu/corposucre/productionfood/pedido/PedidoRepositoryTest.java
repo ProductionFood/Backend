@@ -246,31 +246,38 @@ class PedidoRepositoryTest {
     }
 
     @Test
-    @DisplayName("R-10: lineasParaDevolucion toma solo los SALIDA_VENTA del kardex de este pedido")
-    void lineasParaDevolucionDevuelveSoloLasSalidasDeVentaDelPedido() {
+    @DisplayName("R-07/R-10: lineasParaDevolucion devuelve el neto por lote del kardex del pedido")
+    void lineasParaDevolucionDevuelveElNetoPorLoteDelPedido() {
         var pedido = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.EN_PREPARACION);
         var otroPedido = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.EN_PREPARACION);
         var loteA = insertarLote(idsProducto.get(0), "3.00");
         var loteB = insertarLote(idsProducto.get(1), "2.00");
+        var loteC = insertarLote(idsProducto.get(0), "1.00");
         var detalleA = insertarLinea(pedido, idsProducto.get(0), "3.00", "1250.50");
         var detalleB = insertarLinea(pedido, idsProducto.get(1), "2.00", "800.00");
         var detalleOtro = insertarLinea(otroPedido, idsProducto.get(0), "1.00", "1250.50");
 
-        // Dos salidas de venta del pedido, una salida de otro pedido y una entrada de devolución
-        // del propio pedido: solo las dos primeras deben reponerse.
+        // Salidas del pedido, una salida de otro pedido, una devolución de una cancelación
+        // anterior —con origen 'pedidos', que no netea— y una reducción de línea con origen
+        // 'detalle_pedido', que sí descuenta de lo que queda por reponer.
         insertarMovimiento(loteA, "SALIDA_VENTA", "3.00", "detalle_pedido", detalleA);
         insertarMovimiento(loteB, "SALIDA_VENTA", "2.00", "detalle_pedido", detalleB);
         insertarMovimiento(loteA, "SALIDA_VENTA", "1.00", "detalle_pedido", detalleOtro);
         insertarMovimiento(loteA, "ENTRADA_DEVOLUCION", "3.00", "pedidos", pedido);
+        insertarMovimiento(loteA, "ENTRADA_DEVOLUCION", "1.00", "detalle_pedido", detalleA);
+        // Lote C: salida y devolución completas, neto cero; no debe aparecer.
+        insertarMovimiento(loteC, "SALIDA_VENTA", "1.00", "detalle_pedido", detalleB);
+        insertarMovimiento(loteC, "ENTRADA_DEVOLUCION", "1.00", "detalle_pedido", detalleB);
 
         var lineas = repository.lineasParaDevolucion(pedido);
 
-        // Orden id_movimiento DESC: la última salida sembrada del pedido va primero.
+        // Lote A neto 3−1 = 2 (la devolución de 'pedidos' no netea) y lote B neto 2. El orden es
+        // MAX(id_movimiento) DESC: el último movimiento del lote A se sembró después del de B.
         assertThat(lineas)
                 .extracting(LineaDevolucion::idLote, LineaDevolucion::cantidad)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(loteB, new BigDecimal("2.00")),
-                        org.assertj.core.groups.Tuple.tuple(loteA, new BigDecimal("3.00")));
+                        org.assertj.core.groups.Tuple.tuple(loteA, new BigDecimal("2.00")),
+                        org.assertj.core.groups.Tuple.tuple(loteB, new BigDecimal("2.00")));
     }
 
     @Test
