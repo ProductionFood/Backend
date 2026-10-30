@@ -56,4 +56,5 @@ Docs/
 | HU-14 Detalle de compra | Entregada 2026-10-28 (backend verificado en caliente; frontend pendiente) |
 | HU-15 Historial de compras | Entregada 2026-10-29 (backend verificado en caliente; frontend pendiente) |
 | HU-16 Creación de pedidos | Entregada 2026-10-30 (backend verificado en caliente; frontend pendiente) |
+| HU-17 Productos del pedido | Entregada 2026-10-30 (QA ciego 23/24 CP y 25/25 SEC; frontend pendiente) |
 | HU-19 Lotes de producto terminado | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
