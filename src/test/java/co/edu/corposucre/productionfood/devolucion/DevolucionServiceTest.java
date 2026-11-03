@@ -300,6 +300,20 @@ class DevolucionServiceTest {
         verifyNoInteractions(devolucionRepository);
     }
 
+    @Test
+    @DisplayName("listar con el rango de fechas invertido responde 400 RANGO_FECHAS_INVALIDO")
+    void listarConRangoInvertidoResponde400() {
+        // Contrato transversal 04-CONTRATO-API.md §4: la validación va antes de armar la
+        // página, así que un rango invertido nunca llega al SQL.
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.listar(null, hoy, hoy.minusDays(1), null, 0, 10, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+
+        verifyNoInteractions(devolucionRepository);
+    }
+
     // ---------------------------------------------------------------- obtener
 
     @Test
