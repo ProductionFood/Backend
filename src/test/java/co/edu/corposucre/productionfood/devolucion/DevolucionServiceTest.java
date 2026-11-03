@@ -352,6 +352,8 @@ class DevolucionServiceTest {
     @Test
     @DisplayName("listarPorPedido pasa el filtro idPedido y mapea la página")
     void listarPorPedidoPasaElFiltroYMApea() {
+        when(pedidoRepository.buscarPorId(ID_PEDIDO))
+                .thenReturn(Optional.of(pedido(ID_PEDIDO, EstadoPedido.ENTREGADO)));
         when(devolucionRepository.buscar(null, null, null, ID_PEDIDO,
                 new PageRequest(0, 5, "d.id_devolucion", false)))
                 .thenReturn(List.of(new DevolucionFila(
@@ -368,16 +370,17 @@ class DevolucionServiceTest {
         assertThat(r.content().get(0).devueltoPreviamente()).isEqualByComparingTo("0.00");
         assertThat(r.content().get(0).disponibleParaDevolver()).isEqualByComparingTo("27.00");
         assertThat(r.totalElements()).isEqualTo(1L);
+        verify(pedidoRepository).buscarPorId(ID_PEDIDO);
         verify(devolucionRepository).buscar(null, null, null, ID_PEDIDO,
                 new PageRequest(0, 5, "d.id_devolucion", false));
         verify(devolucionRepository).contar(null, null, null, ID_PEDIDO);
     }
 
     @Test
-    @DisplayName("listarPorPedido de un pedido sin devoluciones devuelve página vacía, sin 404")
+    @DisplayName("listarPorPedido de un pedido existente sin devoluciones devuelve página vacía")
     void listarPorPedidoSinDevolucionesDevuelvePaginaVacia() {
-        // Sin stub de pedidoRepository: el listado no comprueba la existencia del pedido, así
-        // que un id inexistente recorre el mismo camino que uno sin devoluciones.
+        when(pedidoRepository.buscarPorId(9999))
+                .thenReturn(Optional.of(pedido(9999, EstadoPedido.ENTREGADO)));
         when(devolucionRepository.buscar(null, null, null, 9999,
                 new PageRequest(0, 10, "d.fecha_devolucion", false))).thenReturn(List.of());
         when(devolucionRepository.contar(null, null, null, 9999)).thenReturn(0L);
@@ -390,7 +393,27 @@ class DevolucionServiceTest {
         assertThat(r.page()).isZero();
     }
 
-    // ----------------------------------------------------------------- datos
+    @Test
+    @DisplayName("listarPorPedido de un pedido inexistente responde 404 sin consultar el listado")
+    void listarPorPedidoInexistenteResponde404() {
+        when(pedidoRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.listarPorPedido(9999, 0, 10, null))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasMessage("No se encontró el pedido con id 9999.");
+
+        verifyNoInteractions(devolucionRepository);
+    }
+
+    @Test
+    @DisplayName("listarPorPedido valida la paginación antes que la existencia del pedido")
+    void listarPorPedidoConPaginacionInvalidaResponde400AntesDel404() {
+        assertThatThrownBy(() -> service.listarPorPedido(9999, -1, 10, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasMessageContaining("page");
+
+        verifyNoInteractions(pedidoRepository, devolucionRepository);
+    }
 
     /**
      * Deja la línea y su pedido en el estado dado, listos para las validaciones de {@code crear}.

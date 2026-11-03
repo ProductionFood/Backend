@@ -1,5 +1,7 @@
 package co.edu.corposucre.productionfood.devolucion.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -32,6 +34,10 @@ import co.edu.corposucre.productionfood.lote.dto.ProductoRefResponse;
  * {@code "PENDIENTE"}): es lo que el contrato expone al consumidor, igual que en
  * {@code PedidoResponse}.
  *
+ * <p>{@code descripcion} lleva {@code @JsonInclude(ALWAYS)} porque la inclusión global de Jackson
+ * es {@code non_null}: sin esa anotación, una devolución sin descripción perdería la clave del
+ * JSON y el contrato de HU-18 exige verla como {@code null} (CP-05).
+ *
  * @param idDevolucion          identificador de la devolución
  * @param pedido                pedido del que sale la devolución, con su cliente
  * @param producto              producto de la línea devuelta
@@ -53,7 +59,7 @@ public record DevolucionResponse(
         BigDecimal devueltoPreviamente,
         BigDecimal disponibleParaDevolver,
         String motivo,
-        String descripcion,
+        @JsonInclude(JsonInclude.Include.ALWAYS) String descripcion,
         LocalDate fechaDevolucion,
         String estado) {
 

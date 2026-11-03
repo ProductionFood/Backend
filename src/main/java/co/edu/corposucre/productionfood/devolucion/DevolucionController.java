@@ -121,10 +121,10 @@ public class DevolucionController {
                description = "Listado paginado de las devoluciones de un pedido concreto, con "
                         + "los mismos campos y las mismas reglas de orden que el listado "
                         + "general; estado y rango de fechas no se aceptan aquí porque el "
-                        + "propio pedido ya acota el conjunto. Un pedido sin devoluciones "
-                        + "—o inexistente— responde una página vacía con total 0, no un 404: "
-                        + "comprobar la existencia del pedido no añadiría información y sí un "
-                        + "caso de error que el endpoint no define.")
+                        + "propio pedido ya acota el conjunto. Un pedido existente sin "
+                        + "devoluciones responde una página vacía con total 0; un pedido "
+                        + "inexistente responde 404 RECURSO_NO_ENCONTRADO, como el resto de "
+                        + "subcolecciones de un recurso padre.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Página de devoluciones del pedido, "
                 + "vacía si no tiene ninguna"),
@@ -132,7 +132,9 @@ public class DevolucionController {
                 + "inválidos, o id de pedido no numérico (PARAMETRO_INVALIDO, "
                 + "CAMPO_ORDEN_INVALIDO)"),
         @ApiResponse(responseCode = "401", description = "Sin token"),
-        @ApiResponse(responseCode = "403", description = "Sin permisos")
+        @ApiResponse(responseCode = "403", description = "Sin permisos"),
+        @ApiResponse(responseCode = "404", description = "Pedido inexistente "
+                + "(RECURSO_NO_ENCONTRADO)")
     })
     public PageResponse<DevolucionResponse> listarPorPedido(
             @PathVariable Integer idPedido,
