@@ -30,6 +30,8 @@ import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoExceptio
 import co.edu.corposucre.productionfood.common.error.ReglaDeNegocioException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.devolucion.dto.CrearDevolucionRequest;
+import co.edu.corposucre.productionfood.inventario.InventarioPtRepository;
+import co.edu.corposucre.productionfood.inventario.InventarioPtService;
 import co.edu.corposucre.productionfood.pedido.DetallePedido;
 import co.edu.corposucre.productionfood.pedido.DetallePedidoRepository;
 import co.edu.corposucre.productionfood.pedido.EstadoPedido;
@@ -43,7 +45,8 @@ import co.edu.corposucre.productionfood.pedido.PedidoRepository;
  * pedido y acumulado—, la semántica fija de {@code devueltoPreviamente} y
  * {@code disponibleParaDevolver} (R-03) y la paginación de los dos listados. La exclusión de
  * las {@code RECHAZADA} del acumulado vive en {@link DevolucionRepository} y se prueba en su
- * test de integración; aquí el servicio consume el acumulado que ese repositorio informa.
+ * test de integración; aquí el servicio consume el acumulado que ese repositorio informa. El
+ * cambio de estado con reposición de stock se prueba en {@link DevolucionAprobacionTest}.
  */
 class DevolucionServiceTest {
 
@@ -54,6 +57,8 @@ class DevolucionServiceTest {
     private DevolucionRepository devolucionRepository;
     private DetallePedidoRepository detallePedidoRepository;
     private PedidoRepository pedidoRepository;
+    private InventarioPtRepository inventarioPtRepository;
+    private InventarioPtService inventarioPtService;
     private DevolucionService service;
 
     @BeforeEach
@@ -61,8 +66,10 @@ class DevolucionServiceTest {
         devolucionRepository = mock(DevolucionRepository.class);
         detallePedidoRepository = mock(DetallePedidoRepository.class);
         pedidoRepository = mock(PedidoRepository.class);
+        inventarioPtRepository = mock(InventarioPtRepository.class);
+        inventarioPtService = mock(InventarioPtService.class);
         service = new DevolucionService(devolucionRepository, detallePedidoRepository,
-                pedidoRepository);
+                pedidoRepository, inventarioPtRepository, inventarioPtService);
     }
 
     // ------------------------------------------------------------------ crear
@@ -111,8 +118,9 @@ class DevolucionServiceTest {
 
         verify(detallePedidoRepository).obtenerPorIdParaActualizar(ID_DETALLE);
         verify(pedidoRepository).buscarPorId(ID_PEDIDO);
-        // R-01: registrar solo reporta la mercancía; no se mueve inventario (el servicio no lo
-        // inyecta: la reposición entra con el cambio de estado).
+        // R-01: registrar solo reporta la mercancía; no se mueve inventario, aunque el servicio
+        // lo tenga inyectado para la reposición del cambio de estado.
+        verifyNoInteractions(inventarioPtRepository, inventarioPtService);
     }
 
     @ParameterizedTest
