@@ -282,6 +282,48 @@ public class InventarioPtRepository {
     }
 
     /**
+     * Devuelve los renglones {@code SALIDA_VENTA} de un origen del kardex, del más reciente al
+     * más antiguo (R-02 de HU-18).
+     *
+     * <p>A diferencia de {@link #movimientosNetosDeOrigen}, que netea por lote para no
+     * devolver-y-redescontar, esta consulta devuelve cada venta tal cual, porque la aprobación
+     * de una devolución reparte la cantidad en el orden exacto en que la línea consumió: el
+     * último lote tomado es el de vencimiento más lejano y es el primero que debe recibir la
+     * mercancía. El {@code ORDER BY m.id_movimiento DESC} invierte el consumo —que fue por
+     * identificador creciente— y {@code id_movimiento}, clave primaria, hace determinado ese
+     * orden.
+     *
+     * <p>Se reutiliza {@link LoteConsumido} porque modela exactamente esto: la cantidad de un
+     * lote en una operación del kardex, siempre positiva (el signo lo da el tipo, no el
+     * registro). {@code fechaVencimiento} viaja por consistencia con
+     * {@link #movimientosNetosDeOrigen} y no interviene en el reparto.
+     *
+     * @param tablaOrigen tabla que originó la venta, por ejemplo {@code detalle_pedido}
+     * @param idOrigen    fila de esa tabla
+     * @return renglones de venta del origen, del más reciente al más antiguo; vacía si la
+     *         línea no vendió nada
+     */
+    public List<LoteConsumido> movimientosDeVentaPorOrigen(String tablaOrigen, Integer idOrigen) {
+        var params = new MapSqlParameterSource()
+                .addValue("tablaOrigen", tablaOrigen)
+                .addValue("idOrigen", idOrigen);
+
+        return jdbc.query("""
+                SELECT m.id_lote, l.codigo_lote, l.fecha_vencimiento, m.cantidad
+                FROM movimientos_inventario_pt m
+                JOIN lotes l ON l.id_lote = m.id_lote
+                WHERE m.tabla_origen = :tablaOrigen
+                  AND m.id_origen = :idOrigen
+                  AND m.tipo_movimiento = 'SALIDA_VENTA'
+                ORDER BY m.id_movimiento DESC
+                """, params, (rs, fila) -> new LoteConsumido(
+                        rs.getObject("id_lote", Integer.class),
+                        rs.getString("codigo_lote"),
+                        rs.getObject("fecha_vencimiento", LocalDate.class),
+                        rs.getBigDecimal("cantidad")));
+    }
+
+    /**
      * Devuelve una página del kardex de un lote, ordenada por la columna y la dirección recibidas.
      *
      * <p>{@code columnaOrden} NUNCA es entrada directa del usuario: la resuelve el servicio contra

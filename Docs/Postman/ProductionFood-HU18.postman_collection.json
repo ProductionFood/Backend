@@ -1,0 +1,3562 @@
+{
+  "info": {
+    "_postman_id": "hu18-registro-devoluciones",
+    "name": "ProductionFood - HU-18 Registro de devoluciones",
+    "description": "Casos de HU-18: registro, consulta y aprobación/rechazo de devoluciones de un pedido. Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar Preparación antes que el resto: crea los usuarios de los cinco roles, un cliente, un producto con dos lotes y los pedidos base (ENTREGADO, PENDIENTE y CANCELADO) con sus líneas. CP-24 (transaccionalidad de la aprobación) no se puede provocar por API: está cubierto por la prueba automatizada de rollback. SEC-03 usa la variable manual tokenExpirado y SEC-05 el token del usuario INACTIVO que crea y desactiva Preparación. Los tokens nunca se guardan en la colección: se obtienen del login.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "fechaHoy",
+      "value": ""
+    },
+    {
+      "key": "fechaProduccion",
+      "value": ""
+    },
+    {
+      "key": "fechaVencimientoA",
+      "value": ""
+    },
+    {
+      "key": "fechaVencimientoB",
+      "value": ""
+    },
+    {
+      "key": "idUnidad",
+      "value": "1"
+    },
+    {
+      "key": "idCliente",
+      "value": ""
+    },
+    {
+      "key": "idProducto",
+      "value": ""
+    },
+    {
+      "key": "idLoteA",
+      "value": ""
+    },
+    {
+      "key": "idLoteB",
+      "value": ""
+    },
+    {
+      "key": "codigoLoteA",
+      "value": ""
+    },
+    {
+      "key": "codigoLoteB",
+      "value": ""
+    },
+    {
+      "key": "idPedidoDev",
+      "value": ""
+    },
+    {
+      "key": "idDetalleDev",
+      "value": ""
+    },
+    {
+      "key": "idPedidoLimite",
+      "value": ""
+    },
+    {
+      "key": "idDetalleLimite",
+      "value": ""
+    },
+    {
+      "key": "idPedidoRechazo",
+      "value": ""
+    },
+    {
+      "key": "idDetalleRechazo",
+      "value": ""
+    },
+    {
+      "key": "idPedidoPendiente",
+      "value": ""
+    },
+    {
+      "key": "idDetallePendiente",
+      "value": ""
+    },
+    {
+      "key": "idPedidoCancelado",
+      "value": ""
+    },
+    {
+      "key": "idDetalleCancelado",
+      "value": ""
+    },
+    {
+      "key": "idDevolucion",
+      "value": ""
+    },
+    {
+      "key": "idDevolucionAprobada",
+      "value": ""
+    },
+    {
+      "key": "idDevolucionSinDesc",
+      "value": ""
+    },
+    {
+      "key": "idDevolucionExacta",
+      "value": ""
+    },
+    {
+      "key": "idDevolucionLimite",
+      "value": ""
+    },
+    {
+      "key": "idDevolucionRechazo",
+      "value": ""
+    },
+    {
+      "key": "stockAntes",
+      "value": ""
+    },
+    {
+      "key": "stockLoteBAntes",
+      "value": ""
+    },
+    {
+      "key": "stockAntesRegistro",
+      "value": ""
+    },
+    {
+      "key": "stockAntesRechazo",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioVentas",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioProduccion",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioConsulta",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioCompras",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioInactivo",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Preparación",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al administrador de la semilla y guarda tokenAdmin. Genera el sufijo único de la ejecución y las fechas relativas a hoy.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const hoy = new Date();",
+                  "const iso = (d) => { const c = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return c.toISOString().slice(0, 10); };",
+                  "const suma = (dias) => { const d = new Date(hoy); d.setDate(d.getDate() + dias); return iso(d); };",
+                  "pm.collectionVariables.set('fechaHoy', iso(hoy));",
+                  "pm.collectionVariables.set('fechaProduccion', suma(-5));",
+                  "pm.collectionVariables.set('fechaVencimientoA', suma(2));",
+                  "pm.collectionVariables.set('fechaVencimientoB', suma(5));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenAdmin\", pm.response.json().token);",
+                  "pm.collectionVariables.set(\"token\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea un usuario de rol VENTAS para la matriz de roles; si ya existe responde 409 y se reutiliza el de la ejecución anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-18 VENTAS {{sufijo}}\",\n  \"correo\": \"hu18-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "pm.collectionVariables.set(\"idUsuarioVentas\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu18-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenVentas\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea un usuario de rol PRODUCCION para la matriz de roles; si ya existe responde 409 y se reutiliza el de la ejecución anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-18 PRODUCCION {{sufijo}}\",\n  \"correo\": \"hu18-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "pm.collectionVariables.set(\"idUsuarioProduccion\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu18-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenProduccion\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea un usuario de rol CONSULTA para la matriz de roles; si ya existe responde 409 y se reutiliza el de la ejecución anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-18 CONSULTA {{sufijo}}\",\n  \"correo\": \"hu18-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "pm.collectionVariables.set(\"idUsuarioConsulta\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu18-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenConsulta\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea un usuario de rol COMPRAS para la matriz de roles; si ya existe responde 409 y se reutiliza el de la ejecución anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-18 COMPRAS {{sufijo}}\",\n  \"correo\": \"hu18-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "pm.collectionVariables.set(\"idUsuarioCompras\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu18-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenCompras\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario INACTIVO → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea un usuario de rol INACTIVO para la matriz de roles; si ya existe responde 409 y se reutiliza el de la ejecución anterior.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-18 INACTIVO {{sufijo}}\",\n  \"correo\": \"hu18-inactivo-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "pm.collectionVariables.set(\"idUsuarioInactivo\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login INACTIVO → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu18-inactivo-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenInactivo\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar usuario INACTIVO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios/{{idUsuarioInactivo}}/estado"
+            },
+            "description": "Deja inactivo al usuario cuyo token sigue siendo válido, para SEC-05.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener unidad de medida → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/unidades-medida"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "pm.collectionVariables.set('idUnidad', list.length ? list[0].idUnidad : 1);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente de la prueba → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Tienda La Esquina HU-18 {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idCliente\", pm.response.json().idCliente);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto Pan francés QA-18 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pan francés QA-18\",\n  \"descripcion\": \"Datos de QA HU-18\",\n  \"precio\": 1200.0,\n  \"idUnidad\": \"{{idUnidad}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idProducto\", pm.response.json().idProducto);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear lote PF-1017 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "Lote que vence más tarde (40 unidades en el ejemplo de HU-17; aquí 200 para soportar todos los pedidos de la colección).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{sufijo}}-PF-1017\",\n  \"idProducto\": \"{{idProducto}}\",\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimientoB}}\",\n  \"cantidad\": 200.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idLoteB\", pm.response.json().idLote);",
+                  "pm.collectionVariables.set(\"codigoLoteB\", pm.response.json().codigoLote);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear lote PF-1015 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "Lote que vence antes; el FEFO lo consume primero.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{sufijo}}-PF-1015\",\n  \"idProducto\": \"{{idProducto}}\",\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimientoA}}\",\n  \"cantidad\": 12.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idLoteA\", pm.response.json().idLote);",
+                  "pm.collectionVariables.set(\"codigoLoteA\", pm.response.json().codigoLote);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido para devoluciones → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoDev\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al pedido para devoluciones → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProducto}}\",\n  \"cantidad\": 30.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDetalleDev\", pm.response.json().idDetallePedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido para devoluciones: PENDIENTE → EN_PREPARACION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PREPARACION\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido para devoluciones: EN_PREPARACION → ENTREGADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ENTREGADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido para acumulado → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoLimite\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al pedido para acumulado → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoLimite}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProducto}}\",\n  \"cantidad\": 10.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDetalleLimite\", pm.response.json().idDetallePedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido para acumulado: PENDIENTE → EN_PREPARACION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoLimite}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PREPARACION\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido para acumulado: EN_PREPARACION → ENTREGADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoLimite}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ENTREGADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido para rechazo → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoRechazo\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al pedido para rechazo → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoRechazo}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProducto}}\",\n  \"cantidad\": 10.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDetalleRechazo\", pm.response.json().idDetallePedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido para rechazo: PENDIENTE → EN_PREPARACION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoRechazo}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PREPARACION\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido para rechazo: EN_PREPARACION → ENTREGADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoRechazo}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ENTREGADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido PENDIENTE → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoPendiente\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al pedido PENDIENTE → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoPendiente}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProducto}}\",\n  \"cantidad\": 10.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDetallePendiente\", pm.response.json().idDetallePedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido para CANCELADO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoCancelado\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al pedido para CANCELADO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoCancelado}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProducto}}\",\n  \"cantidad\": 10.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDetalleCancelado\", pm.response.json().idDetallePedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido para CANCELADO: PENDIENTE → CANCELADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoCancelado}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Registro (CP-01…CP-14)",
+      "item": [
+        {
+          "name": "CP-01 Registrar devolución válida → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "3 unidades de una línea de 30. Nace PENDIENTE y no mueve inventario (R-01).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"descripcion\": \"Tres panes llegaron aplastados en el transporte\",\n  \"cantidadDevuelta\": 3.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDevolucion\", pm.response.json().idDevolucion);",
+                  "pm.test(\"estado PENDIENTE\", () => pm.expect(pm.response.json().estado).to.eql(\"PENDIENTE\"));",
+                  "pm.test(\"disponibleParaDevolver 27\", () => pm.expect(Number(pm.response.json().disponibleParaDevolver)).to.eql(27));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Detalle de pedido inexistente → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": 9999,\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code DETALLE_PEDIDO_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"DETALLE_PEDIDO_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 Motivo vacío → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 Motivo de 51 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 Sin descripción → 201 (descripcion null)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "La descripción es opcional, pero la clave viaja siempre: el contrato exige verla como null (DEF-01).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"Error en el pedido\",\n  \"cantidadDevuelta\": 2.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDevolucionSinDesc\", pm.response.json().idDevolucion);",
+                  "pm.test(\"descripcion presente\", () => pm.expect(pm.response.json()).to.have.property(\"descripcion\"));",
+                  "pm.test(\"descripcion null\", () => pm.expect(pm.response.json().descripcion).to.be.null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 Descripción de 256 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"descripcion\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Devolver más de lo pedido → 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "La línea de 30 ya tiene 3 y 2 comprometidas: quedan 25 disponibles.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 30.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"code CANTIDAD_EXCEDE_PEDIDO\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_EXCEDE_PEDIDO\"));",
+                  "pm.test(\"mensaje con el disponible\", () => pm.expect(pm.response.json().message).to.contain(\"Solo puede devolver 25\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 Devolver exactamente lo disponible → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "25 unidades completan las 30 de la línea (3 + 2 + 25).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"Error en el pedido\",\n  \"cantidadDevuelta\": 25.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDevolucionExacta\", pm.response.json().idDevolucion);",
+                  "pm.test(\"disponible en cero\", () => pm.expect(Number(pm.response.json().disponibleParaDevolver)).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09a Línea de 10: registrar 8 pendientes → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleLimite}}\",\n  \"motivo\": \"Producto vencido\",\n  \"cantidadDevuelta\": 8.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDevolucionLimite\", pm.response.json().idDevolucion);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09b Otra de 5 sobre la misma línea → 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "Las PENDIENTE ocupan cantidad: solo quedan 2 (R-03).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleLimite}}\",\n  \"motivo\": \"Producto vencido\",\n  \"cantidadDevuelta\": 5.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"code CANTIDAD_EXCEDE_PEDIDO\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_EXCEDE_PEDIDO\"));",
+                  "pm.test(\"mensaje con el disponible\", () => pm.expect(pm.response.json().message).to.contain(\"Solo puede devolver 2\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10a Línea de 10: registrar 8 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Cliente insatisfecho\",\n  \"cantidadDevuelta\": 8.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDevolucionRechazo\", pm.response.json().idDevolucion);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10b Rechazar la devolución → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionRechazo}}/estado"
+            },
+            "description": "Rechazar no toca inventario; lotesRepuestos queda vacío.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"RECHAZADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado RECHAZADA\", () => pm.expect(pm.response.json().estado).to.eql(\"RECHAZADA\"));",
+                  "pm.test(\"sin lotes repuestos\", () => pm.expect(pm.response.json().lotesRepuestos).to.have.length(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10c Registrar 8 otra vez → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "La RECHAZADA liberó su cantidad: las rechazadas no cuentan en R-03.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Cliente insatisfecho\",\n  \"cantidadDevuelta\": 8.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 Cantidad cero → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleDev}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code CANTIDAD_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 La fecha la pone el servidor → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            },
+            "description": "La fecha de CP-01 es la de hoy del servidor (R-06)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"fecha del servidor\", () => pm.expect(pm.response.json().fechaDevolucion).to.eql(pm.collectionVariables.get(\"fechaHoy\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Enviar fecha no tiene efecto → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "El DTO no expone fechaDevolucion: el valor enviado se ignora y la base pone la fecha de hoy (R-06).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Error en el pedido\",\n  \"cantidadDevuelta\": 1.0,\n  \"fechaDevolucion\": \"2020-01-01\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"fecha del servidor\", () => pm.expect(pm.response.json().fechaDevolucion).to.eql(pm.collectionVariables.get(\"fechaHoy\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Estado inicial siempre PENDIENTE → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado PENDIENTE\", () => pm.expect(pm.response.json().estado).to.eql(\"PENDIENTE\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Aprobación y reposición (CP-15…CP-25)",
+      "item": [
+        {
+          "name": "CP-15a Stock antes de aprobar → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}/stock"
+            },
+            "description": "Guarda el stock vendible del producto antes de aprobar CP-01."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"stockAntes\", pm.response.json().cantidadDisponible);",
+                  "const loteB = pm.response.json().lotes.find((l) => l.codigoLote === pm.collectionVariables.get(\"codigoLoteB\"));",
+                  "pm.collectionVariables.set(\"stockLoteBAntes\", loteB ? loteB.disponible : 0);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15b Aprobar devolución → 200 (repone stock)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}/estado"
+            },
+            "description": "Aprobar repone mercancía en los lotes de los que salió la línea (R-01, R-02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"idDevolucionAprobada\", pm.response.json().idDevolucion);",
+                  "pm.test(\"estado APROBADA\", () => pm.expect(pm.response.json().estado).to.eql(\"APROBADA\"));",
+                  "pm.test(\"un lote repuesto\", () => pm.expect(pm.response.json().lotesRepuestos).to.have.length(1));",
+                  "pm.test(\"lote correcto (el último consumido)\", () => pm.expect(pm.response.json().lotesRepuestos[0].codigoLote).to.eql(pm.collectionVariables.get(\"codigoLoteB\")));",
+                  "pm.test(\"movimiento con saldos\", () => { const l = pm.response.json().lotesRepuestos[0]; pm.expect(Number(l.saldoPosterior) - Number(l.saldoAnterior)).to.eql(Number(l.cantidad)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15c El stock subió 3 → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}/stock"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"stock + 3\", () => pm.expect(Number(pm.response.json().cantidadDisponible)).to.eql(Number(pm.collectionVariables.get(\"stockAntes\")) + 3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16a Stock antes de registrar → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}/stock"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"stockAntesRegistro\", pm.response.json().cantidadDisponible);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16b Registrar 1 unidad → 201 (no repone)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "Registrar solo reporta la mercancía: el stock no se mueve hasta aprobar (R-01).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16c El stock no cambió → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}/stock"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"stock igual\", () => pm.expect(Number(pm.response.json().cantidadDisponible)).to.eql(Number(pm.collectionVariables.get(\"stockAntesRegistro\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 Vuelve al último lote consumido → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}/stock"
+            },
+            "description": "La línea consumió PF-1015 (12) y PF-1017 (18); la devolución de 3 se repone en PF-1017, el último lote tomado (R-02)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const loteB = pm.response.json().lotes.find((l) => l.codigoLote === pm.collectionVariables.get(\"codigoLoteB\"));",
+                  "pm.test(\"PF-1017 subió 3\", () => pm.expect(Number(loteB.disponible)).to.eql(Number(pm.collectionVariables.get(\"stockLoteBAntes\")) + 3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 Movimiento ENTRADA_DEVOLUCION → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionAprobada}}"
+            },
+            "description": "La aprobación de CP-15b registró una ENTRADA_DEVOLUCION con origen devoluciones; el saldo anterior y posterior del lote repuesto están en su respuesta."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19a Stock antes de rechazar → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}/stock"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"stockAntesRechazo\", pm.response.json().cantidadDisponible);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19b Rechazar no repone stock → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionSinDesc}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"RECHAZADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado RECHAZADA\", () => pm.expect(pm.response.json().estado).to.eql(\"RECHAZADA\"));",
+                  "pm.test(\"sin lotes repuestos\", () => pm.expect(pm.response.json().lotesRepuestos).to.have.length(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19c El stock no cambió → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProducto}}/stock"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"stock igual\", () => pm.expect(Number(pm.response.json().cantidadDisponible)).to.eql(Number(pm.collectionVariables.get(\"stockAntesRechazo\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-20 Aprobar dos veces → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionAprobada}}/estado"
+            },
+            "description": "APROBADA es terminal: el segundo PATCH no repone stock otra vez (R-04).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code TRANSICION_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"TRANSICION_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 Aprobada no vuelve a pendiente → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionAprobada}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code TRANSICION_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"TRANSICION_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 Devolución sobre pedido PENDIENTE → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetallePendiente}}\",\n  \"motivo\": \"Error en el pedido\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code PEDIDO_NO_DEVOLVIBLE\", () => pm.expect(pm.response.json().code).to.eql(\"PEDIDO_NO_DEVOLVIBLE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Devolución sobre pedido CANCELADO → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "El pedido cancelado ya devolvió su stock entero; aprobar encima lo duplicaría.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleCancelado}}\",\n  \"motivo\": \"Error en el pedido\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code PEDIDO_NO_DEVOLVIBLE\", () => pm.expect(pm.response.json().code).to.eql(\"PEDIDO_NO_DEVOLVIBLE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-25 COMPRAS no puede aprobar → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionExacta}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "CP-24 no tiene petición: provocar un fallo al reponer exige tocar la base o el servidor en vivo. Está cubierto por DevolucionAprobacionTest, que verifica que la transacción revierte y la devolución no queda aprobada."
+    },
+    {
+      "name": "Consulta y filtros",
+      "item": [
+        {
+          "name": "Listar devoluciones → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones?page=0&size=5"
+            },
+            "description": "Página por defecto: fechaDevolucion descendente, desempate por id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"trae content\", () => pm.expect(pm.response.json().content).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar con filtros de estado y fecha → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones?estado=PENDIENTE&fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}&page=0&size=5"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar por pedido → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones?idPedido={{idPedidoDev}}&page=0&size=5&sort=id,asc"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Devoluciones de un pedido → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/devoluciones?page=0&size=20"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"trae content\", () => pm.expect(pm.response.json().content).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener una devolución → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"trae el pedido\", () => pm.expect(pm.response.json().pedido.idPedido).to.eql(Number(pm.collectionVariables.get(\"idPedidoDev\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Devoluciones de un pedido inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/999999/devoluciones"
+            },
+            "description": "Un pedido inexistente responde 404; uno existente sin devoluciones, página vacía (DEF-02)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"code RECURSO_NO_ENCONTRADO\", () => pm.expect(pm.response.json().code).to.eql(\"RECURSO_NO_ENCONTRADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Devolución inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/999999"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"code RECURSO_NO_ENCONTRADO\", () => pm.expect(pm.response.json().code).to.eql(\"RECURSO_NO_ENCONTRADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Campo de orden fuera de la lista blanca → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones?sort=cliente,asc"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code CAMPO_ORDEN_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"CAMPO_ORDEN_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rango de fechas invertido → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones?fechaInicio={{fechaVencimientoB}}&fechaFin={{fechaHoy}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code RANGO_FECHAS_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"RANGO_FECHAS_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estado no canónico → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones?estado=PENDIENTES"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "item": [
+        {
+          "name": "SEC-01 GET listado sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET listado token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto-no-es-un-jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET listado token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET listado rol sin permiso (COMPRAS) → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET listado usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET devolución sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET devolución token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto-no-es-un-jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET devolución token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET devolución rol sin permiso (COMPRAS) → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET devolución usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucion}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET por pedido sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET por pedido token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto-no-es-un-jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET por pedido token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET por pedido rol sin permiso (COMPRAS) → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET por pedido usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 POST registrar sin token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 POST registrar token malformado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer esto-no-es-un-jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 POST registrar token expirado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 POST registrar rol sin permiso (CONSULTA) → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 POST registrar usuario inactivo → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleRechazo}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 PATCH estado sin token → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionExacta}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 PATCH estado token malformado → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer esto-no-es-un-jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionExacta}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 PATCH estado token expirado → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionExacta}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 PATCH estado rol sin permiso (CONSULTA) → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionExacta}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 PATCH estado usuario inactivo → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionExacta}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Matriz: PRODUCCION no accede al listado → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "PRODUCCION no accede al módulo ni en lectura; la matriz de roles manda sobre la tabla de la especificación."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Matriz: PRODUCCION no accede al listado por pedido → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoDev}}/devoluciones"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
