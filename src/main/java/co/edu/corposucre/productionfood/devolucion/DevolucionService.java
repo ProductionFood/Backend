@@ -3,6 +3,10 @@ package co.edu.corposucre.productionfood.devolucion;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,20 +18,26 @@ import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoExceptio
 import co.edu.corposucre.productionfood.common.error.ReglaDeNegocioException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.devolucion.dto.AprobacionResponse;
+import co.edu.corposucre.productionfood.devolucion.dto.CambiarEstadoDevolucionRequest;
 import co.edu.corposucre.productionfood.devolucion.dto.CrearDevolucionRequest;
 import co.edu.corposucre.productionfood.devolucion.dto.DevolucionResponse;
+import co.edu.corposucre.productionfood.inventario.InventarioPtRepository;
+import co.edu.corposucre.productionfood.inventario.InventarioPtService;
+import co.edu.corposucre.productionfood.inventario.LoteConsumido;
+import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
 import co.edu.corposucre.productionfood.lote.dto.ProductoRefResponse;
 import co.edu.corposucre.productionfood.pedido.DetallePedidoRepository;
 import co.edu.corposucre.productionfood.pedido.EstadoPedido;
 import co.edu.corposucre.productionfood.pedido.PedidoRepository;
 
 /**
- * Registro y consulta de devoluciones de un pedido (HU-18).
+ * Registro, consulta y cambio de estado de devoluciones de un pedido (HU-18).
  *
  * <p>Registrar una devolución solo <em>reporta</em> la mercancía: la fila nace
  * {@code PENDIENTE} y no se mueve inventario (R-01), porque producto en mal estado no debe
  * volver a estar disponible hasta que alguien lo revise. Que la aprobación repone el stock es
- * R-01 y vive en el cambio de estado, no aquí.
+ * R-01 y vive en {@link #cambiarEstado}, no en el alta.
  *
  * <p>El control de cantidad es contra el acumulado de la línea (R-03), no contra cada
  * devolución por separado: las {@code APROBADA} y {@code PENDIENTE} ocupan cantidad pedida y
@@ -49,12 +59,20 @@ public class DevolucionService {
 
     private final PedidoRepository pedidoRepository;
 
+    private final InventarioPtRepository inventarioPtRepository;
+
+    private final InventarioPtService inventarioPtService;
+
     public DevolucionService(DevolucionRepository devolucionRepository,
                              DetallePedidoRepository detallePedidoRepository,
-                             PedidoRepository pedidoRepository) {
+                             PedidoRepository pedidoRepository,
+                             InventarioPtRepository inventarioPtRepository,
+                             InventarioPtService inventarioPtService) {
         this.devolucionRepository = devolucionRepository;
         this.detallePedidoRepository = detallePedidoRepository;
         this.pedidoRepository = pedidoRepository;
+        this.inventarioPtRepository = inventarioPtRepository;
+        this.inventarioPtService = inventarioPtService;
     }
 
     /**
@@ -200,6 +218,171 @@ public class DevolucionService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("la devolución", id));
         return aResponse(devolucion,
                 devolucionRepository.sumarDevueltoPorDetalle(devolucion.idDetallePedido()));
+    }
+
+    /**
+     * Cambia el estado de una devolución validando la máquina de transiciones (R-04) y, si el
+     * destino es {@code APROBADA}, devuelve la mercancía a los lotes de los que salió (R-01).
+     *
+     * <p>Orden exacto de la operación, dentro de una única transacción:
+     *
+     * <ol>
+     *   <li>La devolución debe existir; si no, 404.</li>
+     *   <li>La transición se valida con la máquina de {@link EstadoDevolucion} <strong>antes</strong>
+     *       de tocar el inventario ({@code TRANSICION_INVALIDA}, 409): un destino prohibido
+     *       —aprobar una ya aprobada o volver a {@code PENDIENTE} (CP-20, CP-21)— no debe
+     *       reponer stock, y un rechazo ni siquiera lo consulta.</li>
+     *   <li>El {@code UPDATE} va antes de reponer y condicionado al estado leído: si otra
+     *       transacción cambió la devolución entre la lectura y la escritura, afecta cero filas
+     *       y se aborta sin tocar inventario. Así una doble aprobación concurrente no repone
+     *       dos veces (CP-20).</li>
+     *   <li>Solo si el destino es {@code APROBADA} (R-01) se lee el kardex de la línea
+     *       —{@link InventarioPtRepository#movimientosDeVentaPorOrigen}, {@code SALIDA_VENTA}
+     *       de {@code detalle_pedido} en orden inverso al consumo (R-02)— y se reparte la
+     *       cantidad devuelta entre esos renglones, una entrada por lote con
+     *       {@link TipoMovimientoPt#ENTRADA_DEVOLUCION} y origen {@code devoluciones}/{@code id}
+     *       (CP-18). Un {@code RECHAZADA} no toca inventario en absoluto.</li>
+     *   <li>Se relee la devolución para montar la respuesta.</li>
+     * </ol>
+     *
+     * <p>Si el kardex no respalda la cantidad —lista vacía o suma insuficiente— se lanza
+     * {@link IllegalStateException} para que la transacción revierta y la devolución <strong>no
+     * quede aprobada</strong> con stock sin reponer (CP-24). Si una entrada falla, la
+     * excepción se propaga sin atraparla: la transacción revierte las entradas anteriores y el
+     * estado, de modo que inventario, kardex y {@code devoluciones} no pueden divergir.
+     *
+     * <p>La anotación usa la acción genérica {@code CAMBIAR_ESTADO_DEVOLUCION} y no
+     * {@code APROBAR_DEVOLUCION}, que pedía el paso 7 de la tarea: un mismo método atiende
+     * tanto la aprobación como el rechazo y una anotación no puede variar el literal según el
+     * destino. El estado pedido viaja en {@code detalle}, igual que {@code CAMBIAR_ESTADO} de
+     * HU-16 en {@code PedidoService.cambiarEstado}.
+     *
+     * @param id  identificador de la devolución
+     * @param req estado destino: {@code APROBADA} repone stock, {@code RECHAZADA} no lo toca
+     * @return la devolución releída de la base con su estado nuevo; {@code lotesRepuestos}
+     *         informa cada entrada al aprobar y queda vacío al rechazar
+     * @throws RecursoNoEncontradoException si la devolución no existe (también si desaparece
+     *                                      entre la escritura y la relectura)
+     * @throws ConflictoNegocioException si la transición no está permitida o se perdió la carrera
+     * @throws IllegalStateException si el kardex no respalda la cantidad a reponer (CP-24)
+     */
+    @Transactional
+    @Auditable(accion = "CAMBIAR_ESTADO_DEVOLUCION", tabla = "devoluciones",
+            detalle = "'Devolución ' + #id + ' a ' + #req.estado")
+    public AprobacionResponse cambiarEstado(Integer id, CambiarEstadoDevolucionRequest req) {
+        var actual = devolucionRepository.buscarPorId(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("la devolución", id));
+
+        // Antes del inventario: una devolución terminal no puede volver a mover stock.
+        if (!actual.estado().puedeTransicionarA(req.estado())) {
+            throw transicionInvalida(actual.estado(), req.estado());
+        }
+
+        // El UPDATE va antes de reponer y condicionado al estado leído: si otra transacción
+        // cambió la devolución entre la lectura y la escritura, afecta cero filas y se aborta
+        // sin tocar inventario. Así una doble aprobación concurrente no repone dos veces.
+        var afectadas = devolucionRepository.cambiarEstado(id, actual.estado(), req.estado());
+        if (afectadas == 0) {
+            throw transicionInvalida(actual.estado(), req.estado());
+        }
+
+        List<AprobacionResponse.LoteRepuesto> lotesRepuestos = List.of();
+        if (req.estado() == EstadoDevolucion.APROBADA) {
+            lotesRepuestos = reponerStock(actual);
+        }
+
+        var guardada = devolucionRepository.buscarPorId(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("la devolución", id));
+        return new AprobacionResponse(id, guardada.estado().name(), lotesRepuestos);
+    }
+
+    /**
+     * Devuelve la mercancía de una devolución aprobada a los lotes de los que salió la línea
+     * (R-01, R-02, CP-18).
+     *
+     * <p>El kardex se lee en orden inverso al consumo ({@code id_movimiento DESC}) y ahí se
+     * reparte la cantidad devuelta: el último lote tomado es el de vencimiento más lejano y es
+     * el primero que debe recibir la mercancía. Varias salidas del mismo lote se agrupan en una
+     * sola entrada, manteniendo la posición de su primera aparición, para que el kardex no
+     * registre dos entradas donde cabía una.
+     *
+     * <p>La suma de las salidas debe respaldar lo que se devuelve; si no, es que el kardex de
+     * la línea está incompleto y aprobar inventaría stock que nadie vendió, así que se lanza
+     * {@link IllegalStateException} para revertir la transacción entera (CP-24).
+     *
+     * @param devolucion devolución recién aprobada, con su línea y cantidad
+     * @return un {@link AprobacionResponse.LoteRepuesto} por lote que recibió mercancía, en el
+     *         orden en que se repuso
+     * @throws IllegalStateException si el kardex no respalda la cantidad devuelta
+     */
+    private List<AprobacionResponse.LoteRepuesto> reponerStock(Devolucion devolucion) {
+        var movimientos = inventarioPtRepository.movimientosDeVentaPorOrigen(
+                "detalle_pedido", devolucion.idDetallePedido());
+        var respaldado = movimientos.stream()
+                .map(LoteConsumido::cantidad)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (respaldado.compareTo(devolucion.cantidadDevuelta()) < 0) {
+            throw new IllegalStateException("El kardex de detalle_pedido #"
+                    + devolucion.idDetallePedido() + " solo respalda " + cifra(respaldado)
+                    + " unidades; la devolución " + devolucion.idDevolucion()
+                    + " intenta reponer " + cifra(devolucion.cantidadDevuelta()) + ".");
+        }
+
+        // LinkedHashMap mantiene la posición de la primera aparición de cada lote: agrupar
+        // no cambia el orden inverso al consumo en el que se reparte.
+        var porLote = new LinkedHashMap<Integer, LoteConsumido>();
+        for (var movimiento : movimientos) {
+            var previo = porLote.get(movimiento.idLote());
+            porLote.put(movimiento.idLote(), previo == null ? movimiento
+                    : new LoteConsumido(movimiento.idLote(), movimiento.codigoLote(),
+                            movimiento.fechaVencimiento(),
+                            previo.cantidad().add(movimiento.cantidad())));
+        }
+
+        var restante = devolucion.cantidadDevuelta().setScale(2, RoundingMode.HALF_UP);
+        var repuestos = new ArrayList<AprobacionResponse.LoteRepuesto>();
+        for (var lote : porLote.values()) {
+            if (restante.signum() == 0) {
+                break;
+            }
+            var porcion = lote.cantidad().min(restante);
+            if (porcion.signum() == 0) {
+                continue;
+            }
+            var saldos = inventarioPtService.registrarEntrada(lote.idLote(), porcion,
+                    TipoMovimientoPt.ENTRADA_DEVOLUCION, "devoluciones",
+                    devolucion.idDevolucion(),
+                    "Reposicion por devolucion " + devolucion.idDevolucion());
+            repuestos.add(new AprobacionResponse.LoteRepuesto(lote.codigoLote(), porcion,
+                    saldos.anterior(), saldos.posterior()));
+            restante = restante.subtract(porcion);
+        }
+        return repuestos;
+    }
+
+    /**
+     * Construye la excepción {@code TRANSICION_INVALIDA} lista para lanzar, sin lanzarla aquí.
+     *
+     * <p>Mismo patrón que {@code PedidoService.transicionInvalida}: devolver la excepción deja
+     * el {@code throw} —y por tanto la decisión de responder 409— en quien decide. El mensaje
+     * nombra el estado actual y los destinos permitidos, como en el contrato §7 de HU-16.
+     *
+     * @param actual  estado en el que está la devolución
+     * @param destino estado al que se intentó transicionar
+     * @return la excepción, ya construida, lista para lanzar
+     */
+    private static ConflictoNegocioException transicionInvalida(EstadoDevolucion actual,
+                                                                EstadoDevolucion destino) {
+        var permitidas = actual.transicionesValidas().stream()
+                .map(EstadoDevolucion::name)
+                .sorted()
+                .collect(Collectors.joining(", "));
+        var disponibles = permitidas.isEmpty()
+                ? "no hay transiciones disponibles"
+                : "las transiciones disponibles son: " + permitidas;
+        return new ConflictoNegocioException("TRANSICION_INVALIDA",
+                String.format("No se puede pasar de %s a %s. Desde %s %s.",
+                        actual, destino, actual, disponibles));
     }
 
     /**

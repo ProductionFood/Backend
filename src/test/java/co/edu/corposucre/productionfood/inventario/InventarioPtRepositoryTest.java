@@ -167,6 +167,36 @@ class InventarioPtRepositoryTest {
                 fechaVencimientoDe(conNeto), new BigDecimal("3.00")));
     }
 
+    @Test
+    @DisplayName("HU-18 R-02: los movimientos de venta salen en id_movimiento DESC y solo del origen")
+    void movimientosDeVentaPorOrigenFiltraYOrdenaDesc() {
+        var loteViejo = insertarLote(LocalDate.now().plusDays(10), "10.00");
+        var loteNuevo = insertarLote(LocalDate.now().plusDays(20), "10.00");
+        // Consumo real de la línea: primero el lote FEFO, después el nuevo y otra vez el
+        // viejo. El orden esperado es el inverso, por id_movimiento.
+        insertarMovimiento(loteViejo, "SALIDA_VENTA", "5.00", idOrigen);
+        insertarMovimiento(loteNuevo, "SALIDA_VENTA", "4.00", idOrigen);
+        // Una devolución previa no es venta: no entra en el reparto.
+        insertarMovimiento(loteViejo, "ENTRADA_DEVOLUCION", "1.00", idOrigen);
+        insertarMovimiento(loteViejo, "SALIDA_VENTA", "2.00", idOrigen);
+        // Otro origen con la misma tabla no debe mezclarse.
+        insertarMovimiento(loteNuevo, "SALIDA_VENTA", "9.00", idOrigenAjeno);
+
+        var movimientos = repository.movimientosDeVentaPorOrigen(TABLA_ORIGEN, idOrigen);
+
+        assertThat(movimientos).extracting(LoteConsumido::idLote)
+                .containsExactly(loteViejo, loteNuevo, loteViejo);
+        assertThat(movimientos).extracting(LoteConsumido::cantidad)
+                .containsExactly(new BigDecimal("2.00"), new BigDecimal("4.00"),
+                        new BigDecimal("5.00"));
+        assertThat(movimientos).extracting(LoteConsumido::codigoLote)
+                .containsExactly(codigoDe(loteViejo), codigoDe(loteNuevo),
+                        codigoDe(loteViejo));
+        // Ni el movimiento de otro tipo ni el de otro origen aparecen en la lista.
+        assertThat(movimientos).extracting(LoteConsumido::cantidad)
+                .doesNotContain(new BigDecimal("9.00"), new BigDecimal("1.00"));
+    }
+
     /**
      * Siembra un lote de producto terminado con su fila de inventario y lo registra para que la
      * limpieza lo borre antes que su producto.
