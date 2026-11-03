@@ -1,6 +1,7 @@
 package co.edu.corposucre.productionfood.devolucion;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -136,6 +137,28 @@ class DevolucionControllerTest {
                 .andExpect(jsonPath("$.motivo").value("Producto en mal estado"))
                 .andExpect(jsonPath("$.fechaDevolucion").value("2026-09-18"))
                 .andExpect(jsonPath("$.estado").value("PENDIENTE"));
+    }
+
+    @Test
+    @WithMockUser(roles = "VENTAS")
+    @DisplayName("Sin descripción la respuesta conserva la clave con null (CP-05)")
+    void crearSinDescripcionConservaLaClaveConNull() throws Exception {
+        when(devolucionService.crear(any(CrearDevolucionRequest.class)))
+                .thenReturn(new DevolucionResponse(16,
+                        new DevolucionResponse.PedidoRef(47, "Tienda La Esquina"),
+                        new ProductoRefResponse(3, "Pan francés", null),
+                        new BigDecimal("30.00"), new BigDecimal("3.00"),
+                        new BigDecimal("0.00"), new BigDecimal("27.00"),
+                        "Producto en mal estado", null,
+                        LocalDate.of(2026, 9, 18), "PENDIENTE"));
+
+        mockMvc.perform(post("/api/v1/devoluciones")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idDetallePedido\":88,\"motivo\":\"Aplastados\","
+                                + "\"cantidadDevuelta\":3.00}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.descripcion").hasJsonPath())
+                .andExpect(jsonPath("$.descripcion").value(nullValue()));
     }
 
     @Test
@@ -433,6 +456,18 @@ class DevolucionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isEmpty())
                 .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    @WithMockUser(roles = "VENTAS")
+    @DisplayName("Un pedido inexistente responde 404 RECURSO_NO_ENCONTRADO")
+    void listadoPorPedidoInexistenteResponde404() throws Exception {
+        when(devolucionService.listarPorPedido(9999, 0, 20, null))
+                .thenThrow(new RecursoNoEncontradoException("el pedido", 9999));
+
+        mockMvc.perform(get("/api/v1/pedidos/9999/devoluciones"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RECURSO_NO_ENCONTRADO"));
     }
 
     @Test

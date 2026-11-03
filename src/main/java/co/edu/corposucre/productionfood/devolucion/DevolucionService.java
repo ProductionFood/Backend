@@ -183,6 +183,26 @@ public class DevolucionService {
 
         var orden = PageRequest.of(page, size, sort, DevolucionRepository.ORDEN,
                 DevolucionRepository.ORDEN_POR_DEFECTO);
+        return listar(estado, fechaInicio, fechaFin, idPedido, orden);
+    }
+
+    /**
+     * Ejecuta el listado con la página ya validada por {@link PageRequest#of}.
+     *
+     * <p>Existe para que {@link #listarPorPedido} pueda validar la paginación antes de comprobar
+     * la existencia del pedido, igual que los demás listados del proyecto: un parámetro inválido
+     * responde 400 aunque el recurso padre no exista.
+     *
+     * @param estado     estado a filtrar, o {@code null} sin filtrar
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin   último día incluido del rango, o {@code null} sin límite superior
+     * @param idPedido   pedido cuyas devoluciones se listan, o {@code null} sin filtrar
+     * @param orden      página y orden ya validados
+     * @return página de devoluciones con su pedido, producto y acumulado de la línea
+     */
+    private PageResponse<DevolucionResponse> listar(EstadoDevolucion estado, LocalDate fechaInicio,
+                                                    LocalDate fechaFin, Integer idPedido,
+                                                    PageRequest orden) {
         var filas = devolucionRepository.buscar(estado, fechaInicio, fechaFin, idPedido, orden);
         var contenido = filas.stream()
                 .map(fila -> aResponse(fila.devolucion(), fila.comprometidaLinea()))
@@ -195,9 +215,9 @@ public class DevolucionService {
     /**
      * Lista las devoluciones de un pedido, para GET {@code /pedidos/{id}/devoluciones}.
      *
-     * <p>El listado es el contrato: un pedido sin devoluciones —o inexistente— responde una
-     * página vacía con total {@code 0}, no un 404. Comprobar aquí la existencia del pedido no
-     * añadiría información al consumidor y sí un caso de error que el endpoint no define.
+     * <p>El pedido debe existir: el contrato transversal (04-CONTRATO-API §5) responde 404
+     * {@code RECURSO_NO_ENCONTRADO} cuando el id no existe, igual que el resto de recursos. Un
+     * pedido existente sin devoluciones sigue respondiendo una página vacía con total {@code 0}.
      *
      * @param idPedido pedido cuyas devoluciones se listan
      * @param page     página solicitada, desde 0
@@ -206,11 +226,18 @@ public class DevolucionService {
      *                 "fechaDevolucion,desc"
      * @return página de devoluciones del pedido, vacía si no tiene ninguna
      * @throws ParametroInvalidoException si la paginación o el campo de orden son inválidos
+     * @throws RecursoNoEncontradoException si el pedido no existe
      */
     @Transactional(readOnly = true)
     public PageResponse<DevolucionResponse> listarPorPedido(Integer idPedido, int page, int size,
                                                             String sort) {
-        return listar(null, null, null, idPedido, page, size, sort);
+        // La paginación se valida antes que la existencia, como en los demás listados: un
+        // parámetro inválido responde 400 aunque el pedido no exista.
+        var orden = PageRequest.of(page, size, sort, DevolucionRepository.ORDEN,
+                DevolucionRepository.ORDEN_POR_DEFECTO);
+        pedidoRepository.buscarPorId(idPedido)
+                .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", idPedido));
+        return listar(null, null, null, idPedido, orden);
     }
 
     /**
