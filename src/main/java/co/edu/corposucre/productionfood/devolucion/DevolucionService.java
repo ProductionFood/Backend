@@ -167,12 +167,20 @@ public class DevolucionService {
      *                   {@code fechaDevolucion}, {@code estado} e {@code id}; por defecto
      *                   "fechaDevolucion,desc"
      * @return página de devoluciones con su pedido, producto y acumulado de la línea
-     * @throws ParametroInvalidoException si la paginación o el campo de orden son inválidos
+     * @throws ParametroInvalidoException si el rango de fechas está invertido, o si la
+     *                                    paginación o el campo de orden son inválidos
      */
     @Transactional(readOnly = true)
     public PageResponse<DevolucionResponse> listar(EstadoDevolucion estado, LocalDate fechaInicio,
                                                    LocalDate fechaFin, Integer idPedido,
                                                    int page, int size, String sort) {
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            // Código del contrato transversal (04-CONTRATO-API.md §4), no el genérico
+            // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
         var orden = PageRequest.of(page, size, sort, DevolucionRepository.ORDEN,
                 DevolucionRepository.ORDEN_POR_DEFECTO);
         var filas = devolucionRepository.buscar(estado, fechaInicio, fechaFin, idPedido, orden);
