@@ -6,6 +6,8 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.SimpleEvaluationContext;
 import org.springframework.stereotype.Component;
@@ -25,15 +27,33 @@ import co.edu.corposucre.productionfood.security.SecurityUtils;
  * bitácora indistinguishable entre "se intentó y se rechazó" y "ocurrió", el registro
  * mentiroso es peor que el registro ausente.
  *
- * <p>Ventana conocida: al auditar en el RETORNO con {@code REQUIRES_NEW}, un rollback de la
- * transacción de negocio al commit (una clave foránea que solo aparece al cerrar) deja en la
- * bitácora una fila de un cambio que NUNCA ocurrió. Es el precio consciente de REQUIRES_NEW,
- * que es lo que hace real la garantía de que un fallo de auditoría no tumba la operación; se
- * mitigaría contrastando con el kardex (transaccional) o auditando después del commit.
+ * <p>El aspecto tiene precedencia mayor que el
+ * advisor de {@code @Transactional}, que usa {@code LOWEST_PRECEDENCE}: el aspecto envuelve al
+ * proxy transaccional, así que {@code auditar} corre DESPUÉS del commit del servicio de negocio.
+ * Esto tiene dos consecuencias buscadas. La primera, la conexión de la transacción de negocio ya
+ * está liberada cuando {@code REQUIRES_NEW} pide la suya, de modo que cada petición necesita una
+ * sola conexión a la vez; con el aspecto dentro de la transacción, un pool lleno de
+ * transacciones externas se bloqueaba esperando segundas conexiones hasta el timeout. La
+ * segunda, un rollback de negocio (incluido el que solo aparece al hacer commit, como una clave
+ * foránea) lanza la excepción antes de que {@code @AfterReturning} se evalúe, así que ya no queda
+ * en la bitácora la fila de un cambio que nunca ocurrió.
+ *
+ * <p>Ventana residual: si el commit tiene éxito y la auditoría falla después, el cambio queda
+ * sin fila. Es el coste consciente de que un fallo de auditoría nunca deshaga ni tumbe la
+ * operación (R-03), y se registra siempre en el log. Si el método auditable se invoca desde
+ * otra transacción ya abierta, la auditoría vuelve a ocurrir dentro de ella.
  */
 @Aspect
 @Component
+@Order(AuditoriaAspect.ORDEN)
 public class AuditoriaAspect {
+
+    /**
+     * Inmediatamente por fuera del advisor transaccional ({@code LOWEST_PRECEDENCE}) y no con
+     * {@code HIGHEST_PRECEDENCE}: este último se ejecuta antes del
+     * {@code ExposeInvocationInterceptor} y el {@code JoinPoint} deja de poder leerse.
+     */
+    static final int ORDEN = Ordered.LOWEST_PRECEDENCE - 100;
 
     private static final Logger log = LoggerFactory.getLogger(AuditoriaAspect.class);
 
