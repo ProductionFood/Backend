@@ -176,15 +176,17 @@ public class PedidoController {
     @GetMapping("/productos-mas-vendidos")
     @PreAuthorize("hasAnyRole('ADMIN','VENTAS')")
     @Operation(summary = "Ranking de productos más vendidos",
-               description = "Ranking de productos de los pedidos del período, ordenado por "
-                        + "unidades vendidas y no por importe (R-07): un producto barato vendido "
-                        + "muchas veces supera a uno caro vendido pocas. Cada fila trae las "
+               description = "Ranking de productos de los pedidos entregados del período, "
+                        + "ordenado por unidades vendidas y no por importe (R-07): un producto barato "
+                        + "vendido muchas veces supera a uno caro vendido pocas. Cada fila trae las "
                         + "unidades, el importe como columna adicional y el número de pedidos "
-                        + "distintos en que aparece. Los pedidos CANCELADO no cuentan (R-03). "
+                        + "distintos en que aparece. Solo cuentan los pedidos ENTREGADO (R-07): "
+                        + "los PENDIENTE, EN_PREPARACION y CANCELADO no suman. "
                         + "fechaInicio y fechaFin son opcionales, inclusivos y en formato ISO "
                         + "(yyyy-MM-dd); un rango invertido responde 400 RANGO_FECHAS_INVALIDO y "
                         + "una fecha mal formada 400 PARAMETRO_INVALIDO. Un período sin pedidos "
-                        + "responde 200 con la lista vacía. Se reserva a ADMIN y VENTAS.")
+                        + "entregados responde 200 con la lista vacía. "
+                        + "Se reserva a ADMIN y VENTAS.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Ranking de productos, con ventas o "
                 + "vacío"),

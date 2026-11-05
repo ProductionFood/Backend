@@ -570,7 +570,7 @@ public class PedidoService {
      * Ranking de productos más vendidos de un período (HU-25 R-07).
      *
      * <p>El rango se valida antes de tocar la base. El orden es el del repositorio: unidades
-     * vendidas descendente, no importe.
+     * vendidas descendente, no importe. Solo cuentan los pedidos {@code ENTREGADO}.
      *
      * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
      * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
