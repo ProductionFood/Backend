@@ -81,6 +81,7 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-23 | Actualización automática de inventario | 2026-11-05 · [`HU-23-actualizacion-inventario.md`](HU-23-actualizacion-inventario.md) |
 | HU-24 | Dashboard resumen | 2026-11-05 · [`HU-24-dashboard-resumen.md`](HU-24-dashboard-resumen.md) |
 | HU-25 | Consulta de pedidos | 2026-11-05 · [`HU-25-consulta-pedidos.md`](HU-25-consulta-pedidos.md) |
+| HU-26 | Eficiencia de producción | 2026-11-05 · [`HU-26-eficiencia-produccion.md`](HU-26-eficiencia-produccion.md) |
 | HU-27 | Alerta de stock bajo | 2026-11-05 · [`HU-27-alerta-stock-bajo.md`](HU-27-alerta-stock-bajo.md) |
 
 > HU-20, HU-21 y HU-22 quedaron verificadas con QA ciego el 2026-11-05. HU-20 y HU-21 pasaron
