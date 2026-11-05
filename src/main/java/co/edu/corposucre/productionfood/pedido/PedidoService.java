@@ -42,7 +42,8 @@ public class PedidoService {
 
     /**
      * Lista blanca de ordenamiento del listado: traduce el campo que pide el cliente al prefijo
-     * de columna SQL de {@code pedidos} (alias {@code p}). {@code PageRequest.of} rechaza
+     * de columna SQL de {@code pedidos} (alias {@code p}) o, para {@code total}, al alias calculado
+     * {@code total_pedido}. {@code PageRequest.of} rechaza
      * cualquier campo que no esté aquí, y la columna resuelta es la única que llega al
      * repositorio, de modo que el orden nunca es SQL arbitrario.
      */
@@ -50,6 +51,8 @@ public class PedidoService {
             "fechaPedido", "p.fecha_pedido",
             "fechaEntrega", "p.fecha_entrega",
             "estado", "p.estado",
+            // Columna calculada (HU-25): se ordena por el alias de la subconsulta del SELECT.
+            "total", "total_pedido",
             "id", "p.id_pedido");
 
     private static final String ORDEN_POR_DEFECTO = "fechaPedido,desc";
@@ -189,11 +192,13 @@ public class PedidoService {
      * @param page       página solicitada, desde 0
      * @param size       tamaño de página, entre 1 y 100
      * @param sort       orden "campo,direccion", con campos de la lista blanca
-     *                   {@code fechaPedido}, {@code fechaEntrega}, {@code estado} e {@code id};
+     *                   {@code fechaPedido}, {@code fechaEntrega}, {@code estado}, {@code total}
+     *                   e {@code id};
      *                   por defecto "fechaPedido,desc"
      * @return página de pedidos con su cliente y sus totales
      * @throws ParametroInvalidoException si el rango de fechas está invertido, o la paginación o
      *                                    el campo de orden son inválidos
+     * @throws ClienteInexistenteFiltroException si {@code idCliente} no existe (404)
      */
     @Transactional(readOnly = true)
     public PageResponse<PedidoResponse> listar(Integer idCliente, EstadoPedido estado,
@@ -204,6 +209,12 @@ public class PedidoService {
             // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
             throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
                     "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+
+        // HU-25: solo existencia, no actividad; un cliente desactivado conserva su historial.
+        // Los caminos de crear y actualizar siguen respondiendo 409 y no pasan por aquí.
+        if (idCliente != null && !clienteRepository.existsById(idCliente)) {
+            throw new ClienteInexistenteFiltroException(idCliente);
         }
 
         var orden = PageRequest.of(page, size, sort, ORDEN, ORDEN_POR_DEFECTO);
@@ -394,6 +405,9 @@ public class PedidoService {
                 pedido.getFechaEntrega(),
                 pedido.getEstado().name(),
                 pedido.getTotalPedido(),
+                pedido.getTotalBruto(),
+                pedido.getDevoluciones(),
+                pedido.getTotalNeto(),
                 pedido.getCantidadItems(),
                 pedido.getEstado() == EstadoPedido.PENDIENTE);
     }

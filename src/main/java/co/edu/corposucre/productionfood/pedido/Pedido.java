@@ -19,6 +19,11 @@ import java.time.LocalDate;
  * {@code cantidadItems} cuenta esas líneas; el pedido se registra primero y el detalle llega
  * después, por lo que un pedido recién creado es válido con total cero.
  *
+ * <p>HU-25 añade tres derivados más, calculados por la misma consulta: {@code totalBruto}
+ * (suma de {@code cantidad * precio_unitario}, igual a {@code totalPedido}), {@code devoluciones}
+ * (valor de las devoluciones aprobadas al precio de la línea) y {@code totalNeto}
+ * ({@code totalBruto - devoluciones}).
+ *
  * <p>{@code nombreCliente} es una proyección de solo lectura que llega del {@code JOIN} de
  * {@link PedidoRowMapper}; no existe como columna en {@code pedidos}.
  */
@@ -35,6 +40,12 @@ public class Pedido {
     private EstadoPedido estado;
 
     private BigDecimal totalPedido;
+
+    private BigDecimal totalBruto;
+
+    private BigDecimal devoluciones;
+
+    private BigDecimal totalNeto;
 
     private int cantidadItems;
 
@@ -89,6 +100,30 @@ public class Pedido {
 
     public void setTotalPedido(BigDecimal totalPedido) {
         this.totalPedido = totalPedido;
+    }
+
+    public BigDecimal getTotalBruto() {
+        return totalBruto;
+    }
+
+    public void setTotalBruto(BigDecimal totalBruto) {
+        this.totalBruto = totalBruto;
+    }
+
+    public BigDecimal getDevoluciones() {
+        return devoluciones;
+    }
+
+    public void setDevoluciones(BigDecimal devoluciones) {
+        this.devoluciones = devoluciones;
+    }
+
+    public BigDecimal getTotalNeto() {
+        return totalNeto;
+    }
+
+    public void setTotalNeto(BigDecimal totalNeto) {
+        this.totalNeto = totalNeto;
     }
 
     public int getCantidadItems() {

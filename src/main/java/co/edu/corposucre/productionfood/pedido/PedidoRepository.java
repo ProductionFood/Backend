@@ -37,6 +37,12 @@ public class PedidoRepository {
      * subconsultas correlacionadas sobre {@code detalle_pedido}: {@code COALESCE} devuelve
      * {@code 0} mientras el pedido no tenga líneas, que es el estado válido de un pedido recién
      * registrado (el detalle llega después).
+     *
+     * <p>HU-25 añade tres importes: {@code total_bruto} (igual a {@code total_pedido}, que se
+     * conserva por compatibilidad con HU-16), {@code devoluciones} y {@code total_neto}. Todos
+     * parten de {@code detalle_pedido.precio_unitario}, el precio congelado al vender, y nunca de
+     * {@code productos.precio} (R-02). Solo descuentan las devoluciones {@code APROBADA}; las
+     * pendientes y las rechazadas no (R-04).
      */
     private static final String SELECT = """
             SELECT p.id_pedido, p.id_cliente, p.fecha_pedido, p.fecha_entrega, p.estado,
@@ -44,6 +50,22 @@ public class PedidoRepository {
                    COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
                              FROM detalle_pedido dp
                              WHERE dp.id_pedido = p.id_pedido), 0) AS total_pedido,
+                   COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
+                             FROM detalle_pedido dp
+                             WHERE dp.id_pedido = p.id_pedido), 0) AS total_bruto,
+                   COALESCE((SELECT SUM(d.cantidad_devuelta * dp.precio_unitario)
+                             FROM detalle_pedido dp
+                             JOIN devoluciones d ON d.id_detalle_pedido = dp.id_detalle_pedido
+                             WHERE dp.id_pedido = p.id_pedido
+                               AND d.estado = 'APROBADA'), 0) AS devoluciones,
+                   COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
+                             FROM detalle_pedido dp
+                             WHERE dp.id_pedido = p.id_pedido), 0)
+                   - COALESCE((SELECT SUM(d.cantidad_devuelta * dp.precio_unitario)
+                               FROM detalle_pedido dp
+                               JOIN devoluciones d ON d.id_detalle_pedido = dp.id_detalle_pedido
+                               WHERE dp.id_pedido = p.id_pedido
+                                 AND d.estado = 'APROBADA'), 0) AS total_neto,
                    COALESCE((SELECT COUNT(*)
                              FROM detalle_pedido dp
                              WHERE dp.id_pedido = p.id_pedido), 0) AS cantidad_items
@@ -71,7 +93,8 @@ public class PedidoRepository {
      *                        sin límite inferior
      * @param fechaFin        último día incluido del rango de {@code fecha_pedido}, o {@code null}
      *                        sin límite superior
-     * @param propiedadOrden  columna ya validada por el servicio, con su prefijo {@code p.}
+     * @param propiedadOrden  columna o alias ya validado por el servicio: una columna con su
+     *                        prefijo {@code p.} o el alias calculado {@code total_pedido}
      * @param ascendente      {@code true} para orden ascendente, {@code false} para descendente
      * @param size            tamaño de la página
      * @param offset          desplazamiento de la página, en {@code long} porque

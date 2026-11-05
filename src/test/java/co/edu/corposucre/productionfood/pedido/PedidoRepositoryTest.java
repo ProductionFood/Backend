@@ -58,6 +58,7 @@ class PedidoRepositoryTest {
     private final List<Integer> idsClienteExtra = new ArrayList<>();
     private final List<Integer> idsPedido = new ArrayList<>();
     private final List<Integer> idsLote = new ArrayList<>();
+    private final List<Integer> idsDevolucion = new ArrayList<>();
 
     private static String entorno(String nombre, String defecto) {
         String valor = System.getenv(nombre);
@@ -114,6 +115,10 @@ class PedidoRepositoryTest {
                     new MapSqlParameterSource().addValue("ids", idsLote));
             jdbc.update("DELETE FROM lotes WHERE id_lote IN (:ids)",
                     new MapSqlParameterSource().addValue("ids", idsLote));
+        }
+        if (!idsDevolucion.isEmpty()) {
+            jdbc.update("DELETE FROM devoluciones WHERE id_devolucion IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsDevolucion));
         }
         // El detalle primero que la cabecera: detalle_pedido → pedidos es FK.
         if (!idsPedido.isEmpty()) {
@@ -182,6 +187,104 @@ class PedidoRepositoryTest {
         assertThat(leido.getNombreCliente()).isEqualTo("Cliente HU-16 test" + sufijo);
         assertThat(leido.getFechaPedido()).isEqualTo(INICIO);
         assertThat(leido.getEstado()).isEqualTo(EstadoPedido.PENDIENTE);
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-14: totalBruto y totalNeto de un pedido sin devoluciones son el total")
+    void importesSinDevolucionesCoincidenConElTotal() {
+        var id = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.ENTREGADO);
+        insertarLinea(id, idsProducto.get(0), "2.00", "50.00");
+        insertarLinea(id, idsProducto.get(1), "3.00", "10.00");
+
+        var leido = repository.buscarPorId(id).orElseThrow();
+
+        assertThat(leido.getTotalPedido()).isEqualByComparingTo("130.00");
+        assertThat(leido.getTotalBruto()).isEqualByComparingTo("130.00");
+        assertThat(leido.getDevoluciones()).isEqualByComparingTo("0.00");
+        assertThat(leido.getTotalNeto()).isEqualByComparingTo("130.00");
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-15/16: solo las devoluciones APROBADA descuentan, al precio histórico")
+    void soloLasDevolucionesAprobadasDescuentan() {
+        var id = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.ENTREGADO);
+        var lineaA = insertarLinea(id, idsProducto.get(0), "10.00", "50.00");
+        var lineaB = insertarLinea(id, idsProducto.get(1), "5.00", "20.00");
+        insertarDevolucion(lineaA, "2.00", "APROBADA");
+        insertarDevolucion(lineaA, "1.00", "APROBADA");
+        insertarDevolucion(lineaB, "4.00", "PENDIENTE");
+        insertarDevolucion(lineaB, "3.00", "RECHAZADA");
+
+        var leido = repository.buscarPorId(id).orElseThrow();
+
+        // bruto 10*50 + 5*20 = 600; devuelto aprobado (2+1)*50 = 150; neto 450.
+        assertThat(leido.getTotalBruto()).isEqualByComparingTo("600.00");
+        assertThat(leido.getDevoluciones()).isEqualByComparingTo("150.00");
+        assertThat(leido.getTotalNeto()).isEqualByComparingTo("450.00");
+        assertThat(leido.getTotalPedido()).isEqualByComparingTo("600.00");
+    }
+
+    @Test
+    @DisplayName("HU-25 R-02: cambiar productos.precio no cambia los importes del pedido")
+    void cambiarElPrecioDelCatalogoNoAlteraLosImportes() {
+        var id = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.ENTREGADO);
+        var linea = insertarLinea(id, idsProducto.get(0), "4.00", "25.00");
+        insertarDevolucion(linea, "1.00", "APROBADA");
+
+        jdbc.update("UPDATE productos SET precio = 9999.00 WHERE id_producto = :id",
+                new MapSqlParameterSource().addValue("id", idsProducto.get(0)));
+
+        var leido = repository.buscarPorId(id).orElseThrow();
+        assertThat(leido.getTotalBruto()).isEqualByComparingTo("100.00");
+        assertThat(leido.getDevoluciones()).isEqualByComparingTo("25.00");
+        assertThat(leido.getTotalNeto()).isEqualByComparingTo("75.00");
+    }
+
+    @Test
+    @DisplayName("HU-25: las devoluciones de un pedido no contaminan a otro ni duplican filas")
+    void lasDevolucionesNoSeCruzanEntrePedidos() {
+        var a = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.ENTREGADO);
+        var b = insertarPedidoDirecto(idCliente, INICIO.plusDays(1), EstadoPedido.ENTREGADO);
+        var lineaA = insertarLinea(a, idsProducto.get(0), "2.00", "10.00");
+        insertarLinea(b, idsProducto.get(0), "2.00", "10.00");
+        insertarDevolucion(lineaA, "1.00", "APROBADA");
+
+        var filas = repository.buscar(idCliente, null, INICIO, FIN, "p.id_pedido", true, 10, 0);
+
+        assertThat(filas).hasSize(2);
+        assertThat(filas.get(0).getDevoluciones()).isEqualByComparingTo("10.00");
+        assertThat(filas.get(0).getTotalNeto()).isEqualByComparingTo("10.00");
+        assertThat(filas.get(1).getDevoluciones()).isEqualByComparingTo("0.00");
+        assertThat(filas.get(1).getTotalNeto()).isEqualByComparingTo("20.00");
+    }
+
+    @Test
+    @DisplayName("HU-25: un pedido sin líneas responde importes en cero")
+    void pedidoSinLineasTieneImportesEnCero() {
+        var id = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);
+
+        var leido = repository.buscarPorId(id).orElseThrow();
+
+        assertThat(leido.getTotalPedido()).isEqualByComparingTo("0.00");
+        assertThat(leido.getTotalBruto()).isEqualByComparingTo("0.00");
+        assertThat(leido.getDevoluciones()).isEqualByComparingTo("0.00");
+        assertThat(leido.getTotalNeto()).isEqualByComparingTo("0.00");
+        assertThat(leido.getCantidadItems()).isZero();
+    }
+
+    @Test
+    @DisplayName("HU-25: buscar ordena por la columna calculada total_pedido")
+    void buscarOrdenaPorTotalPedido() {
+        var barato = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);
+        var caro = insertarPedidoDirecto(idCliente, INICIO.plusDays(1), EstadoPedido.PENDIENTE);
+        insertarLinea(barato, idsProducto.get(0), "1.00", "10.00");
+        insertarLinea(caro, idsProducto.get(0), "1.00", "900.00");
+
+        var asc = repository.buscar(idCliente, null, INICIO, FIN, "total_pedido", true, 10, 0);
+        var desc = repository.buscar(idCliente, null, INICIO, FIN, "total_pedido", false, 10, 0);
+
+        assertThat(asc).extracting(Pedido::getIdPedido).containsExactly(barato, caro);
+        assertThat(desc).extracting(Pedido::getIdPedido).containsExactly(caro, barato);
     }
 
     @Test
@@ -419,6 +522,20 @@ class PedidoRepositoryTest {
                         .addValue("posterior", new BigDecimal("7.00"))
                         .addValue("tablaOrigen", tablaOrigen)
                         .addValue("idOrigen", idOrigen));
+    }
+
+    private Integer insertarDevolucion(Integer idDetallePedido, String cantidad, String estado) {
+        var id = insertarConId("""
+                INSERT INTO devoluciones (id_detalle_pedido, motivo, cantidad_devuelta,
+                                          fecha_devolucion, estado)
+                VALUES (:linea, 'DEFECTO', :cantidad, :fecha, :estado)
+                """, new MapSqlParameterSource()
+                        .addValue("linea", idDetallePedido)
+                        .addValue("cantidad", new BigDecimal(cantidad))
+                        .addValue("fecha", INICIO)
+                        .addValue("estado", estado));
+        idsDevolucion.add(id);
+        return id;
     }
 
     private Integer insertarClienteExtra(String nombre) {

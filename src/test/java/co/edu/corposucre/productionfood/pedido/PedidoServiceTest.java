@@ -67,6 +67,9 @@ class PedidoServiceTest {
         pedido.setFechaEntrega(fechaEntrega);
         pedido.setEstado(estado);
         pedido.setTotalPedido(total);
+        pedido.setTotalBruto(total);
+        pedido.setDevoluciones(BigDecimal.ZERO.setScale(2));
+        pedido.setTotalNeto(total);
         pedido.setCantidadItems(items);
         return pedido;
     }
@@ -195,6 +198,7 @@ class PedidoServiceTest {
     void listarDelegaEnBuscarYContar() {
         var inicio = LocalDate.now().minusDays(10);
         var fin = LocalDate.now().minusDays(1);
+        when(clienteRepository.existsById(ID_CLIENTE)).thenReturn(true);
         when(pedidoRepository.buscar(eq(ID_CLIENTE), eq(EstadoPedido.PENDIENTE), eq(inicio),
                 eq(fin), eq("p.fecha_pedido"), eq(false), eq(10), eq(20L)))
                 .thenReturn(List.of(fila(7, EstadoPedido.PENDIENTE, null,
@@ -214,6 +218,90 @@ class PedidoServiceTest {
         verify(pedidoRepository).buscar(eq(ID_CLIENTE), eq(EstadoPedido.PENDIENTE), eq(inicio),
                 eq(fin), eq("p.fecha_pedido"), eq(false), eq(10), eq(20L));
         verify(pedidoRepository).contar(ID_CLIENTE, EstadoPedido.PENDIENTE, inicio, fin);
+    }
+
+    @Test
+    @DisplayName("HU-25: listar mapea totalBruto, devoluciones y totalNeto sin tocar totalPedido")
+    void listarMapeaLosImportesNuevos() {
+        var f = fila(7, EstadoPedido.ENTREGADO, null, new BigDecimal("500.00"), 2);
+        f.setTotalBruto(new BigDecimal("500.00"));
+        f.setDevoluciones(new BigDecimal("120.00"));
+        f.setTotalNeto(new BigDecimal("380.00"));
+        when(pedidoRepository.buscar(any(), any(), any(), any(), any(), eq(false), eq(20), eq(0L)))
+                .thenReturn(List.of(f));
+        when(pedidoRepository.contar(null, null, null, null)).thenReturn(1L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null).content().get(0);
+
+        assertThat(r.totalPedido()).isEqualByComparingTo("500.00");
+        assertThat(r.totalBruto()).isEqualByComparingTo("500.00");
+        assertThat(r.devoluciones()).isEqualByComparingTo("120.00");
+        assertThat(r.totalNeto()).isEqualByComparingTo("380.00");
+    }
+
+    @Test
+    @DisplayName("HU-25: obtener mapea también los importes nuevos")
+    void obtenerMapeaLosImportesNuevos() {
+        var f = fila(7, EstadoPedido.PENDIENTE, null, new BigDecimal("150.00"), 1);
+        f.setDevoluciones(new BigDecimal("50.00"));
+        f.setTotalNeto(new BigDecimal("100.00"));
+        when(pedidoRepository.buscarPorId(7)).thenReturn(Optional.of(f));
+
+        var r = service.obtener(7);
+
+        assertThat(r.totalPedido()).isEqualByComparingTo("150.00");
+        assertThat(r.devoluciones()).isEqualByComparingTo("50.00");
+        assertThat(r.totalNeto()).isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    @DisplayName("HU-25: sort=total ordena por la columna calculada total_pedido")
+    void listarOrdenaPorTotal() {
+        when(pedidoRepository.buscar(null, null, null, null, "total_pedido", true, 20, 0L))
+                .thenReturn(List.of());
+        when(pedidoRepository.contar(null, null, null, null)).thenReturn(0L);
+
+        service.listar(null, null, null, null, 0, 20, "total,asc");
+
+        verify(pedidoRepository).buscar(null, null, null, null, "total_pedido", true, 20, 0L);
+    }
+
+    @Test
+    @DisplayName("HU-25: listar con un idCliente inexistente responde 404 CLIENTE_INEXISTENTE "
+            + "sin consultar pedidos")
+    void listarConClienteInexistenteResponde404() {
+        when(clienteRepository.existsById(9999)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.listar(9999, null, null, null, 0, 10, null))
+                .isInstanceOf(ClienteInexistenteFiltroException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CLIENTE_INEXISTENTE")
+                .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.NOT_FOUND);
+
+        verifyNoInteractions(pedidoRepository);
+    }
+
+    @Test
+    @DisplayName("HU-25: un cliente inactivo pero existente no es 404 en el listado")
+    void listarConClienteInactivoNoEs404() {
+        when(clienteRepository.existsById(ID_CLIENTE)).thenReturn(true);
+        when(pedidoRepository.buscar(eq(ID_CLIENTE), any(), any(), any(), any(), eq(false),
+                eq(20), eq(0L))).thenReturn(List.of());
+        when(pedidoRepository.contar(ID_CLIENTE, null, null, null)).thenReturn(0L);
+
+        var r = service.listar(ID_CLIENTE, null, null, null, 0, 20, null);
+
+        assertThat(r.totalElements()).isZero();
+        verify(clienteRepository, never()).existeActivo(any());
+    }
+
+    @Test
+    @DisplayName("HU-25: el rango invertido sigue ganando sobre el cliente inexistente")
+    void listarRangoInvertidoSeValidaAntesQueElCliente() {
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.listar(9999, null, hoy, hoy.minusDays(1), 0, 10, null))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
     }
 
     @Test

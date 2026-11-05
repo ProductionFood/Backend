@@ -17,6 +17,10 @@ import java.time.LocalDate;
  * columnas de la cabecera: un pedido recién registrado responde {@code 0} y {@code 0} hasta que
  * su detalle se agrega.
  *
+ * <p>HU-25 añade {@code totalBruto} (igual a {@code totalPedido}, que se conserva por
+ * compatibilidad), {@code devoluciones} (devoluciones aprobadas valoradas al precio de la línea)
+ * y {@code totalNeto} ({@code totalBruto - devoluciones}).
+ *
  * <p>{@code editable} lo calcula el servicio a partir de la máquina de estados de
  * {@code EstadoPedido}: solo un pedido en un estado no terminal admite edición de cabecera o
  * cambio de estado, y el booleano le ahorra al consumidor reimplementar esa regla.
@@ -28,6 +32,9 @@ public record PedidoResponse(
         LocalDate fechaEntrega,
         String estado,
         BigDecimal totalPedido,
+        BigDecimal totalBruto,
+        BigDecimal devoluciones,
+        BigDecimal totalNeto,
         int cantidadItems,
         boolean editable) {
 }

@@ -365,12 +365,14 @@ class PedidoSeguridadTest {
     private static PedidoResponse pedido(int id) {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), "PENDIENTE",
+                new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
                 new BigDecimal("0.00"), 0, true);
     }
 
     private static PedidoResponse pedidoEn(int id, String estado) {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), estado,
+                new BigDecimal("120.00"), new BigDecimal("120.00"), new BigDecimal("0.00"),
                 new BigDecimal("120.00"), 3, "PENDIENTE".equals(estado));
     }
 }
