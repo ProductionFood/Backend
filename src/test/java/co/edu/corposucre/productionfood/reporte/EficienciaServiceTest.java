@@ -116,6 +116,15 @@ class EficienciaServiceTest {
     }
 
     @Test
+    @DisplayName("Ajustado no pierde precisión con cantidades pequeñas (planificado 3, producido 3.33)")
+    void ajustadoConCantidadesPequenas() {
+        var p = unicoPlan(List.of(producto(9, "3.00", "3.33")),
+                List.of(consumo(9, "0.003", "0.003", "3.00", "3.33")));
+
+        assertThat(p.consumos().get(0).rendimientoAjustado()).isEqualTo(bd("111.00"));
+    }
+
+    @Test
     @DisplayName("CP-05 teórica 15 y real 16,2 dan desviación 8.00 y eficiencia 92.59")
     void desviacionYEficiencia() {
         var p = unicoPlan(List.of(producto(9, "90.00", "90.00")),

@@ -63,6 +63,11 @@ public class EficienciaService {
     private static final int ESCALA_CANTIDAD = 3;
     private static final int ESCALA_UNIDADES = 2;
     private static final int ESCALA_INTERMEDIA = 4;
+    /**
+     * Escala del teórico ajustado a lo producido. Debe ser holgada: con cantidades pequeñas
+     * (p. ej. 0.003 kg) cuatro decimales distorsionan el cociente contra el real.
+     */
+    private static final int ESCALA_AJUSTE = 10;
 
     private final EficienciaRepository repository;
     private final CalculadoraEficienciaService calculadora;
@@ -208,7 +213,7 @@ public class EficienciaService {
         // compararlo con el real, y la comparación la hace la calculadora.
         var teoricoAjustado = f.teorica() == null ? null
                 : f.teorica().multiply(f.producida())
-                        .divide(f.planificada(), ESCALA_INTERMEDIA, RoundingMode.HALF_UP);
+                        .divide(f.planificada(), ESCALA_AJUSTE, RoundingMode.HALF_UP);
         return new EficienciaPlanResponse.Consumo(f.materiaPrima(), f.unidad(),
                 cantidad(f.teorica()), cantidad(f.real()),
                 calculadora.desviacion(f.teorica(), f.real()),
