@@ -14,7 +14,7 @@ y mostrar la sugerencia de compra agrupada por proveedor. Complementa
   que se prellena con la sugerencia es de HU-13. Esta historia es de **solo lectura**.
 
 > **Estado:** backend verificado con QA ciego (CP-01…CP-26 y SEC-01…SEC-05, con las excepciones de
-> la ficha: solo CP-20, CP-21 y CP-22). El consumo desde Angular sigue pendiente. Los ids, nombres, costos y proveedores
+> la ficha: solo CP-21 y CP-22). El consumo desde Angular sigue pendiente. Los ids, nombres, costos y proveedores
 > dependen de la base.
 
 ---
