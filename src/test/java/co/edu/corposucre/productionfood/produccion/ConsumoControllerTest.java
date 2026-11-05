@@ -43,6 +43,7 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.config.SecurityConfig;
+import co.edu.corposucre.productionfood.inventario.dto.AlertaStockResponse;
 import co.edu.corposucre.productionfood.produccion.dto.ActualizarConsumoRequest;
 import co.edu.corposucre.productionfood.produccion.dto.ConsumoResponse;
 import co.edu.corposucre.productionfood.produccion.dto.ConsumoTeoricoLineaResponse;
@@ -130,6 +131,7 @@ class ConsumoControllerTest {
                 .andExpect(jsonPath("$.content[0].fechaRegistro")
                         .value("2026-09-18T10:22:41"))
                 .andExpect(jsonPath("$.content[0].inventario").doesNotExist())
+                .andExpect(jsonPath("$.content[0].alertas").doesNotExist())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.totalPages").value(1));
 
@@ -276,6 +278,76 @@ class ConsumoControllerTest {
 
         verify(consumoService).registrar(eq(ID_DETALLE),
                 any(RegistrarConsumoRequest.class));
+    }
+
+    @Test
+    @WithMockUser(roles = "PRODUCCION")
+    @DisplayName("CA-03: registrar devuelve alertas con la alerta de la materia prima en stock bajo")
+    void registrarConsumoIncluyeAlertas() throws Exception {
+        when(consumoService.registrar(eq(ID_DETALLE),
+                any(RegistrarConsumoRequest.class)))
+                .thenReturn(consumo(ID_CONSUMO, "15.000", "16.200",
+                        new InventarioConsumoResponse(new BigDecimal("62.50"),
+                                new BigDecimal("46.30")),
+                        List.of(alerta("BAJO", "46.30"))));
+
+        mockMvc.perform(post(REGISTRO)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(
+                                new RegistrarConsumoRequest(ID_MATERIA_PRIMA,
+                                        new BigDecimal("16.200")))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.alertas.length()").value(1))
+                .andExpect(jsonPath("$.alertas[0].idMateriaPrima").value(ID_MATERIA_PRIMA))
+                .andExpect(jsonPath("$.alertas[0].nivel").value("BAJO"))
+                .andExpect(jsonPath("$.alertas[0].cantidadDisponible").value(46.30))
+                .andExpect(jsonPath("$.alertas[0].stockMinimo").value(50.00))
+                .andExpect(jsonPath("$.alertas[0].faltante").value(3.70));
+    }
+
+    @Test
+    @WithMockUser(roles = "PRODUCCION")
+    @DisplayName("CA-03: sin alerta el campo alertas viaja como lista vacía, no se omite")
+    void registrarConsumoSinAlertaDevuelveListaVacia() throws Exception {
+        when(consumoService.registrar(eq(ID_DETALLE),
+                any(RegistrarConsumoRequest.class)))
+                .thenReturn(consumo(ID_CONSUMO, "15.000", "16.200", null, List.of()));
+
+        mockMvc.perform(post(REGISTRO)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(
+                                new RegistrarConsumoRequest(ID_MATERIA_PRIMA,
+                                        new BigDecimal("16.200")))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.alertas").isArray())
+                .andExpect(jsonPath("$.alertas.length()").value(0));
+    }
+
+    @Test
+    @WithMockUser(roles = "PRODUCCION")
+    @DisplayName("CA-03: corregir devuelve alertas con la alerta AGOTADO de la materia prima")
+    void actualizarConsumoIncluyeAlertas() throws Exception {
+        when(consumoService.actualizar(eq(ID_CONSUMO),
+                any(ActualizarConsumoRequest.class)))
+                .thenReturn(consumo(ID_CONSUMO, "15.000", "18.000",
+                        new InventarioConsumoResponse(new BigDecimal("3.00"),
+                                new BigDecimal("0.00")),
+                        List.of(alerta("AGOTADO", "0.00"))));
+
+        mockMvc.perform(put(RECURSO)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(
+                                new ActualizarConsumoRequest(new BigDecimal("18.000")))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alertas.length()").value(1))
+                .andExpect(jsonPath("$.alertas[0].nivel").value("AGOTADO"));
+    }
+
+    private static AlertaStockResponse alerta(String nivel, String disponible) {
+        return new AlertaStockResponse(ID_MATERIA_PRIMA, MATERIA_PRIMA, "kg",
+                new BigDecimal(disponible), new BigDecimal("50.00"),
+                new BigDecimal("50.00").subtract(new BigDecimal(disponible)), nivel,
+                new BigDecimal("3200.00"), new BigDecimal("11840.00"), null);
     }
 
     @Test
@@ -466,6 +538,12 @@ class ConsumoControllerTest {
      */
     private static ConsumoResponse consumo(Integer idConsumo, String teorica, String real,
                                            InventarioConsumoResponse inventario) {
+        return consumo(idConsumo, teorica, real, inventario, null);
+    }
+
+    private static ConsumoResponse consumo(Integer idConsumo, String teorica, String real,
+                                           InventarioConsumoResponse inventario,
+                                           List<AlertaStockResponse> alertas) {
         var calculadora = new CalculadoraEficienciaService();
         var cantidadTeorica = new BigDecimal(teorica);
         var cantidadReal = new BigDecimal(real);
@@ -475,6 +553,6 @@ class ConsumoControllerTest {
                 calculadora.eficiencia(cantidadTeorica, cantidadReal),
                 calculadora.desviacion(cantidadTeorica, cantidadReal),
                 cantidadTeorica.signum() == 0,
-                FECHA_REGISTRO, inventario);
+                FECHA_REGISTRO, inventario, alertas);
     }
 }

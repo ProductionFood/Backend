@@ -25,9 +25,11 @@ import org.springframework.http.HttpStatus;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.inventario.AlertaService;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.SaldosInventario;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
+import co.edu.corposucre.productionfood.inventario.dto.AlertaStockResponse;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaRepository;
 import co.edu.corposucre.productionfood.produccion.dto.RegistrarConsumoRequest;
 import co.edu.corposucre.productionfood.receta.DetalleReceta;
@@ -61,6 +63,7 @@ class ConsumoRegistrarServiceTest {
     private ConsumoRepository consumoRepository;
     private PlanProduccionRepository planProduccionRepository;
     private InventarioService inventarioService;
+    private AlertaService alertaService;
     private ConsumoService service;
 
     @BeforeEach
@@ -72,10 +75,11 @@ class ConsumoRegistrarServiceTest {
         consumoRepository = mock(ConsumoRepository.class);
         planProduccionRepository = mock(PlanProduccionRepository.class);
         inventarioService = mock(InventarioService.class);
+        alertaService = mock(AlertaService.class);
         service = new ConsumoService(detallePlanRepository, recetaRepository,
                 detalleRecetaRepository, new CalculadoraConsumoService(), materiaPrimaRepository,
                 consumoRepository, planProduccionRepository, inventarioService,
-                new CalculadoraEficienciaService());
+                new CalculadoraEficienciaService(), alertaService);
     }
 
     @Test
@@ -131,6 +135,70 @@ class ConsumoRegistrarServiceTest {
                         && cantidad.compareTo(new BigDecimal("16.21")) == 0),
                 eq(TipoMovimiento.SALIDA_PRODUCCION), eq("consumo_materia_prima"),
                 eq(ID_CONSUMO), eq(OBSERVACION));
+    }
+
+    @Test
+    @DisplayName("CA-03: si tras el descuento queda BAJO, alertas trae la alerta de esa materia prima")
+    void descuentoQueDejaBajoTraeAlerta() {
+        prepararRegistroValido();
+        when(inventarioService.registrarSalida(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new SaldosInventario(new BigDecimal("112.50"),
+                        new BigDecimal("46.30")));
+        when(alertaService.alertaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.of(alerta("BAJO", "46.30")));
+
+        var r = service.registrar(ID_DETALLE, new RegistrarConsumoRequest(ID_MATERIA_PRIMA,
+                new BigDecimal("16.200")));
+
+        assertThat(r.alertas()).singleElement().satisfies(a -> {
+            assertThat(a.idMateriaPrima()).isEqualTo(ID_MATERIA_PRIMA);
+            assertThat(a.nivel()).isEqualTo("BAJO");
+        });
+    }
+
+    @Test
+    @DisplayName("CA-03: si tras el descuento queda AGOTADO, alertas trae la alerta AGOTADO")
+    void descuentoQueAgotaTraeAlertaAgotado() {
+        prepararRegistroValido();
+        when(inventarioService.registrarSalida(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new SaldosInventario(new BigDecimal("16.20"),
+                        new BigDecimal("0.00")));
+        when(alertaService.alertaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.of(alerta("AGOTADO", "0.00")));
+
+        var r = service.registrar(ID_DETALLE, new RegistrarConsumoRequest(ID_MATERIA_PRIMA,
+                new BigDecimal("16.200")));
+
+        assertThat(r.alertas()).singleElement()
+                .satisfies(a -> assertThat(a.nivel()).isEqualTo("AGOTADO"));
+    }
+
+    @Test
+    @DisplayName("CA-03: sin alerta (incluido el saldo igual al mínimo) alertas es lista vacía")
+    void sinAlertaDevuelveListaVacia() {
+        prepararRegistroValido();
+        when(inventarioService.registrarSalida(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new SaldosInventario(new BigDecimal("66.20"),
+                        new BigDecimal("50.00")));
+        when(alertaService.alertaDeMateriaPrima(ID_MATERIA_PRIMA)).thenReturn(Optional.empty());
+
+        var r = service.registrar(ID_DETALLE, new RegistrarConsumoRequest(ID_MATERIA_PRIMA,
+                new BigDecimal("16.200")));
+
+        assertThat(r.alertas()).isNotNull().isEmpty();
+        verify(alertaService).alertaDeMateriaPrima(ID_MATERIA_PRIMA);
+    }
+
+    @Test
+    @DisplayName("CA-03: sin movimiento de inventario no se consulta la alerta y alertas es []")
+    void sinMovimientoNoConsultaAlerta() {
+        prepararRegistroValido();
+
+        var r = service.registrar(ID_DETALLE, new RegistrarConsumoRequest(ID_MATERIA_PRIMA,
+                new BigDecimal("0.000")));
+
+        assertThat(r.alertas()).isNotNull().isEmpty();
+        verifyNoInteractions(alertaService);
     }
 
     @Test
@@ -315,6 +383,13 @@ class ConsumoRegistrarServiceTest {
                 .hasFieldOrPropertyWithValue("status", HttpStatus.CONFLICT);
 
         verifyNoInteractions(inventarioService);
+    }
+
+    private static AlertaStockResponse alerta(String nivel, String disponible) {
+        return new AlertaStockResponse(ID_MATERIA_PRIMA, "Harina de trigo", "kg",
+                new BigDecimal(disponible), new BigDecimal("50.00"),
+                new BigDecimal("50.00").subtract(new BigDecimal(disponible)), nivel,
+                new BigDecimal("3200.00"), new BigDecimal("11840.00"), null);
     }
 
     private void prepararLineaYPlan() {

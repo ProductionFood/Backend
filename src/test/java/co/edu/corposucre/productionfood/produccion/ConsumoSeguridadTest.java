@@ -363,7 +363,8 @@ class ConsumoSeguridadTest {
                 false,
                 LocalDateTime.of(2026, 9, 18, 10, 22, 41),
                 new InventarioConsumoResponse(new BigDecimal("112.50"),
-                        new BigDecimal("96.30")));
+                        new BigDecimal("96.30")),
+                List.of());
     }
 
     /**
