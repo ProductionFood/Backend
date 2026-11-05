@@ -432,19 +432,20 @@ public class PedidoRepository {
      * <p>Se ordena por unidades vendidas y no por importe: un producto caro vendido tres veces no
      * supera a uno barato vendido doscientas. El importe y la cantidad de pedidos distintos van
      * como columnas adicionales; a igualdad de unidades desempata el importe descendente y luego
-     * el nombre, para que el orden sea determinista. Excluye los pedidos {@code CANCELADO} (R-03)
-     * y valora al {@code precio_unitario} de la línea (R-02).
+     * el nombre, para que el orden sea determinista. Solo cuenta los pedidos {@code ENTREGADO}
+     * (unidades despachadas, R-07): los pendientes, en preparación y cancelados no suman. Valora
+     * al {@code precio_unitario} de la línea (R-02).
      *
      * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
      * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
-     * @return una fila por producto con ventas no canceladas, de más a menos unidades; vacía si
-     *         el rango no tiene ventas
+     * @return una fila por producto con ventas entregadas, de más a menos unidades; vacía si
+     *         el rango no tiene pedidos entregados
      */
     public List<ProductoVendidoFila> productosMasVendidos(LocalDate fechaInicio,
                                                           LocalDate fechaFin) {
         var params = new MapSqlParameterSource();
         var where = armarFiltros(null, null, fechaInicio, fechaFin, params)
-                + " AND p.estado <> 'CANCELADO'";
+                + " AND p.estado = 'ENTREGADO'";
 
         return jdbc.query("""
                 SELECT pr.nombre AS producto,

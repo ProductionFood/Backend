@@ -7,7 +7,7 @@ import java.math.RoundingMode;
  * Fila agregada del ranking de productos más vendidos (HU-25).
  *
  * <p>Es lo que {@link PedidoRepository#productosMasVendidos} devuelve por cada producto con
- * ventas no canceladas en el rango (R-03): las unidades vendidas, el importe a precio histórico
+ * pedidos entregados en el rango (R-03, R-07): las unidades vendidas, el importe a precio histórico
  * (R-02) y la cantidad de pedidos distintos que lo incluyeron. Las unidades y el importe se fijan
  * a escala 2, la de las columnas {@code decimal(10,2)} y la del contrato monetario.
  *

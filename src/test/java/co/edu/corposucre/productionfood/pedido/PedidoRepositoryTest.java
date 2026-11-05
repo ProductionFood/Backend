@@ -698,7 +698,7 @@ class PedidoRepositoryTest {
         // Producto A: caro, 3 unidades en 3 pedidos. Producto B: barato, 200 unidades en 2.
         var p1 = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
         var p2 = insertarPedidoDirecto(idCliente, AGR_INICIO.plusDays(1), EstadoPedido.ENTREGADO);
-        var p3 = insertarPedidoDirecto(idCliente, AGR_INICIO.plusDays(2), EstadoPedido.PENDIENTE);
+        var p3 = insertarPedidoDirecto(idCliente, AGR_INICIO.plusDays(2), EstadoPedido.ENTREGADO);
         insertarLinea(p1, idsProducto.get(0), "1.00", "5000.00");
         insertarLinea(p2, idsProducto.get(0), "1.00", "5000.00");
         insertarLinea(p3, idsProducto.get(0), "1.00", "5000.00");
@@ -716,6 +716,29 @@ class PedidoRepositoryTest {
         assertThat(ranking.get(1).unidadesVendidas()).isEqualByComparingTo("3.00");
         assertThat(ranking.get(1).importe()).isEqualByComparingTo("15000.00");
         assertThat(ranking.get(1).pedidos()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-20 R-07: el ranking solo suma pedidos ENTREGADO, no los en curso ni "
+            + "los cancelados")
+    void rankingSoloCuentaEntregados() {
+        var entregado = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        var pendiente = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.PENDIENTE);
+        var enPreparacion = insertarPedidoDirecto(idCliente, AGR_INICIO,
+                EstadoPedido.EN_PREPARACION);
+        var cancelado = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.CANCELADO);
+        insertarLinea(entregado, idsProducto.get(0), "4.00", "10.00");
+        insertarLinea(pendiente, idsProducto.get(0), "100.00", "10.00");
+        insertarLinea(enPreparacion, idsProducto.get(0), "200.00", "10.00");
+        insertarLinea(cancelado, idsProducto.get(0), "300.00", "10.00");
+
+        var ranking = repository.productosMasVendidos(AGR_INICIO, AGR_FIN);
+
+        assertThat(ranking).hasSize(1);
+        assertThat(ranking.get(0).producto()).isEqualTo("Producto A HU-16 test" + sufijo);
+        assertThat(ranking.get(0).unidadesVendidas()).isEqualByComparingTo("4.00");
+        assertThat(ranking.get(0).importe()).isEqualByComparingTo("40.00");
+        assertThat(ranking.get(0).pedidos()).isEqualTo(1);
     }
 
     @Test

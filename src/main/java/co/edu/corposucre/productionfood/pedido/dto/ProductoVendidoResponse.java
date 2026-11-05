@@ -7,7 +7,7 @@ import java.math.BigDecimal;
  *
  * <p>El ranking se ordena por unidades vendidas y no por importe: un producto caro vendido tres
  * veces no supera a uno barato vendido doscientas. Ambas columnas se exponen. Solo cuentan los
- * pedidos no cancelados (R-03) y el importe usa el precio histórico de la línea (R-02).
+ * pedidos entregados (R-03, R-07) y el importe usa el precio histórico de la línea (R-02).
  *
  * @param producto         nombre del producto
  * @param unidadesVendidas suma de unidades de sus líneas, a escala 2
