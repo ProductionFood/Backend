@@ -1,0 +1,3652 @@
+{
+  "info": {
+    "_postman_id": "hu25-consulta-pedidos",
+    "name": "ProductionFood - HU-25 Consulta de pedidos",
+    "description": "Casos de la HU-25 (consulta de pedidos): GET /api/v1/pedidos con los filtros idCliente, fechaInicio/fechaFin y estado combinados con AND, el orden por fechaPedido|fechaEntrega|estado|total|id, la paginación y el detalle opcional con incluirDetalle=true y tope de size 20 (CP-01…CP-16, CP-23, CP-24); GET /api/v1/pedidos/resumen con venta bruta, devoluciones, venta neta y ticket promedio, cancelados fuera de la venta (R-03, R-04); GET /api/v1/pedidos/por-cliente con las ventas agrupadas por cliente y su porcentaje; y GET /api/v1/pedidos/productos-mas-vendidos, ordenado por unidades y solo con pedidos ENTREGADO (R-07). Solo lectura (R-01): las escrituras sobre los tres paths de reporte responden 405 METODO_NO_PERMITIDO. Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles, dos clientes, dos productos con su lote y cuatro pedidos del cliente A (dos ENTREGADO, uno en curso y uno CANCELADO) con una devolución aprobada y otra pendiente. Los pedidos nacen con fechaPedido de hoy (HU-16), así que los rangos usan {{fechaHoy}}; los totales se verifican contra el cliente y los productos creados en la ejecución. CP-14 sube el precio de P1 en el catálogo a mitad de la colección. SEC-03 usa la variable manual tokenExpirado (JWT caducado del mismo secreto) y SEC-05 el token del usuario INACTIVO que crea y desactiva Preparación. Los tokens nunca se guardan en la colección: se obtienen del login.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "fechaHoy",
+      "value": ""
+    },
+    {
+      "key": "fechaProduccion",
+      "value": ""
+    },
+    {
+      "key": "fechaVencimiento",
+      "value": ""
+    },
+    {
+      "key": "idUnidad",
+      "value": ""
+    },
+    {
+      "key": "idCliente",
+      "value": ""
+    },
+    {
+      "key": "idClienteVacio",
+      "value": ""
+    },
+    {
+      "key": "idProductoBarato",
+      "value": ""
+    },
+    {
+      "key": "idProductoCaro",
+      "value": ""
+    },
+    {
+      "key": "idPedidoE1",
+      "value": ""
+    },
+    {
+      "key": "idDetalleE1P1",
+      "value": ""
+    },
+    {
+      "key": "idDetalleE1P2",
+      "value": ""
+    },
+    {
+      "key": "idPedidoE2",
+      "value": ""
+    },
+    {
+      "key": "idPedidoEC",
+      "value": ""
+    },
+    {
+      "key": "idPedidoCA",
+      "value": ""
+    },
+    {
+      "key": "idDevolucionAprobada",
+      "value": ""
+    },
+    {
+      "key": "totalBrutoE1",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioVentas",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioProduccion",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioConsulta",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioCompras",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioInactivo",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Preparación",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al administrador del seed. Guarda tokenAdmin y token, y genera el sufijo único de esta ejecución y las fechas de trabajo. Los pedidos de la HU-16 siempre nacen con fechaPedido de hoy, así que todos los pedidos de siembra caen en {{fechaHoy}}: las fronteras del rango inclusivo se prueban con ese día.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const hoy = new Date();",
+                  "const iso = (d) => { const c = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return c.toISOString().slice(0, 10); };",
+                  "const suma = (dias) => { const d = new Date(hoy); d.setDate(d.getDate() + dias); return iso(d); };",
+                  "pm.collectionVariables.set('fechaHoy', iso(hoy));",
+                  "pm.collectionVariables.set('fechaProduccion', suma(-5));",
+                  "pm.collectionVariables.set('fechaVencimiento', suma(30));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenAdmin\", pm.response.json().token);",
+                  "pm.collectionVariables.set(\"token\", pm.response.json().token);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(pm.response.json().usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol VENTAS (idRol 4).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-25 VENTAS {{sufijo}}\",\n  \"correo\": \"hu25-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"idUsuarioVentas\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al usuario VENTAS y guarda tokenVentas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu25-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenVentas\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol PRODUCCION (idRol 2).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-25 PRODUCCION {{sufijo}}\",\n  \"correo\": \"hu25-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"idUsuarioProduccion\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al usuario PRODUCCION y guarda tokenProduccion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu25-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenProduccion\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol CONSULTA (idRol 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-25 CONSULTA {{sufijo}}\",\n  \"correo\": \"hu25-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"idUsuarioConsulta\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al usuario CONSULTA y guarda tokenConsulta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu25-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenConsulta\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol COMPRAS (idRol 3).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-25 COMPRAS {{sufijo}}\",\n  \"correo\": \"hu25-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"idUsuarioCompras\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al usuario COMPRAS y guarda tokenCompras.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu25-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenCompras\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario INACTIVO → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol INACTIVO (idRol 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-25 INACTIVO {{sufijo}}\",\n  \"correo\": \"hu25-inactivo-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"idUsuarioInactivo\", pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login INACTIVO → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al usuario INACTIVO y guarda tokenInactivo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu25-inactivo-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"tokenInactivo\", pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar el usuario inactivo → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios/{{idUsuarioInactivo}}/estado"
+            },
+            "description": "Desactiva al usuario anterior después de su login, para SEC-05 (token vigente de un usuario ya inactivo).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener unidad de medida → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/unidades-medida"
+            },
+            "description": "Toma la primera unidad de medida para crear los productos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const l = pm.response.json();",
+                  "pm.collectionVariables.set(\"idUnidad\", l.length ? l[0].idUnidad : 1);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente A → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes"
+            },
+            "description": "Cliente con el que se siembran los pedidos de la prueba.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Tienda La Esquina HU-25 {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idCliente\", pm.response.json().idCliente);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente B sin pedidos → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clientes"
+            },
+            "description": "Cliente nuevo sin ningún pedido, para CP-02.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Cliente sin pedidos HU-25 {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idClienteVacio\", pm.response.json().idCliente);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto barato (P1) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos"
+            },
+            "description": "Producto barato ($1.200) que se vende en volumen: debe encabezar el ranking por unidades (CP-20).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pan francés QA-25 {{sufijo}}\",\n  \"descripcion\": \"Datos de QA HU-25\",\n  \"precio\": 1200.0,\n  \"idUnidad\": \"{{idUnidad}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idProductoBarato\", pm.response.json().idProducto);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto caro (P2) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos"
+            },
+            "description": "Producto caro ($2.500) que se vende poco.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Croissant QA-25 {{sufijo}}\",\n  \"descripcion\": \"Datos de QA HU-25\",\n  \"precio\": 2500.0,\n  \"idUnidad\": \"{{idUnidad}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idProductoCaro\", pm.response.json().idProducto);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear lote de P1 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "Stock de producto terminado para poder agregar líneas a los pedidos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{sufijo}}-HU25-P1\",\n  \"idProducto\": \"{{idProductoBarato}}\",\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 300.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear lote de P2 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lotes-producto"
+            },
+            "description": "Stock de producto terminado para poder agregar líneas a los pedidos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigoLote\": \"{{sufijo}}-HU25-P2\",\n  \"idProducto\": \"{{idProductoCaro}}\",\n  \"fechaProduccion\": \"{{fechaProduccion}}\",\n  \"fechaVencimiento\": \"{{fechaVencimiento}}\",\n  \"cantidad\": 100.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido E1 (entregado, con devolución) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "description": "Pedido de siembra (E1 (entregado, con devolución)). fechaPedido es hoy.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\",\n  \"fechaEntrega\": \"{{fechaHoy}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoE1\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea (barato × 30.0) al pedido E1 (entregado, con devolución) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE1}}/detalles"
+            },
+            "description": "Línea con el precio vigente del catálogo, que queda congelado en la línea (R-02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProductoBarato}}\",\n  \"cantidad\": 30.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDetalleE1P1\", pm.response.json().idDetallePedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea (caro × 6.0) al pedido E1 (entregado, con devolución) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE1}}/detalles"
+            },
+            "description": "Línea con el precio vigente del catálogo, que queda congelado en la línea (R-02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProductoCaro}}\",\n  \"cantidad\": 6.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDetalleE1P2\", pm.response.json().idDetallePedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido E1 (entregado, con devolución) → EN_PREPARACION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE1}}/estado"
+            },
+            "description": "Transición de estado de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PREPARACION\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido E1 (entregado, con devolución) → ENTREGADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE1}}/estado"
+            },
+            "description": "Transición de estado de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ENTREGADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido E2 (entregado) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "description": "Pedido de siembra (E2 (entregado)). fechaPedido es hoy.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoE2\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea (barato × 10.0) al pedido E2 (entregado) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE2}}/detalles"
+            },
+            "description": "Línea con el precio vigente del catálogo, que queda congelado en la línea (R-02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProductoBarato}}\",\n  \"cantidad\": 10.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido E2 (entregado) → EN_PREPARACION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE2}}/estado"
+            },
+            "description": "Transición de estado de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PREPARACION\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido E2 (entregado) → ENTREGADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE2}}/estado"
+            },
+            "description": "Transición de estado de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ENTREGADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido EC (en curso, PENDIENTE) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "description": "Pedido de siembra (EC (en curso, PENDIENTE)). fechaPedido es hoy.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoEC\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea (barato × 5.0) al pedido EC (en curso, PENDIENTE) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoEC}}/detalles"
+            },
+            "description": "Línea con el precio vigente del catálogo, que queda congelado en la línea (R-02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProductoBarato}}\",\n  \"cantidad\": 5.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pedido CA (cancelado) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos"
+            },
+            "description": "Pedido de siembra (CA (cancelado)). fechaPedido es hoy.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": \"{{idCliente}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idPedidoCA\", pm.response.json().idPedido);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea (barato × 7.0) al pedido CA (cancelado) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoCA}}/detalles"
+            },
+            "description": "Línea con el precio vigente del catálogo, que queda congelado en la línea (R-02).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": \"{{idProductoBarato}}\",\n  \"cantidad\": 7.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedido CA (cancelado) → CANCELADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoCA}}/estado"
+            },
+            "description": "Transición de estado de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Devolución APROBADA: 3 panes del pedido E1 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "Registra la devolución de 3 unidades de P1 (3 × $1.200 = $3.600); se aprueba en el paso siguiente (R-04, CP-15).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleE1P1}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"descripcion\": \"Tres panes llegaron aplastados\",\n  \"cantidadDevuelta\": 3.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"idDevolucionAprobada\", pm.response.json().idDevolucion);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Aprobar la devolución → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones/{{idDevolucionAprobada}}/estado"
+            },
+            "description": "Pasa la devolución a APROBADA (repone stock y la hace descontar de la venta).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"APROBADA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Devolución PENDIENTE: 1 croissant del pedido E1 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devoluciones"
+            },
+            "description": "Devolución que se deja en PENDIENTE: no debe descontar del neto (CP-16).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idDetallePedido\": \"{{idDetalleE1P2}}\",\n  \"motivo\": \"Producto en mal estado\",\n  \"descripcion\": \"Un croissant llegó roto\",\n  \"cantidadDevuelta\": 1.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sanity: listar los pedidos del cliente A → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&size=100"
+            },
+            "description": "Comprueba la siembra: 4 pedidos (E1, E2, en curso y cancelado). Guarda el totalBruto de E1 para CP-14."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"4 pedidos sembrados\", () => pm.expect(j.totalElements).to.eql(4));",
+                  "const e1 = j.content.find(p => p.idPedido === Number(pm.collectionVariables.get(\"idPedidoE1\")));",
+                  "pm.test(\"E1 bruto 51000\", () => pm.expect(e1.totalBruto).to.eql(51000));",
+                  "pm.collectionVariables.set(\"totalBrutoE1\", e1.totalBruto);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Listado con filtros (CP-01…CP-16, CP-23, CP-24)",
+      "item": [
+        {
+          "name": "CP-01 Filtrar por cliente → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&size=100"
+            },
+            "description": "CP-01 (CA-01): solo regresan pedidos del cliente A."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"solo ese cliente\", () => j.content.forEach(p => pm.expect(p.cliente.idCliente).to.eql(Number(pm.collectionVariables.get(\"idCliente\")))));",
+                  "pm.test(\"4 pedidos\", () => pm.expect(j.totalElements).to.eql(4));",
+                  "pm.test(\"totalPedido conservado de HU-16 e igual a totalBruto\", () => j.content.forEach(p => pm.expect(p.totalPedido).to.eql(p.totalBruto)));",
+                  "pm.test(\"totalNeto = totalBruto − devoluciones\", () => j.content.forEach(p => pm.expect(p.totalNeto).to.eql(p.totalBruto - p.devoluciones)));",
+                  "pm.test(\"sin detalle por defecto\", () => j.content.forEach(p => pm.expect(p).to.not.have.property(\"detalle\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Cliente sin pedidos → 200 vacío",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idClienteVacio}}"
+            },
+            "description": "CP-02: un cliente existente sin pedidos responde content vacío, no 404."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"content vacío\", () => pm.expect(pm.response.json().content).to.eql([]));",
+                  "pm.test(\"totalElements 0\", () => pm.expect(pm.response.json().totalElements).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 Filtrar por rango de fechas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}&size=100"
+            },
+            "description": "CP-03 (CA-02): los pedidos del cliente A en el rango (todos nacen hoy)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"4 en el rango\", () => pm.expect(pm.response.json().totalElements).to.eql(4));",
+                  "pm.test(\"todos de hoy\", () => pm.response.json().content.forEach(p => pm.expect(p.fechaPedido).to.eql(pm.collectionVariables.get(\"fechaHoy\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03b Rango pasado → 200 vacío",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&fechaInicio=2000-01-01&fechaFin=2000-01-02"
+            },
+            "description": "Un rango sin pedidos responde content vacío."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"vacío\", () => pm.expect(pm.response.json().content).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 Rango inclusivo en los dos extremos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}&size=100"
+            },
+            "description": "CP-04 (R-05): con inicio = fin = el día de los pedidos, aparecen todos; ambos extremos son inclusivos (fecha_pedido es DATE, BETWEEN)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"el día frontera aparece\", () => pm.expect(pm.response.json().totalElements).to.eql(4));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 Rango invertido → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?fechaInicio={{fechaHoy}}&fechaFin=2000-01-01"
+            },
+            "description": "CP-05 (R-05): fechaInicio posterior a fechaFin."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"RANGO_FECHAS_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"RANGO_FECHAS_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 Filtrar por estado → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&estado=ENTREGADO&size=100"
+            },
+            "description": "CP-06 (CA-03): solo entregados del cliente A (E1 y E2)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"2 entregados\", () => pm.expect(pm.response.json().totalElements).to.eql(2));",
+                  "pm.test(\"todos ENTREGADO\", () => pm.response.json().content.forEach(p => pm.expect(p.estado).to.eql(\"ENTREGADO\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Estado inválido → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?estado=DESPACHADO"
+            },
+            "description": "CP-07: literal no canónico."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 Filtros combinados con AND → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&estado=ENTREGADO&fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}&size=100"
+            },
+            "description": "CP-08: cliente + rango + estado se aplican a la vez."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"2 pedidos\", () => pm.expect(pm.response.json().totalElements).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 Detalle del pedido → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&incluirDetalle=true&sort=id,asc"
+            },
+            "description": "CP-09 (CA-04): con incluirDetalle=true cada pedido trae `detalle` con sus líneas (producto, cantidad, precioUnitario histórico y subtotal); un pedido sin líneas respondería []."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const c = pm.response.json().content;",
+                  "pm.test(\"todos traen detalle\", () => c.forEach(p => pm.expect(p.detalle).to.be.an(\"array\")));",
+                  "pm.test(\"E1 tiene 2 líneas con subtotal\", () => { const e1 = c[0]; pm.expect(e1.detalle.length).to.eql(2); pm.expect(e1.detalle[0].subtotal).to.eql(e1.detalle[0].cantidad * e1.detalle[0].precioUnitario); });",
+                  "pm.test(\"la suma de subtotales es el totalBruto\", () => c.forEach(p => pm.expect(p.detalle.reduce((s, l) => s + l.subtotal, 0)).to.eql(p.totalBruto)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 Tope de size con detalle → 200 (size 20)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?incluirDetalle=true&size=100"
+            },
+            "description": "CP-10 (R-06): con detalle, size se recorta a 20 en silencio, sin 400; el valor de la cabecera es la fuente de verdad."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"size recortado a 20\", () => pm.expect(pm.response.json().size).to.eql(20));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10b Sin detalle el tope sigue en 100 → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?size=101"
+            },
+            "description": "Sin incluirDetalle, size fuera de 1..100 responde 400 (a diferencia del recorte con detalle)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 Paginación → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&page=1&size=2&sort=id,asc"
+            },
+            "description": "CP-11 (CA-05): con 4 pedidos, la página 1 de tamaño 2 trae los 2 últimos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"página 1, 2 elementos\", () => { pm.expect(j.page).to.eql(1); pm.expect(j.content.length).to.eql(2); pm.expect(j.totalPages).to.eql(2); pm.expect(j.last).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 Orden por total descendente → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&sort=total,desc&size=100"
+            },
+            "description": "CP-12 (CA-05): total ordena por el total bruto derivado del detalle."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().content.map(p => p.totalBruto);",
+                  "pm.test(\"descendente\", () => t.forEach((v, i) => { if (i > 0) pm.expect(t[i - 1]).to.be.at.least(v); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Orden por id ascendente → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&sort=id,asc&size=100"
+            },
+            "description": "Campo de la lista blanca: id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().content.map(p => p.idPedido);",
+                  "pm.test(\"ascendente\", () => t.forEach((v, i) => { if (i > 0) pm.expect(t[i - 1]).to.be.below(v); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Orden por fechaEntrega ascendente → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&sort=fechaEntrega,asc&size=100"
+            },
+            "description": "Campo de la lista blanca: fechaEntrega."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Orden fuera de lista blanca → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?sort=id_cliente,asc"
+            },
+            "description": "CP-13: campo de sort fuera de fechaPedido, fechaEntrega, estado, total, id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"CAMPO_ORDEN_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"CAMPO_ORDEN_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cliente inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente=999999"
+            },
+            "description": "Decisión de la implementación: 404 por existencia del cliente, no por actividad (un cliente desactivado conserva su historial)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"CLIENTE_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"CLIENTE_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Subir el precio del catálogo → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos/{{idProductoBarato}}"
+            },
+            "description": "CP-14 (R-02), paso 1: sube el precio de P1 de $1.200 a $1.500 en el catálogo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pan francés QA-25 {{sufijo}}\",\n  \"descripcion\": \"Datos de QA HU-25\",\n  \"precio\": 1500.0,\n  \"idUnidad\": \"{{idUnidad}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 El total no cambia con el precio del catálogo → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&estado=ENTREGADO&sort=id,asc&incluirDetalle=true"
+            },
+            "description": "CP-14 (R-02), paso 2: el totalBruto de E1 sigue siendo el de la siembra y la línea de P1 conserva $1.200 de precioUnitario."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const e1 = pm.response.json().content[0];",
+                  "pm.test(\"totalBruto igual al de antes\", () => pm.expect(e1.totalBruto).to.eql(Number(pm.collectionVariables.get(\"totalBrutoE1\"))));",
+                  "pm.test(\"precio histórico 1200\", () => pm.expect(e1.detalle.find(l => l.producto.idProducto === Number(pm.collectionVariables.get(\"idProductoBarato\"))).precioUnitario).to.eql(1200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 Las devoluciones aprobadas se descuentan → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&estado=ENTREGADO&sort=id,asc"
+            },
+            "description": "CP-15 (R-04): E1 de $51.000 con 3 panes devueltos y aprobados ($3.600): devoluciones 3600 y totalNeto 47400. E2 sin devoluciones: 0."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const c = pm.response.json().content;",
+                  "pm.test(\"E1 bruto/devoluciones/neto\", () => { pm.expect(c[0].totalBruto).to.eql(51000); pm.expect(c[0].devoluciones).to.eql(3600); pm.expect(c[0].totalNeto).to.eql(47400); });",
+                  "pm.test(\"E2 sin devoluciones\", () => { pm.expect(c[1].devoluciones).to.eql(0); pm.expect(c[1].totalNeto).to.eql(c[1].totalBruto); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Las devoluciones pendientes no descuentan → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&estado=ENTREGADO&sort=id,asc&incluirDetalle=true"
+            },
+            "description": "CP-16: E1 tiene además una devolución PENDIENTE de 1 croissant ($2.500) que no entra en devoluciones: sigue en 3600."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const e1 = pm.response.json().content[0];",
+                  "pm.test(\"devoluciones sigue en 3600\", () => pm.expect(e1.devoluciones).to.eql(3600));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento con detalle (< 2 s) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?incluirDetalle=true&size=20"
+            },
+            "description": "CP-23 (RNF-02): la página con detalle responde en menos de 2 s. El EXPLAIN sobre idx_pedidos_fecha se verifica por SQL fuera de la colección."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"< 2000 ms\", () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-24 Rol CONSULTA lista los pedidos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&size=5"
+            },
+            "description": "CP-24: CONSULTA puede consultar el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol PRODUCCION lista los pedidos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&size=5"
+            },
+            "description": "PRODUCCION también lee el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol VENTAS lista los pedidos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?idCliente={{idCliente}}&size=5"
+            },
+            "description": "VENTAS también lee el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Un pedido por id conserva el contrato de HU-16 → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/{{idPedidoE1}}"
+            },
+            "description": "GET /pedidos/{id} no cambia de ruta ni de códigos; la respuesta incluye ahora los campos de importe y no trae detalle."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test(\"totalPedido = totalBruto\", () => pm.expect(p.totalPedido).to.eql(p.totalBruto));",
+                  "pm.test(\"sin detalle\", () => pm.expect(p).to.not.have.property(\"detalle\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Resumen (CP-17, CP-18, CP-19, CP-22, CP-25)",
+      "item": [
+        {
+          "name": "CP-17 Los cancelados no cuentan como venta → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "CP-17 (R-03): el pedido cancelado se informa en su bloque pero no suma a la venta bruta; ventaBruta = entregados.total."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"cancelados informados aparte\", () => { pm.expect(j.cancelados.cantidad).to.be.at.least(1); pm.expect(j.cancelados.total).to.be.at.least(8400); });",
+                  "pm.test(\"ventaBruta = entregados.total\", () => pm.expect(j.ventaBruta).to.eql(j.entregados.total));",
+                  "pm.test(\"ventaNeta = bruta − devoluciones\", () => pm.expect(j.ventaNeta).to.eql(j.ventaBruta - j.devoluciones));",
+                  "pm.test(\"periodo del rango\", () => pm.expect(j.periodo.desde).to.eql(pm.collectionVariables.get(\"fechaHoy\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 Comprometido separado de entregado → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "CP-18 (R-03): enCurso (PENDIENTE + EN_PREPARACION) y entregados son cifras distintas; la venta bruta no suma lo comprometido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"entregados ≥ 2 con ≥ 63000\", () => { pm.expect(j.entregados.cantidad).to.be.at.least(2); pm.expect(j.entregados.total).to.be.at.least(63000); });",
+                  "pm.test(\"enCurso ≥ 1 con ≥ 6000\", () => { pm.expect(j.enCurso.cantidad).to.be.at.least(1); pm.expect(j.enCurso.total).to.be.at.least(6000); });",
+                  "pm.test(\"devoluciones ≥ 3600 (solo aprobadas)\", () => pm.expect(j.devoluciones).to.be.at.least(3600));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Ticket promedio → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "CP-19: ticketPromedio = ventaBruta / entregados.cantidad, a escala 2 con HALF_UP."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"ticketPromedio calculado\", () => pm.expect(j.ticketPromedio).to.be.closeTo(j.ventaBruta / j.entregados.cantidad, 0.006));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 Período sin pedidos → 200 en cero y sin ticketPromedio",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio=2000-01-01&fechaFin=2000-01-02"
+            },
+            "description": "CP-22: un rango vacío responde las cifras en 0 y SIN el campo ticketPromedio (null no se serializa; ver «Comportamientos conocidos»)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"cifras en cero\", () => { pm.expect(j.entregados.cantidad).to.eql(0); pm.expect(j.enCurso.cantidad).to.eql(0); pm.expect(j.cancelados.cantidad).to.eql(0); pm.expect(j.ventaBruta).to.eql(0); pm.expect(j.devoluciones).to.eql(0); pm.expect(j.ventaNeta).to.eql(0); });",
+                  "pm.test(\"ticketPromedio no se serializa\", () => pm.expect(j).to.not.have.property(\"ticketPromedio\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rango invertido en el resumen → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin=2000-01-01"
+            },
+            "description": "R-05: rango invertido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"RANGO_FECHAS_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"RANGO_FECHAS_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fecha mal formada en el resumen → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio=01-09-2026"
+            },
+            "description": "Formato distinto de yyyy-MM-dd."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resumen sin filtros → 200 (todo el histórico)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen"
+            },
+            "description": "Sin fechas devuelve todo el histórico y periodo no se serializa."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"sin periodo\", () => pm.expect(pm.response.json()).to.not.have.property(\"periodo\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol VENTAS accede al resumen → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "ADMIN y VENTAS acceden a los tres reportes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-25 Rol PRODUCCION no accede al resumen → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "CP-25: PRODUCCION lee el listado pero no los reportes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol CONSULTA no accede al resumen → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "CONSULTA tampoco."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Por-cliente (CP-21)",
+      "item": [
+        {
+          "name": "CP-21 Ventas agrupadas por cliente → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "CP-21: array ordenado por total descendente. El cliente A suma 3 pedidos (E1, E2 y el en curso; el cancelado no cuenta) y $69.000 en bruto, sin descontar devoluciones."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.test(\"ordenado por total descendente\", () => j.forEach((f, i) => { if (i > 0) pm.expect(j[i - 1].total).to.be.at.least(f.total); }));",
+                  "const a = j.find(f => f.cliente.idCliente === Number(pm.collectionVariables.get(\"idCliente\")));",
+                  "pm.test(\"cliente A: 3 pedidos, 69000\", () => { pm.expect(a.cantidadPedidos).to.eql(3); pm.expect(a.total).to.eql(69000); });",
+                  "pm.test(\"porcentaje numérico\", () => pm.expect(a.porcentaje).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Los porcentajes suman 100 → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "Los porcentajes (escala 2, HALF_UP) suman 100,00 con residuo de redondeo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"suma ≈ 100\", () => { const j = pm.response.json(); pm.expect(j.reduce((s, f) => s + f.porcentaje, 0)).to.be.closeTo(100, 0.05 * j.length); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Período sin pedidos → 200 lista vacía",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio=2000-01-01&fechaFin=2000-01-02"
+            },
+            "description": "Rango vacío: lista vacía."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[]\", () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rango invertido en por-cliente → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin=2000-01-01"
+            },
+            "description": "R-05."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"RANGO_FECHAS_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"RANGO_FECHAS_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol PRODUCCION no accede a por-cliente → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "Reservado a ADMIN y VENTAS."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Productos más vendidos (CP-20)",
+      "item": [
+        {
+          "name": "CP-20 Ranking por unidades, no por importe → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "CP-20 (R-07): P1 (barato, 40 unidades en pedidos entregados) aparece antes que P2 (caro, 6 unidades) aunque su importe unitario sea menor. Solo cuentan los ENTREGADO: el pedido en curso (5) y el cancelado (7) no suman (DEF-H25-001 / D-01)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const p1 = j.findIndex(f => f.producto.indexOf(\"Pan francés QA-25\") === 0 && f.producto.endsWith(pm.collectionVariables.get(\"sufijo\")));",
+                  "const p2 = j.findIndex(f => f.producto.indexOf(\"Croissant QA-25\") === 0 && f.producto.endsWith(pm.collectionVariables.get(\"sufijo\")));",
+                  "pm.test(\"ambos productos aparecen\", () => { pm.expect(p1).to.be.at.least(0); pm.expect(p2).to.be.at.least(0); });",
+                  "pm.test(\"el barato va primero\", () => pm.expect(p1).to.be.below(p2));",
+                  "pm.test(\"P1: 40 unidades en 2 pedidos (solo ENTREGADO)\", () => { pm.expect(j[p1].unidadesVendidas).to.eql(40); pm.expect(j[p1].pedidos).to.eql(2); });",
+                  "pm.test(\"P1 importe 48000 al precio histórico\", () => pm.expect(j[p1].importe).to.eql(48000));",
+                  "pm.test(\"P2: 6 unidades, importe 15000\", () => { pm.expect(j[p2].unidadesVendidas).to.eql(6); pm.expect(j[p2].importe).to.eql(15000); });",
+                  "pm.test(\"ordenado por unidades descendente\", () => j.forEach((f, i) => { if (i > 0) pm.expect(j[i - 1].unidadesVendidas).to.be.at.least(f.unidadesVendidas); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Período sin entregados → 200 lista vacía",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio=2000-01-01&fechaFin=2000-01-02"
+            },
+            "description": "Rango vacío: lista vacía."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"[]\", () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ranking sin filtros → 200 (todo el histórico)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos"
+            },
+            "description": "Sin fechas cuenta todo el histórico de entregados."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rango invertido en el ranking → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin=2000-01-01"
+            },
+            "description": "R-05."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"RANGO_FECHAS_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"RANGO_FECHAS_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol CONSULTA no accede al ranking → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "Reservado a ADMIN y VENTAS."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Escrituras reservadas (405)",
+      "item": [
+        {
+          "name": "POST sobre /resumen → 405",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventado\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT sobre /resumen → 405",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventado\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH sobre /resumen → 405",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventado\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE sobre /resumen → 405",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sobre /por-cliente → 405",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventado\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT sobre /por-cliente → 405",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventado\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST sobre /productos-mas-vendidos → 405",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventado\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT sobre /productos-mas-vendidos → 405",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos"
+            },
+            "description": "R-01: no hay escritura en esta historia; el path está reservado y responde 405 METODO_NO_PERMITIDO en lugar de caer en PUT /pedidos/{id} de HU-16.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inventado\": true\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"METODO_NO_PERMITIDO\", () => pm.expect(pm.response.json().code).to.eql(\"METODO_NO_PERMITIDO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "item": [
+        {
+          "name": "SEC-01 GET /pedidos sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?size=1"
+            },
+            "description": "SEC-01: sin cabecera Authorization"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /pedidos token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto.no.es.un.jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?size=1"
+            },
+            "description": "SEC-02: token malformado"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /pedidos token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?size=1"
+            },
+            "description": "SEC-03: token expirado. Usa la variable manual tokenExpirado (un JWT caducado firmado con el mismo secreto); sin ella la petición viaja con un token vacío y responde 401 igualmente, pero no prueba la expiración."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /pedidos con rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?size=1"
+            },
+            "description": "COMPRAS no participa de los pedidos de venta: 403 SIN_PERMISO incluso en GET."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /pedidos con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos?size=1"
+            },
+            "description": "SEC-05: usuario desactivado tras el login; el token sigue vigente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET /pedidos/resumen sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-01: sin cabecera Authorization"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /pedidos/resumen token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto.no.es.un.jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-02: token malformado"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /pedidos/resumen token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-03: token expirado. Usa la variable manual tokenExpirado (un JWT caducado firmado con el mismo secreto); sin ella la petición viaja con un token vacío y responde 401 igualmente, pero no prueba la expiración."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /pedidos/resumen con rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "PRODUCCION no accede a los reportes: 403 SIN_PERMISO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /pedidos/resumen con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/resumen?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-05: usuario desactivado tras el login; el token sigue vigente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET /pedidos/por-cliente sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-01: sin cabecera Authorization"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /pedidos/por-cliente token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto.no.es.un.jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-02: token malformado"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /pedidos/por-cliente token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-03: token expirado. Usa la variable manual tokenExpirado (un JWT caducado firmado con el mismo secreto); sin ella la petición viaja con un token vacío y responde 401 igualmente, pero no prueba la expiración."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /pedidos/por-cliente con rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "PRODUCCION no accede a los reportes: 403 SIN_PERMISO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /pedidos/por-cliente con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/por-cliente?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-05: usuario desactivado tras el login; el token sigue vigente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET /pedidos/productos-mas-vendidos sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-01: sin cabecera Authorization"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET /pedidos/productos-mas-vendidos token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto.no.es.un.jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-02: token malformado"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET /pedidos/productos-mas-vendidos token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-03: token expirado. Usa la variable manual tokenExpirado (un JWT caducado firmado con el mismo secreto); sin ella la petición viaja con un token vacío y responde 401 igualmente, pero no prueba la expiración."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET /pedidos/productos-mas-vendidos con rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "PRODUCCION no accede a los reportes: 403 SIN_PERMISO."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET /pedidos/productos-mas-vendidos con usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/pedidos/productos-mas-vendidos?fechaInicio={{fechaHoy}}&fechaFin={{fechaHoy}}"
+            },
+            "description": "SEC-05: usuario desactivado tras el login; el token sigue vigente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
