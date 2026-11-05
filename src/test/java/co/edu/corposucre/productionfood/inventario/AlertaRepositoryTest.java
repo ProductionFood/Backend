@@ -299,6 +299,18 @@ class AlertaRepositoryTest {
                 .containsExactly(agotado, bajo);
     }
 
+    @Test
+    @DisplayName("R-04: la sugerencia excluye lo agotado sin faltante, que sigue en las alertas")
+    void sugerenciaExcluyeAgotadoSinFaltante() {
+        var sinFaltante = sembrar("sin-faltante", "0.00", "0.00", true);
+        var agotado = sembrar("agotado-con-faltante", "2.00", "0.00", true);
+
+        assertThat(propias(false)).extracting(AlertaStockFila::idMateriaPrima)
+                .contains(sinFaltante, agotado);
+        assertThat(sugerencias()).extracting(s -> s.alerta().idMateriaPrima())
+                .containsExactly(agotado);
+    }
+
     private List<SugerenciaFila> sugerencias() {
         return repository.sugerenciaCompra().stream()
                 .filter(s -> s.alerta().nombre().endsWith(sufijo))
