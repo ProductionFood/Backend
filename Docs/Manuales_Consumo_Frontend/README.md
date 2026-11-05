@@ -27,6 +27,7 @@ quien consume, complemento de `../../../PFDocs/00-base/04-CONTRATO-API.md`.
 | [HU-17 — Productos del pedido](HU-17-productos-pedido.md) | Detalle del pedido (stock FEFO, alta, edición y eliminación de líneas) | Backend verificado 2026-10-30 (QA ciego 23/24 CP y 25/25 SEC) · frontend pendiente |
 | [HU-18 — Registro de devoluciones](HU-18-registro-devoluciones.md) | Devoluciones (bandeja, registro, aprobación con reposición y kardex) | Backend verificado 2026-11-02 (QA ciego 25/25 CP y 25/25 SEC) · frontend pendiente |
 | [HU-19 — Lotes de producto terminado](HU-19-lotes-producto-terminado.md) | Lotes de producto (listado con filtros, alta, detalle y kardex) | Backend verificado en caliente 2026-10-25 · frontend pendiente |
+| [HU-20 — Planes de producción](HU-20-planes-produccion.md) | Planes de producción (listado con filtros, alta, edición y estados) | Backend verificado 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC) · frontend pendiente |
 
 ## Qué debe tener un manual
 

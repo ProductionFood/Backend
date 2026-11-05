@@ -75,6 +75,10 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-17 | Productos del pedido | 2026-10-30 · [`HU-17-productos-pedido.md`](HU-17-productos-pedido.md) |
 | HU-18 | Registro de devoluciones | 2026-11-02 · [`HU-18-registro-devoluciones.md`](HU-18-registro-devoluciones.md) |
 | HU-19 | Lotes de producto terminado | 2026-10-25 · [`HU-19-lotes-producto-terminado.md`](HU-19-lotes-producto-terminado.md) |
+| HU-20 | Planes de producción | 2026-11-05 · [`HU-20-planes-produccion.md`](HU-20-planes-produccion.md) |
 
+> HU-20 quedó verificada con QA ciego el 2026-11-05 (CP-01…CP-23, SEC-01…05 en los cinco
+> endpoints, matriz de roles y verificaciones SQL). El consumo desde el frontend sigue pendiente.
+>
 > HU-09 quedó verificada en caliente contra MySQL el 2026-10-23 (CP-01…CP-20 y SEC-01…05).
 > El consumo desde el frontend sigue pendiente, igual que en las HUs anteriores.
