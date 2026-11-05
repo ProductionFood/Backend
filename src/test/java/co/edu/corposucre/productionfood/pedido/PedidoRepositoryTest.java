@@ -547,6 +547,213 @@ class PedidoRepositoryTest {
         assertThat(leido.getEstado()).isEqualTo(EstadoPedido.PENDIENTE);
     }
 
+    // ---- HU-25 PR3: agregaciones ----
+
+    /** Rango propio de las agregaciones, distinto del de la siembra filtrable. */
+    private static final LocalDate AGR_INICIO = LocalDate.of(1990, 3, 1);
+    private static final LocalDate AGR_FIN = LocalDate.of(1990, 3, 31);
+
+    @Test
+    @DisplayName("HU-25 resumenPorPeriodo: agrupa por estado, cuenta pedidos y suma al precio "
+            + "histórico")
+    void resumenAgrupaPorEstado() {
+        var e1 = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        insertarLinea(e1, idsProducto.get(0), "2.00", "50.00");
+        insertarLinea(e1, idsProducto.get(1), "1.00", "20.00");
+        var e2 = insertarPedidoDirecto(idCliente, AGR_FIN, EstadoPedido.ENTREGADO);
+        insertarLinea(e2, idsProducto.get(0), "1.00", "50.00");
+        var p = insertarPedidoDirecto(idCliente, AGR_INICIO.plusDays(3), EstadoPedido.PENDIENTE);
+        insertarLinea(p, idsProducto.get(0), "3.00", "10.00");
+        var c = insertarPedidoDirecto(idCliente, AGR_INICIO.plusDays(4), EstadoPedido.CANCELADO);
+        insertarLinea(c, idsProducto.get(0), "9.00", "10.00");
+        // Fuera del rango: no debe contar.
+        var fuera = insertarPedidoDirecto(idCliente, AGR_FIN.plusDays(1), EstadoPedido.ENTREGADO);
+        insertarLinea(fuera, idsProducto.get(0), "100.00", "100.00");
+
+        var filas = repository.resumenPorPeriodo(AGR_INICIO, AGR_FIN);
+
+        var entregado = filas.stream().filter(f -> f.estado() == EstadoPedido.ENTREGADO)
+                .findFirst().orElseThrow();
+        // Los pedidos de los dos extremos del rango entran (inclusivo).
+        assertThat(entregado.cantidad()).isEqualTo(2);
+        assertThat(entregado.total()).isEqualByComparingTo("170.00");
+        assertThat(entregado.total().scale()).isEqualTo(2);
+        var pendiente = filas.stream().filter(f -> f.estado() == EstadoPedido.PENDIENTE)
+                .findFirst().orElseThrow();
+        assertThat(pendiente.cantidad()).isEqualTo(1);
+        assertThat(pendiente.total()).isEqualByComparingTo("30.00");
+        var cancelado = filas.stream().filter(f -> f.estado() == EstadoPedido.CANCELADO)
+                .findFirst().orElseThrow();
+        assertThat(cancelado.cantidad()).isEqualTo(1);
+        assertThat(cancelado.total()).isEqualByComparingTo("90.00");
+        assertThat(filas).extracting(ResumenPedidoEstadoFila::estado)
+                .doesNotContain(EstadoPedido.EN_PREPARACION);
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-15/16: el resumen descuenta solo devoluciones APROBADA y sin duplicar "
+            + "por varias devoluciones")
+    void resumenDescuentaSoloDevolucionesAprobadas() {
+        var e = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        var lineaA = insertarLinea(e, idsProducto.get(0), "10.00", "50.00");
+        var lineaB = insertarLinea(e, idsProducto.get(1), "5.00", "20.00");
+        insertarDevolucion(lineaA, "2.00", "APROBADA");
+        insertarDevolucion(lineaA, "1.00", "APROBADA");
+        insertarDevolucion(lineaB, "4.00", "PENDIENTE");
+        insertarDevolucion(lineaB, "3.00", "RECHAZADA");
+
+        var filas = repository.resumenPorPeriodo(AGR_INICIO, AGR_FIN);
+
+        assertThat(filas).hasSize(1);
+        // Dos devoluciones a la misma línea no deben multiplicar el bruto: 600, no 1200.
+        assertThat(filas.get(0).total()).isEqualByComparingTo("600.00");
+        assertThat(filas.get(0).devoluciones()).isEqualByComparingTo("150.00");
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-14: el resumen usa precio_unitario aunque cambie productos.precio")
+    void resumenUsaElPrecioHistorico() {
+        var e = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        var linea = insertarLinea(e, idsProducto.get(0), "4.00", "25.00");
+        insertarDevolucion(linea, "1.00", "APROBADA");
+
+        jdbc.update("UPDATE productos SET precio = 9999.00 WHERE id_producto = :id",
+                new MapSqlParameterSource().addValue("id", idsProducto.get(0)));
+
+        var fila = repository.resumenPorPeriodo(AGR_INICIO, AGR_FIN).get(0);
+        assertThat(fila.total()).isEqualByComparingTo("100.00");
+        assertThat(fila.devoluciones()).isEqualByComparingTo("25.00");
+    }
+
+    @Test
+    @DisplayName("HU-25: un pedido sin líneas cuenta en su estado con total 0.00")
+    void resumenCuentaUnPedidoSinLineas() {
+        insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.PENDIENTE);
+
+        var filas = repository.resumenPorPeriodo(AGR_INICIO, AGR_INICIO);
+
+        assertThat(filas).hasSize(1);
+        assertThat(filas.get(0).cantidad()).isEqualTo(1);
+        assertThat(filas.get(0).total()).isEqualByComparingTo("0.00");
+        assertThat(filas.get(0).devoluciones()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-22: un rango sin pedidos devuelve la lista vacía")
+    void resumenDeUnRangoVacio() {
+        var vacio = LocalDate.of(1990, 1, 15);
+
+        assertThat(repository.resumenPorPeriodo(vacio, vacio)).isEmpty();
+        assertThat(repository.ventasPorCliente(vacio, vacio)).isEmpty();
+        assertThat(repository.productosMasVendidos(vacio, vacio)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-21: ventas por cliente ordena por total descendente y excluye "
+            + "cancelados")
+    void ventasPorClienteOrdenaYExcluyeCancelados() {
+        var otro = insertarClienteExtra("Cliente extra HU-25 test" + sufijo);
+        var chico = insertarClienteExtra("Cliente chico HU-25 test" + sufijo);
+        var a1 = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        insertarLinea(a1, idsProducto.get(0), "1.00", "100.00");
+        var a2 = insertarPedidoDirecto(idCliente, AGR_FIN, EstadoPedido.PENDIENTE);
+        insertarLinea(a2, idsProducto.get(0), "1.00", "50.00");
+        var b = insertarPedidoDirecto(otro, AGR_INICIO, EstadoPedido.ENTREGADO);
+        insertarLinea(b, idsProducto.get(0), "1.00", "400.00");
+        // Un cancelado enorme no cuenta como venta: el cliente "chico" ni aparece.
+        var cancelado = insertarPedidoDirecto(chico, AGR_INICIO, EstadoPedido.CANCELADO);
+        insertarLinea(cancelado, idsProducto.get(0), "10.00", "1000.00");
+        var canceladoDeA = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.CANCELADO);
+        insertarLinea(canceladoDeA, idsProducto.get(0), "10.00", "1000.00");
+
+        var filas = repository.ventasPorCliente(AGR_INICIO, AGR_FIN);
+
+        assertThat(filas).extracting(VentaClienteFila::idCliente).containsExactly(otro, idCliente);
+        assertThat(filas.get(0).cliente()).isEqualTo("Cliente extra HU-25 test" + sufijo);
+        assertThat(filas.get(0).cantidadPedidos()).isEqualTo(1);
+        assertThat(filas.get(0).total()).isEqualByComparingTo("400.00");
+        assertThat(filas.get(0).total().scale()).isEqualTo(2);
+        assertThat(filas.get(1).cantidadPedidos()).isEqualTo(2);
+        assertThat(filas.get(1).total()).isEqualByComparingTo("150.00");
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-14: ventas por cliente y ranking usan el precio histórico")
+    void ventasYRankingUsanElPrecioHistorico() {
+        var e = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        insertarLinea(e, idsProducto.get(0), "4.00", "25.00");
+        jdbc.update("UPDATE productos SET precio = 9999.00 WHERE id_producto = :id",
+                new MapSqlParameterSource().addValue("id", idsProducto.get(0)));
+
+        var ventas = repository.ventasPorCliente(AGR_INICIO, AGR_FIN);
+        var ranking = repository.productosMasVendidos(AGR_INICIO, AGR_FIN);
+
+        assertThat(ventas.get(0).total()).isEqualByComparingTo("100.00");
+        assertThat(ranking.get(0).importe()).isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-20 R-07: el ranking ordena por unidades, no por importe")
+    void rankingPorUnidadesNoPorImporte() {
+        // Producto A: caro, 3 unidades en 3 pedidos. Producto B: barato, 200 unidades en 2.
+        var p1 = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        var p2 = insertarPedidoDirecto(idCliente, AGR_INICIO.plusDays(1), EstadoPedido.ENTREGADO);
+        var p3 = insertarPedidoDirecto(idCliente, AGR_INICIO.plusDays(2), EstadoPedido.PENDIENTE);
+        insertarLinea(p1, idsProducto.get(0), "1.00", "5000.00");
+        insertarLinea(p2, idsProducto.get(0), "1.00", "5000.00");
+        insertarLinea(p3, idsProducto.get(0), "1.00", "5000.00");
+        insertarLinea(p1, idsProducto.get(1), "120.00", "2.00");
+        insertarLinea(p2, idsProducto.get(1), "80.00", "2.00");
+
+        var ranking = repository.productosMasVendidos(AGR_INICIO, AGR_FIN);
+
+        assertThat(ranking).extracting(ProductoVendidoFila::producto)
+                .containsExactly("Producto B HU-16 test" + sufijo,
+                        "Producto A HU-16 test" + sufijo);
+        assertThat(ranking.get(0).unidadesVendidas()).isEqualByComparingTo("200.00");
+        assertThat(ranking.get(0).importe()).isEqualByComparingTo("400.00");
+        assertThat(ranking.get(0).pedidos()).isEqualTo(2);
+        assertThat(ranking.get(1).unidadesVendidas()).isEqualByComparingTo("3.00");
+        assertThat(ranking.get(1).importe()).isEqualByComparingTo("15000.00");
+        assertThat(ranking.get(1).pedidos()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("HU-25: el ranking excluye cancelados, cuenta pedidos distintos y desempata por "
+            + "importe")
+    void rankingExcluyeCanceladosYDesempataPorImporte() {
+        var p1 = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        var cancelado = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.CANCELADO);
+        // Misma cantidad de unidades; B tiene más importe, así que va primero.
+        insertarLinea(p1, idsProducto.get(0), "10.00", "1.00");
+        insertarLinea(p1, idsProducto.get(1), "10.00", "3.00");
+        insertarLinea(cancelado, idsProducto.get(0), "500.00", "1.00");
+
+        var ranking = repository.productosMasVendidos(AGR_INICIO, AGR_FIN);
+
+        assertThat(ranking).extracting(ProductoVendidoFila::producto)
+                .containsExactly("Producto B HU-16 test" + sufijo,
+                        "Producto A HU-16 test" + sufijo);
+        assertThat(ranking.get(1).unidadesVendidas()).isEqualByComparingTo("10.00");
+        assertThat(ranking.get(1).pedidos()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("HU-25: las agregaciones sin fechas no filtran por rango")
+    void agregacionesSinFechasIncluyenElPedidoSembrado() {
+        var e = insertarPedidoDirecto(idCliente, AGR_INICIO, EstadoPedido.ENTREGADO);
+        insertarLinea(e, idsProducto.get(0), "1.00", "10.00");
+
+        assertThat(repository.ventasPorCliente(null, null))
+                .extracting(VentaClienteFila::idCliente).contains(idCliente);
+        assertThat(repository.productosMasVendidos(null, null))
+                .extracting(ProductoVendidoFila::producto)
+                .contains("Producto A HU-16 test" + sufijo);
+        assertThat(repository.resumenPorPeriodo(null, null)).isNotEmpty();
+        assertThat(repository.resumenPorPeriodo(AGR_INICIO, null)).isNotEmpty();
+        assertThat(repository.resumenPorPeriodo(null, AGR_FIN)).isNotEmpty();
+    }
+
     /**
      * Crea un pedido sin fechaEntrega para los tests que usan {@link PedidoRepository#insertar},
      * que es el camino de la aplicación: cliente y estado, y la fecha la pone la base.
