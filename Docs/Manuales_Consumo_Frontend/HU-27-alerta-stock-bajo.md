@@ -14,7 +14,7 @@ y mostrar la sugerencia de compra agrupada por proveedor. Complementa
   que se prellena con la sugerencia es de HU-13. Esta historia es de **solo lectura**.
 
 > **Estado:** backend verificado con QA ciego (CP-01…CP-26 y SEC-01…SEC-05, con las excepciones de
-> la ficha: solo CP-21 y CP-22). El consumo desde Angular sigue pendiente. Los ids, nombres, costos y proveedores
+> la ficha: solo CP-21, que espera a HU-24). El consumo desde Angular sigue pendiente. Los ids, nombres, costos y proveedores
 > dependen de la base.
 
 ---
@@ -87,7 +87,7 @@ GET /api/v1/inventario/alertas?incluirInactivas=false
   "costoReposicionTotal": 346750.00 }
 ```
 
-- **Qué entra:** las materias primas con `cantidadDisponible <= stockMinimo`.
+- **Qué entra:** las materias primas con `cantidadDisponible < stockMinimo` (estricto: con disponible igual al mínimo no hay alerta) y las agotadas.
 - **`nivel`:** `AGOTADO` cuando la cantidad es cero y `BAJO` cuando es mayor que cero pero no
   supera el mínimo. Mostrar `AGOTADO` en rojo y `BAJO` en ámbar.
 - **Orden:** `AGOTADO` primero y, dentro de cada nivel, mayor `faltante` primero. No hace falta
