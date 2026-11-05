@@ -24,9 +24,11 @@ import org.springframework.http.HttpStatus;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.inventario.AlertaService;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.SaldosInventario;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
+import co.edu.corposucre.productionfood.inventario.dto.AlertaStockResponse;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaRepository;
 import co.edu.corposucre.productionfood.produccion.dto.ActualizarConsumoRequest;
 import co.edu.corposucre.productionfood.receta.DetalleRecetaRepository;
@@ -57,6 +59,7 @@ class ConsumoActualizarServiceTest {
     private ConsumoRepository consumoRepository;
     private PlanProduccionRepository planProduccionRepository;
     private InventarioService inventarioService;
+    private AlertaService alertaService;
     private ConsumoService service;
 
     @BeforeEach
@@ -68,10 +71,11 @@ class ConsumoActualizarServiceTest {
         consumoRepository = mock(ConsumoRepository.class);
         planProduccionRepository = mock(PlanProduccionRepository.class);
         inventarioService = mock(InventarioService.class);
+        alertaService = mock(AlertaService.class);
         service = new ConsumoService(detallePlanRepository, recetaRepository,
                 detalleRecetaRepository, new CalculadoraConsumoService(), materiaPrimaRepository,
                 consumoRepository, planProduccionRepository, inventarioService,
-                new CalculadoraEficienciaService());
+                new CalculadoraEficienciaService(), alertaService);
     }
 
     @Test
@@ -325,6 +329,76 @@ class ConsumoActualizarServiceTest {
 
         verifyNoInteractions(inventarioService);
         verify(consumoRepository, never()).actualizarReal(any(), any());
+    }
+
+    @Test
+    @DisplayName("CA-03: la corrección al alza que deja la materia prima BAJO trae la alerta")
+    void correccionAlAlzaGeneraAlerta() {
+        prepararCorreccion("15.000", "18.000", EstadoPlan.EN_PROCESO);
+        when(inventarioService.registrarSalida(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new SaldosInventario(new BigDecimal("52.00"),
+                        new BigDecimal("49.00")));
+        when(alertaService.alertaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.of(alerta("BAJO", "49.00")));
+
+        var r = service.actualizar(ID_CONSUMO, new ActualizarConsumoRequest(
+                new BigDecimal("18.000")));
+
+        assertThat(r.alertas()).singleElement().satisfies(a -> {
+            assertThat(a.idMateriaPrima()).isEqualTo(ID_MATERIA_PRIMA);
+            assertThat(a.nivel()).isEqualTo("BAJO");
+        });
+    }
+
+    @Test
+    @DisplayName("CA-03: la corrección al alza que agota la materia prima trae la alerta AGOTADO")
+    void correccionAlAlzaQueAgotaTraeAgotado() {
+        prepararCorreccion("15.000", "18.000", EstadoPlan.EN_PROCESO);
+        when(inventarioService.registrarSalida(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new SaldosInventario(new BigDecimal("3.00"),
+                        new BigDecimal("0.00")));
+        when(alertaService.alertaDeMateriaPrima(ID_MATERIA_PRIMA))
+                .thenReturn(Optional.of(alerta("AGOTADO", "0.00")));
+
+        var r = service.actualizar(ID_CONSUMO, new ActualizarConsumoRequest(
+                new BigDecimal("18.000")));
+
+        assertThat(r.alertas()).singleElement()
+                .satisfies(a -> assertThat(a.nivel()).isEqualTo("AGOTADO"));
+    }
+
+    @Test
+    @DisplayName("CA-03: la corrección a la baja que sale de alerta devuelve alertas []")
+    void correccionALaBajaQueSaleDeAlertaDevuelveVacio() {
+        prepararCorreccion("15.000", "12.000", EstadoPlan.EN_PROCESO);
+        when(inventarioService.registrarEntrada(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new SaldosInventario(new BigDecimal("47.00"),
+                        new BigDecimal("50.00")));
+        when(alertaService.alertaDeMateriaPrima(ID_MATERIA_PRIMA)).thenReturn(Optional.empty());
+
+        var r = service.actualizar(ID_CONSUMO, new ActualizarConsumoRequest(
+                new BigDecimal("12.000")));
+
+        assertThat(r.alertas()).isNotNull().isEmpty();
+    }
+
+    @Test
+    @DisplayName("CA-03: sin diferencia (sin movimiento) no se consulta la alerta y alertas es []")
+    void sinDiferenciaNoConsultaAlerta() {
+        prepararCorreccion("15.000", "15.000", EstadoPlan.EN_PROCESO);
+
+        var r = service.actualizar(ID_CONSUMO, new ActualizarConsumoRequest(
+                new BigDecimal("15.000")));
+
+        assertThat(r.alertas()).isNotNull().isEmpty();
+        verifyNoInteractions(alertaService);
+    }
+
+    private static AlertaStockResponse alerta(String nivel, String disponible) {
+        return new AlertaStockResponse(ID_MATERIA_PRIMA, "Harina de trigo", "kg",
+                new BigDecimal(disponible), new BigDecimal("50.00"),
+                new BigDecimal("50.00").subtract(new BigDecimal(disponible)), nivel,
+                new BigDecimal("3200.00"), new BigDecimal("11840.00"), null);
     }
 
     private void prepararCorreccion(String cantidadAnterior, String cantidadNueva,

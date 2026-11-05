@@ -2,8 +2,15 @@ package co.edu.corposucre.productionfood.produccion.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
+
+import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+
+import co.edu.corposucre.productionfood.inventario.dto.AlertaStockResponse;
+
+import co.edu.corposucre.productionfood.inventario.dto.AlertaStockResponse;
 
 /**
  * Consumo real de una materia prima registrado sobre una línea de un plan de producción (HU-22).
@@ -25,6 +32,12 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * teórica sea cero. Un ingrediente imprevisto no está en la receta, no tiene consumo teórico y la
  * interfaz lo marca como consumo fuera de receta.
  *
+ * <p><strong>Alertas (HU-23 CA-03)</strong>: {@code alertas} es informativa y nunca bloquea el
+ * registro. Al registrar o corregir trae la alerta de stock (BAJO o AGOTADO) de la materia prima
+ * afectada si, tras el movimiento, quedó en alerta; es la lista vacía cuando no hay alerta (el
+ * saldo igual al mínimo no lo es) o cuando no hubo movimiento. El listado no calcula alertas y el
+ * campo se omite ({@code null}).
+ *
  * <p>{@code inventario} solo llega cuando el consumo descontó stock; un consumo de cero no mueve
  * inventario y el campo se omite.
  *
@@ -42,6 +55,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param fechaRegistro        momento en que se registró el consumo
  * @param inventario           saldos de inventario antes y después; {@code null} si no hubo
  *                             movimiento
+ * @param alertas              alertas de stock de la materia prima tras el movimiento; vacía si
+ *                             no hay alerta y {@code null} (omitida) en el listado
  */
 public record ConsumoResponse(
         Integer idConsumo,
@@ -54,5 +69,6 @@ public record ConsumoResponse(
         @JsonInclude(JsonInclude.Include.ALWAYS) BigDecimal desviacionPorcentaje,
         boolean fueraDeReceta,
         LocalDateTime fechaRegistro,
-        InventarioConsumoResponse inventario) {
+        InventarioConsumoResponse inventario,
+        List<AlertaStockResponse> alertas) {
 }

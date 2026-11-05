@@ -125,10 +125,12 @@ public class ConsumoController {
                         + "inventario y la eficiencia viaja null (R-03). Un cuerpo sin "
                         + "idMateriaPrima o sin cantidadReal responde 400 VALIDACION_FALLIDA y "
                         + "una cantidad negativa 400 CANTIDAD_INVALIDA. Devuelve 201 con la "
-                        + "cabecera Location apuntando al consumo creado.")
+                        + "cabecera Location apuntando al consumo creado y, en alertas, la "
+                        + "alerta de stock de la materia prima si tras el descuento quedó BAJO "
+                        + "o AGOTADO (informativa, nunca bloquea); lista vacía si no hay.")
     @ApiResponses({
         @ApiResponse(responseCode = "201", description = "Consumo registrado, con su eficiencia, "
-                + "su desviación y el efecto en inventario"),
+                + "su desviación, el efecto en inventario y las alertas de stock"),
         @ApiResponse(responseCode = "400", description = "Cuerpo inválido o cantidad negativa "
                 + "(VALIDACION_FALLIDA, CANTIDAD_INVALIDA)"),
         @ApiResponse(responseCode = "401", description = "Sin token"),
@@ -159,10 +161,12 @@ public class ConsumoController {
                         + "null (R-03). Un cuerpo sin cantidadReal responde 400 "
                         + "VALIDACION_FALLIDA y una cantidad negativa 400 CANTIDAD_INVALIDA. "
                         + "Responde 404 RECURSO_NO_ENCONTRADO si el consumo no existe. Devuelve "
-                        + "200 con el consumo corregido y el efecto del ajuste en inventario.")
+                        + "200 con el consumo corregido, el efecto del ajuste en inventario y, en "
+                        + "alertas, la alerta de stock de la materia prima si quedó BAJO o "
+                        + "AGOTADO (informativa); lista vacía si no hay.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Consumo corregido, con su eficiencia, "
-                + "su desviación y el ajuste de inventario"),
+                + "su desviación, el ajuste de inventario y las alertas de stock"),
         @ApiResponse(responseCode = "400", description = "Cuerpo inválido o cantidad negativa "
                 + "(VALIDACION_FALLIDA, CANTIDAD_INVALIDA)"),
         @ApiResponse(responseCode = "401", description = "Sin token"),

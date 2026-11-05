@@ -1,6 +1,7 @@
 package co.edu.corposucre.productionfood.inventario;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -41,6 +42,27 @@ public class AlertaRepository {
                 """,
                 new MapSqlParameterSource().addValue("incluirInactivas", incluirInactivas),
                 new AlertaStockRowMapper());
+    }
+
+    /**
+     * Consulta el nivel de UNA materia prima y la devuelve solo si está {@code AGOTADO} o
+     * {@code BAJO}; con stock suficiente (incluida la igualdad exacta con el mínimo) o si no
+     * existe, el resultado es vacío. Usa la misma vista y el mismo filtro de nivel que
+     * {@link #listarAlertas(boolean)}; no filtra por estado activo porque la usa quien acaba de
+     * mover el inventario de esa materia prima.
+     *
+     * @param idMateriaPrima materia prima consultada
+     */
+    public Optional<AlertaStockFila> buscarAlertaPorMateriaPrima(Integer idMateriaPrima) {
+        return jdbc.query("""
+                SELECT id_materia_prima, nombre, unidad, cantidad_disponible,
+                       stock_minimo, faltante, estado_stock, costo_unitario, fecha_actualizacion
+                FROM v_inventario_materia_prima
+                WHERE id_materia_prima = :idMateriaPrima
+                  AND estado_stock IN ('BAJO', 'AGOTADO')
+                """,
+                new MapSqlParameterSource().addValue("idMateriaPrima", idMateriaPrima),
+                new AlertaStockRowMapper()).stream().findFirst();
     }
 
     /**

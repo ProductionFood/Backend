@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,6 +42,29 @@ class AlertaServiceTest {
                 .containsExactly(new BigDecimal("900.00"), new BigDecimal("286750.00"),
                         new BigDecimal("11840.00"));
         assertThat(r.costoReposicionTotal()).isEqualTo(new BigDecimal("299490.00"));
+    }
+
+    @Test
+    @DisplayName("alertaDeMateriaPrima calcula el costo de reposición como el listado")
+    void alertaDeUnaMateriaPrimaCalculaElCosto() {
+        when(repository.buscarAlertaPorMateriaPrima(12)).thenReturn(Optional.of(
+                fila(12, "Mantequilla", "4.50", "20.00", "15.50", "BAJO", "18500.00")));
+
+        var r = servicio.alertaDeMateriaPrima(12);
+
+        assertThat(r).hasValueSatisfying(a -> {
+            assertThat(a.idMateriaPrima()).isEqualTo(12);
+            assertThat(a.nivel()).isEqualTo("BAJO");
+            assertThat(a.costoReposicion()).isEqualTo(new BigDecimal("286750.00"));
+        });
+    }
+
+    @Test
+    @DisplayName("alertaDeMateriaPrima es vacío si el repositorio no encuentra alerta")
+    void alertaDeUnaMateriaPrimaSinAlertaEsVacia() {
+        when(repository.buscarAlertaPorMateriaPrima(5)).thenReturn(Optional.empty());
+
+        assertThat(servicio.alertaDeMateriaPrima(5)).isEmpty();
     }
 
     @Test

@@ -15,9 +15,11 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.inventario.AlertaService;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.SaldosInventario;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
+import co.edu.corposucre.productionfood.inventario.dto.AlertaStockResponse;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaConDetalle;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaRepository;
 import co.edu.corposucre.productionfood.produccion.dto.ActualizarConsumoRequest;
@@ -74,6 +76,8 @@ public class ConsumoService {
 
     private final CalculadoraEficienciaService calculadoraEficienciaService;
 
+    private final AlertaService alertaService;
+
     public ConsumoService(DetallePlanRepository detallePlanRepository,
                           RecetaRepository recetaRepository,
                           DetalleRecetaRepository detalleRecetaRepository,
@@ -82,7 +86,8 @@ public class ConsumoService {
                           ConsumoRepository consumoRepository,
                           PlanProduccionRepository planProduccionRepository,
                           InventarioService inventarioService,
-                          CalculadoraEficienciaService calculadoraEficienciaService) {
+                          CalculadoraEficienciaService calculadoraEficienciaService,
+                          AlertaService alertaService) {
         this.detallePlanRepository = detallePlanRepository;
         this.recetaRepository = recetaRepository;
         this.detalleRecetaRepository = detalleRecetaRepository;
@@ -92,6 +97,7 @@ public class ConsumoService {
         this.planProduccionRepository = planProduccionRepository;
         this.inventarioService = inventarioService;
         this.calculadoraEficienciaService = calculadoraEficienciaService;
+        this.alertaService = alertaService;
     }
 
     /**
@@ -212,7 +218,8 @@ public class ConsumoService {
      *
      * @param idDetallePlan identificador de la línea del plan
      * @param req           materia prima y cantidad real consumida
-     * @return el consumo registrado con su eficiencia, su desviación y el efecto en inventario
+     * @return el consumo registrado con su eficiencia, su desviación, el efecto en inventario y
+     *         las alertas de stock de la materia prima tras el descuento (CA-03; vacías si no hay)
      * @throws DetallePlanInexistenteException si la línea no existe (404)
      * @throws ConflictoNegocioException       si el plan no está en proceso, la materia prima no
      *                                          existe o está inactiva, el consumo ya existe o el
@@ -278,7 +285,8 @@ public class ConsumoService {
                 .orElseThrow(() -> new IllegalStateException(
                         "No se encontró el consumo " + idConsumo + " recién insertado."));
 
-        return aResponse(guardado, cantidadTeorica, cantidadReal, saldos);
+        return aResponse(guardado, cantidadTeorica, cantidadReal, saldos,
+                alertasTrasMovimiento(req.idMateriaPrima(), saldos));
     }
 
     /**
@@ -309,7 +317,8 @@ public class ConsumoService {
      *
      * @param idConsumo identificador del consumo a corregir
      * @param req       nueva cantidad real, mayor o igual que cero
-     * @return el consumo corregido con su eficiencia, su desviación y el efecto del ajuste
+     * @return el consumo corregido con su eficiencia, su desviación, el efecto del ajuste y las
+     *         alertas de stock de la materia prima tras el ajuste (CA-03; vacías si no hay)
      * @throws RecursoNoEncontradoException si el consumo no existe (404)
      * @throws ConflictoNegocioException    si el plan no está {@code EN_PROCESO} o el ajuste al alza
      *                                      agota el stock (409)
@@ -367,7 +376,8 @@ public class ConsumoService {
                 .orElseThrow(() -> new IllegalStateException(
                         "No se encontró el consumo " + idConsumo + " actualizado."));
 
-        return aResponse(guardado, guardado.getCantidadTeorica(), cantidadNueva, saldos);
+        return aResponse(guardado, guardado.getCantidadTeorica(), cantidadNueva, saldos,
+                alertasTrasMovimiento(consumo.getIdMateriaPrima(), saldos));
     }
 
     /**
@@ -407,7 +417,7 @@ public class ConsumoService {
 
         var contenido = filas.stream()
                 .map(fila -> aResponse(fila, fila.getCantidadTeorica(), fila.getCantidadReal(),
-                        null))
+                        null, null))
                 .toList();
 
         return PageResponse.of(contenido, orden.page(), orden.size(), total);
@@ -457,10 +467,13 @@ public class ConsumoService {
      * @param cantidadTeorica cantidad teórica que se muestra
      * @param cantidadReal    cantidad real que se muestra
      * @param saldos          saldos del movimiento de inventario, o {@code null} si no hubo
-     * @return la respuesta con eficiencia, desviación, fuera de receta e inventario
+     * @param alertas         alertas de stock tras el movimiento, o {@code null} para omitir el
+     *                        campo (listado)
+     * @return la respuesta con eficiencia, desviación, fuera de receta, inventario y alertas
      */
     private ConsumoResponse aResponse(ConsumoMateriaPrima consumo, BigDecimal cantidadTeorica,
-                                      BigDecimal cantidadReal, SaldosInventario saldos) {
+                                      BigDecimal cantidadReal, SaldosInventario saldos,
+                                      List<AlertaStockResponse> alertas) {
         var inventario = saldos == null ? null
                 : new InventarioConsumoResponse(saldos.anterior(), saldos.posterior());
 
@@ -476,7 +489,22 @@ public class ConsumoService {
                 calculadoraEficienciaService.desviacion(cantidadTeorica, cantidadReal),
                 cantidadTeorica.signum() == 0,
                 consumo.getFechaRegistro(),
-                inventario);
+                inventario,
+                alertas);
+    }
+
+    /**
+     * Alerta de stock de la materia prima afectada, consultada DESPUÉS del descuento o la
+     * corrección y en la misma transacción, de modo que ve el saldo ya movido (HU-23 CA-03). Es
+     * informativa: nunca bloquea. Sin movimiento de inventario no se consulta y la lista queda
+     * vacía; con saldo igual al mínimo la vista no marca alerta y también queda vacía.
+     */
+    private List<AlertaStockResponse> alertasTrasMovimiento(Integer idMateriaPrima,
+                                                            SaldosInventario saldos) {
+        if (saldos == null) {
+            return List.of();
+        }
+        return alertaService.alertaDeMateriaPrima(idMateriaPrima).stream().toList();
     }
 
     /**

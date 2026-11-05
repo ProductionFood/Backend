@@ -1,0 +1,4954 @@
+{
+  "info": {
+    "_postman_id": "hu23-actualizacion-inventario",
+    "name": "ProductionFood - HU-23 Actualización de inventario por producción",
+    "description": "HU-23 no tiene endpoints propios (R-01): es el comportamiento transaccional de POST /api/v1/detalles-plan/{id}/consumos y PUT /api/v1/consumos/{id} (HU-22) más GET /api/v1/inventario/alertas (HU-27). Esta colección verifica CA-01 (descuento y kardex), CA-02 (fecha_actualizacion), CA-03 (alertas[] en las respuestas) y CA-04 (atomicidad). Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles y el usuario inactivo, la unidad, el proveedor, 15 materias primas con stock por una compra recibida, el producto, la receta y un plan EN_PROCESO con 11 líneas; 'Casos (CP-01…CP-23)' ejecuta los casos; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren autorización en los tres endpoints. Parciales: CP-03 y CP-11 (un ingrediente por POST), CP-12 (requiere triggers de fallo por SQL), CP-05 y CP-21 (la comprobación completa es SQL, anotada en la descripción); CP-14 dispara dos peticiones simultáneas con pm.sendRequest. Ejecutar la colección completa una vez por base: los saldos esperados parten de materias primas creadas en la Preparación.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Preparación",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Obtiene el token de ADMIN, prepara sufijo y fechas y construye `tokenExpirado` (exp pasado, firma inválida).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('fechaHoy', iso(new Date()));",
+                  "pm.collectionVariables.set('abrev', 'u' + String(Date.now()).slice(-6));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenAdmin', j.token);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(j.usuario.rol).to.eql(\"ADMIN\"));",
+                  "// token vencido y con firma inválida (SEC-03), construido en el sandbox",
+                  "const b64 = (s) => CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(s)).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "pm.collectionVariables.set('tokenExpirado', b64('{\"alg\":\"HS384\"}') + '.' + b64('{\"sub\":\"admin@productionfood.local\",\"iat\":1700000000,\"exp\":1700003600}') + '.AAAA');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-23 PRODUCCION {{sufijo}}\",\n  \"correo\": \"hu23-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu23-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenProduccion', j.token);",
+                  "pm.test(\"rol PRODUCCION\", () => pm.expect(j.usuario.rol).to.eql(\"PRODUCCION\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-23 COMPRAS {{sufijo}}\",\n  \"correo\": \"hu23-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu23-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenCompras', j.token);",
+                  "pm.test(\"rol COMPRAS\", () => pm.expect(j.usuario.rol).to.eql(\"COMPRAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-23 VENTAS {{sufijo}}\",\n  \"correo\": \"hu23-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu23-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenVentas', j.token);",
+                  "pm.test(\"rol VENTAS\", () => pm.expect(j.usuario.rol).to.eql(\"VENTAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-23 CONSULTA {{sufijo}}\",\n  \"correo\": \"hu23-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu23-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenConsulta', j.token);",
+                  "pm.test(\"rol CONSULTA\", () => pm.expect(j.usuario.rol).to.eql(\"CONSULTA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario INACTIVO → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-23 INACTIVO {{sufijo}}\",\n  \"correo\": \"hu23-inactivo-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('idUsuarioInactivo', pm.response.json().idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login INACTIVO (antes de desactivar) → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu23-inactivo-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('tokenInactivo', pm.response.json().token);",
+                  "pm.collectionVariables.set('idUsuarioInactivo', pm.response.json().usuario.idUsuario);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar usuario INACTIVO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios/{{idUsuarioInactivo}}/estado"
+            },
+            "description": "El token guardado queda asociado a un usuario inactivo: SEC-05 espera 403 USUARIO_INACTIVO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear unidad de medida → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/unidades-medida"
+            },
+            "description": "Si la base ya tiene una unidad que prefieras, omite este paso y pon su id en `idUnidad`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Unidad HU-23 {{sufijo}}\",\n  \"abreviatura\": \"{{abrev}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idUnidad', pm.response.json().idUnidad);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear proveedor → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/proveedores"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Proveedor HU-23 {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idProveedor', pm.response.json().idProveedor);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP HARINA → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 50; stock inicial 112.50 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 Harina HU-23 {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 50,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_HARINA', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP BAJO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 50; stock inicial 62.50 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP bajo mínimo {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 50,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_BAJO', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP AGOTA → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 3.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP que se agota {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_AGOTA', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP EXACTO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 50; stock inicial 60.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP en el mínimo {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 50,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_EXACTO', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP REDOND → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 200.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP redondeo {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_REDOND', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP ACUM → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 50.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP redondeo acumulado {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_ACUM', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP PERF → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 100.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP rendimiento {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_PERF', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP CONC → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 10.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP concurrencia {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_CONC', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP ROLES → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 100.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP matriz de roles {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_ROLES', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP CORR → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 100.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP seguridad {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_CORR', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP R1 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 100.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP varios 1 {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_R1', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP R2 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 100.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP varios 2 {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_R2', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP R3 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 100.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP varios 3 {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_R3', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP NOSTOCK → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial 1.00 por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP casi sin stock {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_NOSTOCK', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear MP NOINV → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materias-primas"
+            },
+            "description": "Stock mínimo 1; stock inicial ninguno (nunca se recibe: sin movimientos) por la compra recibida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"HU23 MP sin recepción {{sufijo}}\",\n  \"idUnidad\": {{idUnidad}},\n  \"stockMinimo\": 1,\n  \"costoUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('mp_NOINV', pm.response.json().idMateriaPrima);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear compra → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProveedor\": {{idProveedor}},\n  \"fecha\": \"{{fechaHoy}}\",\n  \"estado\": \"PENDIENTE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idCompra', pm.response.json().idCompra);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra HARINA (112.50) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_HARINA}},\n  \"cantidad\": 112.50,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra BAJO (62.50) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_BAJO}},\n  \"cantidad\": 62.50,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra AGOTA (3.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_AGOTA}},\n  \"cantidad\": 3.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra EXACTO (60.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_EXACTO}},\n  \"cantidad\": 60.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra REDOND (200.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_REDOND}},\n  \"cantidad\": 200.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra ACUM (50.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidad\": 50.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra PERF (100.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidad\": 100.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra CONC (10.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CONC}},\n  \"cantidad\": 10.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra ROLES (100.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ROLES}},\n  \"cantidad\": 100.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra CORR (100.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidad\": 100.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra R1 (100.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_R1}},\n  \"cantidad\": 100.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra R2 (100.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_R2}},\n  \"cantidad\": 100.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra R3 (100.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_R3}},\n  \"cantidad\": 100.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de compra NOSTOCK (1.00) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_NOSTOCK}},\n  \"cantidad\": 1.00,\n  \"precioUnitario\": 1000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recibir compra (entrada de stock) → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/compras/{{idCompra}}/estado"
+            },
+            "description": "Genera el stock inicial de cada materia prima.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"RECIBIDA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"RECIBIDA\", () => pm.expect(pm.response.json().estado).to.eql(\"RECIBIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear producto → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/productos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pan HU-23 {{sufijo}}\",\n  \"descripcion\": \"Producto de prueba HU-23\",\n  \"precio\": 1200,\n  \"idUnidad\": {{idUnidad}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idProducto', pm.response.json().idProducto);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear receta → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/recetas"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"nombre\": \"Receta HU-23 {{sufijo}}\",\n  \"cantidadProducir\": 10,\n  \"idUnidad\": {{idUnidad}},\n  \"detalles\": [ { \"idMateriaPrima\": {{mp_HARINA}}, \"cantidad\": 2.5 } ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan de producción → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaHoy}}\",\n  \"observaciones\": \"Plan QA HU-23 {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idPlan', pm.response.json().idPlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea L0 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_L0', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A1 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A1', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A2 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A2', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A3 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A3', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A4 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A4', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A5 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A5', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A6 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A6', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A7 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A7', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A8 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A8', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A9 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A9', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea A10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "description": "Las líneas A1…A10 permiten repetir una misma materia prima (la pareja línea + materia prima no puede repetirse).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('linea_A10', pm.response.json().idDetallePlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar consumo previo para la matriz PUT (A5) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A5}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ROLES}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idConsumoPutAdmin', pm.response.json().idConsumo);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar consumo previo para la matriz PUT (A6) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A6}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ROLES}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('idConsumoPutProd', pm.response.json().idConsumo);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Casos (CP-01…CP-23)",
+      "item": [
+        {
+          "name": "CP-04 (previo) Anotar fecha_actualizacion → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_HARINA}}"
+            },
+            "description": "Guarda la fecha de la última actualización antes del consumo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('fechaInvAntes', pm.response.json().fechaActualizacion);",
+                  "pm.test(\"saldo inicial 112.50\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(112.5));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-01 Descuenta el inventario → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "CA-01. Consume 16.200 de un saldo de 112.50. CP-08: queda 96.30 con mínimo 50, `alertas: []`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_HARINA}},\n  \"cantidadReal\": 16.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idConsumoHarina', j.idConsumo);",
+                  "pm.test(\"saldo anterior 112.50\", () => pm.expect(j.inventario.anterior).to.eql(112.5));",
+                  "pm.test(\"saldo posterior 96.30\", () => pm.expect(j.inventario.posterior).to.eql(96.3));",
+                  "pm.test(\"CP-08 sin alerta por encima del mínimo\", () => pm.expect(j.alertas).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Movimiento SALIDA_PRODUCCION en el kardex → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_HARINA}}/movimientos?page=0&size=1"
+            },
+            "description": "CA-01. El movimiento más reciente es la salida del consumo recién registrado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var m = pm.response.json().content[0];",
+                  "pm.test(\"SALIDA_PRODUCCION\", () => pm.expect(m.tipo).to.eql(\"SALIDA_PRODUCCION\"));",
+                  "pm.test(\"origen consumo_materia_prima\", () => { pm.expect(m.origen.tabla).to.eql(\"consumo_materia_prima\"); pm.expect(m.origen.id).to.eql(Number(pm.collectionVariables.get('idConsumoHarina'))); });",
+                  "pm.test(\"saldos 112.50 → 96.30\", () => { pm.expect(m.saldoAnterior).to.eql(112.5); pm.expect(m.saldoPosterior).to.eql(96.3); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 La fecha_actualizacion cambia sola → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_HARINA}}"
+            },
+            "description": "CA-02. La fecha la mantiene la base (`ON UPDATE CURRENT_TIMESTAMP`)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"saldo 96.30\", () => pm.expect(j.cantidadDisponible).to.eql(96.3));",
+                  "pm.test(\"fecha posterior a la anotada\", () => pm.expect(j.fechaActualizacion > pm.collectionVariables.get(\"fechaInvAntes\")).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 La fecha la pone la base (ver descripción) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_HARINA}}"
+            },
+            "description": "Verificación SQL (no se puede por API): `SHOW CREATE TABLE inventario;` debe mostrar `fecha_actualizacion ... DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`. Aquí solo se comprueba que el valor existe."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"fechaActualizacion presente\", () => pm.expect(pm.response.json().fechaActualizacion).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 (parte 1/3) Varios ingredientes: MP 1 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "PARCIAL: el contrato admite UN ingrediente por POST. CP-03 se ejecuta como tres POST independientes; la atomicidad conjunta se prueba en la prueba de integración agrupando llamadas en una transacción del llamador.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_R1}},\n  \"cantidadReal\": 10.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"100.00 → 90.00\", () => { pm.expect(j.inventario.anterior).to.eql(100); pm.expect(j.inventario.posterior).to.eql(90); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 (parte 2/3) MP 2 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_R2}},\n  \"cantidadReal\": 10.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"100.00 → 90.00\", () => { pm.expect(j.inventario.anterior).to.eql(100); pm.expect(j.inventario.posterior).to.eql(90); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 (parte 3/3) MP 3 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_R3}},\n  \"cantidadReal\": 10.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"100.00 → 90.00\", () => { pm.expect(j.inventario.anterior).to.eql(100); pm.expect(j.inventario.posterior).to.eql(90); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 y CP-09 Alerta BAJO y no bloquea → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "CA-03. Queda 46.30 con mínimo 50. CP-09: la alerta es informativa, la respuesta es 201 y el consumo queda registrado. `alertas[]` trae el objeto completo de HU-27.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_BAJO}},\n  \"cantidadReal\": 16.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"62.50 → 46.30\", () => { pm.expect(j.inventario.anterior).to.eql(62.5); pm.expect(j.inventario.posterior).to.eql(46.3); });",
+                  "pm.test(\"una alerta BAJO\", () => { pm.expect(j.alertas.length).to.eql(1); pm.expect(j.alertas[0].nivel).to.eql(\"BAJO\"); });",
+                  "pm.test(\"faltante 3.70\", () => pm.expect(j.alertas[0].faltante).to.eql(3.7));",
+                  "pm.test(\"alerta de la MP consumida\", () => { pm.expect(j.alertas[0].idMateriaPrima).to.eql(Number(pm.collectionVariables.get('mp_BAJO'))); pm.expect(j.alertas[0].cantidadDisponible).to.eql(46.3); pm.expect(j.alertas[0].stockMinimo).to.eql(50); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Alerta AGOTADO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_AGOTA}},\n  \"cantidadReal\": 3.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"saldo 0.00\", () => pm.expect(j.inventario.posterior).to.eql(0));",
+                  "pm.test(\"AGOTADO con faltante 1.00\", () => { pm.expect(j.alertas[0].nivel).to.eql(\"AGOTADO\"); pm.expect(j.alertas[0].faltante).to.eql(1); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 Saldo igual al mínimo: sin alerta → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "Borde: 60.00 − 10.00 = 50.00 con mínimo 50.00; no está por debajo, no hay alerta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_EXACTO}},\n  \"cantidadReal\": 10.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"saldo 50.00 = mínimo\", () => pm.expect(j.inventario.posterior).to.eql(50));",
+                  "pm.test(\"sin alertas\", () => pm.expect(j.alertas).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 (parte 1) Ingrediente sin stock → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "PARCIAL: con un ingrediente por POST. Rechaza con 409 y no deja efectos; el rollback de varios ingredientes se prueba en la prueba de integración. Las dos peticiones siguientes comprueban que no hubo efectos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_NOSTOCK}},\n  \"cantidadReal\": 5.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code STOCK_INSUFICIENTE\", () => pm.expect(pm.response.json().code).to.eql(\"STOCK_INSUFICIENTE\"));",
+                  "pm.test(\"message con las cifras\", () => pm.expect(pm.response.json().message).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 (parte 2) El saldo no cambió → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_NOSTOCK}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"sigue en 1.00\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 El kardex no queda huérfano → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_NOSTOCK}}/movimientos?size=20"
+            },
+            "description": "SQL equivalente: `SELECT m.id_movimiento FROM movimientos_inventario_mp m LEFT JOIN consumo_materia_prima c ON c.id_consumo = m.id_origen WHERE m.tabla_origen = 'consumo_materia_prima' AND c.id_consumo IS NULL;` debe devolver 0 filas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var c = pm.response.json().content;",
+                  "pm.test(\"solo la entrada de compra, sin SALIDA_PRODUCCION\", () => pm.expect(c.filter(m => m.tipo === \"SALIDA_PRODUCCION\").length).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 Rollback ante fallo posterior (ver descripción) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_NOSTOCK}}"
+            },
+            "description": "NO APLICABLE desde Postman: requiere SQL. Se verificó en el QA inyectando un trigger de fallo en `consumo_materia_prima` y otro en `movimientos_inventario_mp`: el POST (y el PUT) responden 500 ERROR_INTERNO y el saldo, el kardex y los consumos quedan idénticos. Aquí solo se comprueba que el inventario sigue intacto tras los rechazos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"inventario intacto\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Concurrencia: dos consumos, stock para uno → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_CONC}}"
+            },
+            "description": "Dispara dos POST simultáneos (líneas A1 y A2, misma materia prima, saldo 10.00, cada uno pide 6). Esperado: un 201 y un 409; el saldo queda en 4.00 (nunca negativo). La petición siguiente lo verifica. Para más carga usar el Runner o `ab`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "const base = pm.collectionVariables.get('baseUrl') + '/api/v1/detalles-plan/';\nconst tk = pm.collectionVariables.get('tokenAdmin');\nconst mp = Number(pm.collectionVariables.get('mp_CONC'));\nconst lineas = [pm.collectionVariables.get('linea_A1'), pm.collectionVariables.get('linea_A2')];\nconst codes = [];\nlineas.forEach((l) => {\n  pm.sendRequest({ url: base + l + '/consumos', method: 'POST',\n    header: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },\n    body: { mode: 'raw', raw: JSON.stringify({ idMateriaPrima: mp, cantidadReal: 6 }) } },\n    (err, res) => {\n      codes.push(err ? 0 : res.code);\n      if (codes.length === lineas.length) {\n        pm.test(\"CP-14 un 201 y un 409\", () => pm.expect(codes.slice().sort()).to.eql([201, 409]));\n      }\n    });\n});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 (verificación) Saldo 4.00, nunca negativo → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_CONC}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"saldo 4.00\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(4));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 El stock nunca queda negativo → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario?page=0&size=100"
+            },
+            "description": "SQL: `SELECT id_materia_prima, cantidad_disponible FROM inventario WHERE cantidad_disponible < 0;` debe devolver 0 filas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ninguna fila negativa\", () => pm.expect(pm.response.json().content.filter(r => r.cantidadDisponible < 0).length).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Stock insuficiente con ambas cifras → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A1}}/consumos"
+            },
+            "description": "Pide 200 con 96.30 disponibles. Las cifras van en el `message` (no hay `detalle` estructurado).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_HARINA}},\n  \"cantidadReal\": 200.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code STOCK_INSUFICIENTE\", () => pm.expect(pm.response.json().code).to.eql(\"STOCK_INSUFICIENTE\"));",
+                  "pm.test(\"message con disponible y requerido\", () => { var m = pm.response.json().message; pm.expect(m).to.include(\"96\"); pm.expect(m).to.include(\"200\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 Redondeo HALF_UP 16.205 → 16.21 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A1}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_REDOND}},\n  \"cantidadReal\": 16.205\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"200.00 → 183.79\", () => { pm.expect(j.inventario.anterior).to.eql(200); pm.expect(j.inventario.posterior).to.eql(183.79); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 Redondeo hacia abajo 16.204 → 16.20 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A2}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_REDOND}},\n  \"cantidadReal\": 16.204\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"183.79 → 167.59\", () => { pm.expect(j.inventario.anterior).to.eql(183.79); pm.expect(j.inventario.posterior).to.eql(167.59); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 1/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A1}}/consumos"
+            },
+            "description": "Diez consumos de 0.005: cada uno baja 0.01 (HALF_UP), el total baja 0.10 aunque `cantidad_real` sume 0.050 (sesgo documentado, R-08).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('saldoAcumInicial', j.inventario.anterior);",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 2/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A2}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 3/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A3}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 4/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A4}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 5/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A5}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 6/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A6}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 7/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A7}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 8/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A8}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 9/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A9}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Redondeo acumulado 10/10 (0.005) → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A10}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ACUM}},\n  \"cantidadReal\": 0.005\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"baja 0.01 (0.005 con HALF_UP)\", () => pm.expect(Math.round(j.inventario.anterior - j.inventario.posterior * 100) / 100).to.eql(0.01));",
+                  "pm.test(\"CP-19 total descontado 0.10, sin deriva\", () => pm.expect(Math.round(Number(pm.collectionVariables.get('saldoAcumInicial')) - j.inventario.posterior * 100) / 100).to.eql(0.1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-20 Materia prima sin inventario → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "La materia prima nunca recibió stock. Responde 409 STOCK_INSUFICIENTE (contrato de HU-22), no el 500 INVENTARIO_NO_INICIALIZADO de la especificación. Para probar la ausencia real de fila: `DELETE FROM inventario WHERE id_materia_prima = <id>` en una base aislada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_NOINV}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"code STOCK_INSUFICIENTE\", () => pm.expect(pm.response.json().code).to.eql(\"STOCK_INSUFICIENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 Corregir consumo ajusta por diferencia → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "description": "De 16.2 a 19.2: se descuentan 3.00 más con un solo movimiento. El PUT también devuelve `alertas[]`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 19.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"96.30 → 93.30\", () => { pm.expect(j.inventario.anterior).to.eql(96.3); pm.expect(j.inventario.posterior).to.eql(93.3); });",
+                  "pm.test(\"alertas presente\", () => pm.expect(j.alertas).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 1/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A1}}/consumos"
+            },
+            "description": "RNF-02: diez registros secuenciales (QA: 0,12 s en total).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (false ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 2/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A2}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 3/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A3}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 4/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A4}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 5/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A5}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 6/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A6}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 7/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A7}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 8/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A8}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 9/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A9}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Rendimiento 10/10 → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A10}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_PERF}},\n  \"cantidadReal\": 1.000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"CP-23 < 2 s\", () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.collectionVariables.set('tiempoPerf', (true ? Number(pm.collectionVariables.get('tiempoPerf')) : 0) + pm.response.responseTime);",
+                  "pm.test(\"CP-23 los 10 consumos suman menos de 2 s\", () => pm.expect(Number(pm.collectionVariables.get(\"tiempoPerf\"))).to.be.below(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 Conciliación kardex ↔ saldo (HARINA) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_HARINA}}/movimientos?page=0&size=1"
+            },
+            "description": "Conciliación completa (SQL de la tarea de QA §3): la consulta que compara `inventario.cantidad_disponible` con el `saldo_posterior` del último movimiento debe devolver 0 filas. Aquí se guarda el saldo del kardex y la petición siguiente lo compara."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('saldoKardexHarina', pm.response.json().content[0].saldoPosterior);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 (comparación) Saldo de inventario = último saldo del kardex → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_HARINA}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"coinciden\", () => pm.expect(pm.response.json().cantidadDisponible).to.eql(Number(pm.collectionVariables.get(\"saldoKardexHarina\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 (comparación) Conciliación de MP con redondeos → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/{{mp_REDOND}}/movimientos?page=0&size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('saldoKardexRedond', pm.response.json().content[0].saldoPosterior);",
+                  "pm.test(\"167.59\", () => pm.expect(pm.response.json().content[0].saldoPosterior).to.eql(167.59));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "item": [
+        {
+          "name": "POST /detalles-plan/{id}/consumos con ADMIN → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A3}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ROLES}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"trae alertas[]\", () => pm.expect(pm.response.json().alertas).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{id}/consumos con PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_A4}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_ROLES}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"trae alertas[]\", () => pm.expect(pm.response.json().alertas).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{id}/consumos con COMPRAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{id}/consumos con VENTAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{id}/consumos con CONSULTA → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con ADMIN → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoPutAdmin}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"trae alertas[]\", () => pm.expect(pm.response.json().alertas).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con PRODUCCION → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoPutProd}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"trae alertas[]\", () => pm.expect(pm.response.json().alertas).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con COMPRAS → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con VENTAS → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con CONSULTA → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /inventario/alertas con ADMIN → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /inventario/alertas con PRODUCCION → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /inventario/alertas con COMPRAS → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /inventario/alertas con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /inventario/alertas con CONSULTA → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "item": [
+        {
+          "name": "SEC-01 POST registrar sin token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 PUT corregir sin token → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET alertas sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 POST registrar token malformado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer xxx.malformado"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 PUT corregir token malformado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer xxx.malformado"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET alertas token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer xxx.malformado"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 POST registrar token expirado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "`tokenExpirado` lo construye el login de ADMIN (exp pasado y firma inválida). El backend responde 401 igual que con cualquier token inválido: no distingue «caducado» de «firma inválida».",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 PUT corregir token expirado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "description": "`tokenExpirado` lo construye el login de ADMIN (exp pasado y firma inválida). El backend responde 401 igual que con cualquier token inválido: no distingue «caducado» de «firma inválida».",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET alertas token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "`tokenExpirado` lo construye el login de ADMIN (exp pasado y firma inválida). El backend responde 401 igual que con cualquier token inválido: no distingue «caducado» de «firma inválida»."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"code NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 POST registrar rol sin permiso → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "description": "VENTAS no tiene permiso sobre este endpoint (en POST/PUT tampoco CONSULTA ni COMPRAS; ver la matriz de roles).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 PUT corregir rol sin permiso → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "description": "VENTAS no tiene permiso sobre este endpoint (en POST/PUT tampoco CONSULTA ni COMPRAS; ver la matriz de roles).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET alertas rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "VENTAS no tiene permiso sobre este endpoint (en POST/PUT tampoco CONSULTA ni COMPRAS; ver la matriz de roles)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 POST registrar usuario inactivo → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{linea_L0}}/consumos"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{mp_CORR}},\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 PUT corregir usuario inactivo → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoHarina}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.010\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET alertas usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"code USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioInactivo",
+      "value": ""
+    },
+    {
+      "key": "abrev",
+      "value": ""
+    },
+    {
+      "key": "idUnidad",
+      "value": ""
+    },
+    {
+      "key": "idProveedor",
+      "value": ""
+    },
+    {
+      "key": "fechaHoy",
+      "value": ""
+    },
+    {
+      "key": "idCompra",
+      "value": ""
+    },
+    {
+      "key": "mp_HARINA",
+      "value": ""
+    },
+    {
+      "key": "mp_BAJO",
+      "value": ""
+    },
+    {
+      "key": "mp_AGOTA",
+      "value": ""
+    },
+    {
+      "key": "mp_EXACTO",
+      "value": ""
+    },
+    {
+      "key": "mp_REDOND",
+      "value": ""
+    },
+    {
+      "key": "mp_ACUM",
+      "value": ""
+    },
+    {
+      "key": "mp_PERF",
+      "value": ""
+    },
+    {
+      "key": "mp_CONC",
+      "value": ""
+    },
+    {
+      "key": "mp_ROLES",
+      "value": ""
+    },
+    {
+      "key": "mp_CORR",
+      "value": ""
+    },
+    {
+      "key": "mp_R1",
+      "value": ""
+    },
+    {
+      "key": "mp_R2",
+      "value": ""
+    },
+    {
+      "key": "mp_R3",
+      "value": ""
+    },
+    {
+      "key": "mp_NOSTOCK",
+      "value": ""
+    },
+    {
+      "key": "idProducto",
+      "value": ""
+    },
+    {
+      "key": "idPlan",
+      "value": ""
+    },
+    {
+      "key": "linea_A5",
+      "value": ""
+    },
+    {
+      "key": "linea_A6",
+      "value": ""
+    },
+    {
+      "key": "linea_L0",
+      "value": ""
+    },
+    {
+      "key": "linea_A1",
+      "value": ""
+    },
+    {
+      "key": "linea_A2",
+      "value": ""
+    },
+    {
+      "key": "linea_A3",
+      "value": ""
+    },
+    {
+      "key": "linea_A4",
+      "value": ""
+    },
+    {
+      "key": "linea_A7",
+      "value": ""
+    },
+    {
+      "key": "linea_A8",
+      "value": ""
+    },
+    {
+      "key": "linea_A9",
+      "value": ""
+    },
+    {
+      "key": "linea_A10",
+      "value": ""
+    },
+    {
+      "key": "mp_NOINV",
+      "value": ""
+    },
+    {
+      "key": "idConsumoHarina",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "idConsumoPutAdmin",
+      "value": ""
+    },
+    {
+      "key": "idConsumoPutProd",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "saldoAcumInicial",
+      "value": ""
+    },
+    {
+      "key": "tiempoPerf",
+      "value": ""
+    },
+    {
+      "key": "fechaInvAntes",
+      "value": ""
+    },
+    {
+      "key": "saldoKardexHarina",
+      "value": ""
+    },
+    {
+      "key": "saldoKardexRedond",
+      "value": ""
+    }
+  ]
+}

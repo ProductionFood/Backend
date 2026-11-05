@@ -106,6 +106,45 @@ class AlertaRepositoryTest {
     }
 
     @Test
+    @DisplayName("HU-23 CA-03: buscarAlertaPorMateriaPrima devuelve BAJO con sus cantidades")
+    void buscaLaAlertaBajoDeUnaMateriaPrima() {
+        var id = sembrar("uno-bajo", "20.00", "4.50", true);
+
+        assertThat(repository.buscarAlertaPorMateriaPrima(id)).hasValueSatisfying(fila -> {
+            assertThat(fila.idMateriaPrima()).isEqualTo(id);
+            assertThat(fila.nivel()).isEqualTo("BAJO");
+            assertThat(fila.cantidadDisponible()).isEqualByComparingTo("4.50");
+            assertThat(fila.stockMinimo()).isEqualByComparingTo("20.00");
+            assertThat(fila.faltante()).isEqualByComparingTo("15.50");
+        });
+    }
+
+    @Test
+    @DisplayName("HU-23 CA-03: buscarAlertaPorMateriaPrima devuelve AGOTADO cuando no queda saldo")
+    void buscaLaAlertaAgotadoDeUnaMateriaPrima() {
+        var id = sembrar("uno-agotado", "20.00", "0.00", true);
+
+        assertThat(repository.buscarAlertaPorMateriaPrima(id))
+                .hasValueSatisfying(fila -> assertThat(fila.nivel()).isEqualTo("AGOTADO"));
+    }
+
+    @Test
+    @DisplayName("HU-23 CA-03: con saldo igual al mínimo o mayor la consulta no devuelve alerta")
+    void sinAlertaCuandoElSaldoIgualaOSuperaElMinimo() {
+        var igual = sembrar("uno-igual", "20.00", "20.00", true);
+        var holgado = sembrar("uno-holgado", "20.00", "35.00", true);
+
+        assertThat(repository.buscarAlertaPorMateriaPrima(igual)).isEmpty();
+        assertThat(repository.buscarAlertaPorMateriaPrima(holgado)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("HU-23 CA-03: una materia prima inexistente no devuelve alerta")
+    void materiaPrimaInexistenteNoDevuelveAlerta() {
+        assertThat(repository.buscarAlertaPorMateriaPrima(Integer.MAX_VALUE)).isEmpty();
+    }
+
+    @Test
     @DisplayName("R-03: AGOTADO va antes que BAJO aunque su faltante sea menor")
     void agotadoVaAntesQueBajoAunqueFalteMenos() {
         var bajo = sembrar("bajo", "100.00", "40.00", true);
