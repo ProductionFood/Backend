@@ -1,0 +1,4205 @@
+{
+  "info": {
+    "_postman_id": "hu22-consumo-materia-prima",
+    "name": "ProductionFood - HU-22 Consumo de materia prima",
+    "description": "Casos de la HU-22 (consumo de materia prima): GET /api/v1/planes-produccion/{idPlan}/consumos (paginado con orden por producto, materiaPrima, cantidadTeorica, cantidadReal o fechaRegistro), GET /api/v1/detalles-plan/{idDetallePlan}/consumo-teorico, POST .../consumos y PUT /api/v1/consumos/{id}. Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles, guarda sus tokens y prepara los planes de cada caso; 'Teórico y listado' consulta el contrato de lectura; 'Consumos (CP-01…CP-24)' ejecuta los casos funcionales; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren autorización. CP-05 y CP-17 son verificaciones SQL anotadas en la descripción de su request. SEC-03 y SEC-05 necesitan que rellenes a mano `tokenExpirado` y `tokenInactivo`. Los ids 1 de producto, receta y materia prima y el nombre 'Pan de prueba' corresponden al smoke documentado; ajusta las variables si tu base difiere.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Preparación",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Obtiene el token de ADMIN y prepara el sufijo y las fechas de la ejecución.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const hoy = new Date();",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('fechaHoy', iso(hoy));",
+                  "const futura = new Date(hoy); futura.setDate(futura.getDate() + 7);",
+                  "pm.collectionVariables.set('fechaFutura', iso(futura));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenAdmin', j.token);",
+                  "pm.collectionVariables.set('token', j.token);",
+                  "pm.collectionVariables.set('idUsuarioAdmin', j.usuario.idUsuario);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(j.usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol PRODUCCION (idRol 2).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-22 PRODUCCION {{sufijo}}\",\n  \"correo\": \"hu22-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu22-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenProduccion', j.token);",
+                  "pm.collectionVariables.set('idUsuarioProduccion', j.usuario.idUsuario);",
+                  "pm.test(\"rol PRODUCCION\", () => pm.expect(j.usuario.rol).to.eql(\"PRODUCCION\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol COMPRAS (idRol 3).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-22 COMPRAS {{sufijo}}\",\n  \"correo\": \"hu22-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu22-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenCompras', j.token);",
+                  "pm.collectionVariables.set('idUsuarioCompras', j.usuario.idUsuario);",
+                  "pm.test(\"rol COMPRAS\", () => pm.expect(j.usuario.rol).to.eql(\"COMPRAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol VENTAS (idRol 4).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-22 VENTAS {{sufijo}}\",\n  \"correo\": \"hu22-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu22-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenVentas', j.token);",
+                  "pm.collectionVariables.set('idUsuarioVentas', j.usuario.idUsuario);",
+                  "pm.test(\"rol VENTAS\", () => pm.expect(j.usuario.rol).to.eql(\"VENTAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol CONSULTA (idRol 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-22 CONSULTA {{sufijo}}\",\n  \"correo\": \"hu22-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu22-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenConsulta', j.token);",
+                  "pm.collectionVariables.set('idUsuarioConsulta', j.usuario.idUsuario);",
+                  "pm.test(\"rol CONSULTA\", () => pm.expect(j.usuario.rol).to.eql(\"CONSULTA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan principal → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - principal {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlan', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan principal → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalle', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan principal → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan de eficiencia → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - eficiencia {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanEficiencia', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan de eficiencia → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanEficiencia}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleEficiencia', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan de eficiencia → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanEficiencia}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan de consumo cero → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - consumo cero {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanCero', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan de consumo cero → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanCero}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleCero', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan de consumo cero → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanCero}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan de redondeo → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - redondeo {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanRedondeo', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan de redondeo → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanRedondeo}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleRedondeo', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan de redondeo → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanRedondeo}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan fuera de receta → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - fuera de receta {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanFueraReceta', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan fuera de receta → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanFueraReceta}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleFueraReceta', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan fuera de receta → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanFueraReceta}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan fuera de receta cero → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - fuera de receta cero {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanFueraCero', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan fuera de receta cero → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanFueraCero}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleFueraCero', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan fuera de receta cero → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanFueraCero}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan de stock insuficiente → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - stock insuficiente {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanStock', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan de stock insuficiente → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanStock}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleStock', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan de stock insuficiente → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanStock}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan de inventario → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - inventario {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanInventario', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan de inventario → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanInventario}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 1.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleInventario', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan de inventario → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanInventario}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan PLANIFICADO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - planificado {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanPlanificado', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan PLANIFICADO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanPlanificado}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 10.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetallePlanificado', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan COMPLETADO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - completado {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanCompletado', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea al plan COMPLETADO → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanCompletado}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 10.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetalleCompletado', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan COMPLETADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanCompletado}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Completar plan COMPLETADO → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanCompletado}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"COMPLETADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado COMPLETADO\", () => pm.expect(pm.response.json().estado).to.eql(\"COMPLETADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan matriz POST ADMIN → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - matriz POST ADMIN {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanPostAdmin', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea matriz POST ADMIN → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanPostAdmin}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 10.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetallePostAdmin', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan matriz POST ADMIN → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanPostAdmin}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan matriz POST PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - matriz POST PRODUCCION {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanPostProd', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea matriz POST PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanPostProd}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 10.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetallePostProd', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan matriz POST PRODUCCION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanPostProd}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear plan matriz PUT PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-22 - matriz PUT PRODUCCION {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanPutProd', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Agregar línea matriz PUT PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanPutProd}}/detalles"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idProducto\": {{idProducto}},\n  \"cantidadPlanificada\": 10.00\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idDetallePutProd', j.idDetallePlan);",
+                  "pm.test(\"cantidadProducida 0.00\", () => pm.expect(j.cantidadProducida).to.eql(0));",
+                  "pm.test(\"avance 0.00\", () => pm.expect(j.avance).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar plan matriz PUT PRODUCCION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanPutProd}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar consumo de la matriz PUT PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetallePutProd}}/consumos"
+            },
+            "description": "Deja un consumo de 0.100 en una línea propia para que PRODUCCION pueda ejercer el PUT de la matriz de roles.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idConsumoProd', j.idConsumo);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Teórico y listado",
+      "item": [
+        {
+          "name": "Teórico de la línea principal → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            },
+            "description": "Consulta real del smoke: producto 1, receta que rinde 10.00 con 2.500 kg de la materia prima 1 por tanda, línea de 1.00. El disponible depende de la base."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"idDetallePlan\", () => pm.expect(j.idDetallePlan).to.eql(Number(pm.collectionVariables.get('idDetalle'))));",
+                  "pm.test(\"cantidadPlanificada 1.00\", () => pm.expect(j.cantidadPlanificada).to.eql(1));",
+                  "pm.test(\"recetaRinde 10.00\", () => pm.expect(j.recetaRinde).to.eql(10));",
+                  "pm.test(\"factor 0.100\", () => pm.expect(j.factor).to.eql(0.1));",
+                  "pm.test(\"ingredientes con la harina\", () => pm.expect(j.ingredientes.some(i => i.idMateriaPrima === 1)).to.eql(true));",
+                  "pm.test(\"teórico 0.250\", () => { var i = j.ingredientes.find(x => x.idMateriaPrima === 1); pm.expect(i.teorico).to.eql(0.25); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listado de consumos del plan principal → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20&sort=materiaPrima,asc"
+            },
+            "description": "Listado paginado de los consumos del plan. Después de CP-01 incluye el consumo 97 documentado en la ficha."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"PageResponse\", () => pm.expect(j.content).to.be.an(\"array\"));",
+                  "pm.test(\"page 0 y size 20\", () => { pm.expect(j.page).to.eql(0); pm.expect(j.size).to.eql(20); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Consumos (CP-01…CP-24)",
+      "item": [
+        {
+          "name": "CP-01 Registrar consumo válido → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "CP-01 (CA-01..05): alta válida de 0.300 de la materia prima 1. Guarda `idConsumo`. El inventario baja 0.30; el smoke devolvió 33.33 → 33.03. CP-08, CP-13 y CP-19 se verifican sobre esta misma respuesta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.300\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idConsumo', j.idConsumo);",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/consumos/\"));",
+                  "pm.test(\"idDetallePlan\", () => pm.expect(j.idDetallePlan).to.eql(Number(pm.collectionVariables.get('idDetalle'))));",
+                  "pm.test(\"cantidadTeorica 0.250\", () => pm.expect(j.cantidadTeorica).to.eql(0.25));",
+                  "pm.test(\"cantidadReal 0.300\", () => pm.expect(j.cantidadReal).to.eql(0.3));",
+                  "pm.test(\"eficiencia 83.33\", () => pm.expect(j.eficiencia).to.eql(83.33));",
+                  "pm.test(\"desviación 20.00\", () => pm.expect(j.desviacionPorcentaje).to.eql(20));",
+                  "pm.test(\"fueraDeReceta false\", () => pm.expect(j.fueraDeReceta).to.eql(false));",
+                  "pm.test(\"fechaRegistro del servidor\", () => pm.expect(j.fechaRegistro).to.be.a(\"string\"));",
+                  "pm.test(\"inventario con saldos\", () => { pm.expect(j.inventario.anterior).to.be.a(\"number\"); pm.expect(j.inventario.posterior).to.be.a(\"number\"); });",
+                  "pm.test(\"descuento de 0.30\", () => pm.expect(Math.round((j.inventario.anterior - j.inventario.posterior) * 100) / 100).to.eql(0.3));",
+                  "pm.test(\"CP-08 eficiencia normal\", () => pm.expect(j.eficiencia).to.eql(83.33));",
+                  "pm.test(\"CP-13 desviación normal\", () => pm.expect(j.desviacionPorcentaje).to.eql(20));",
+                  "pm.test(\"CP-19 el inventario se descuenta\", () => pm.expect(Math.round((j.inventario.anterior - j.inventario.posterior) * 100) / 100).to.eql(0.3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 La teórica la calcula el servidor → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalleEficiencia}}/consumos"
+            },
+            "description": "CP-02 (R-01): se inyecta `cantidadTeorica: 999` y el servidor usa 0.250 de la receta. La misma respuesta cubre CP-12: 0.250 de teórico sobre 0.100 de real da eficiencia 250.00 y desviación -60.00.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100,\n  \"cantidadTeorica\": 999\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idConsumoEficiencia', j.idConsumo);",
+                  "pm.test(\"la teórica inyectada se ignora\", () => pm.expect(j.cantidadTeorica).to.eql(0.25));",
+                  "pm.test(\"cantidadReal 0.100\", () => pm.expect(j.cantidadReal).to.eql(0.1));",
+                  "pm.test(\"CP-12 eficiencia 250.00\", () => pm.expect(j.eficiencia).to.eql(250));",
+                  "pm.test(\"CP-12 desviación -60.00\", () => pm.expect(j.desviacionPorcentaje).to.eql(-60));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 Cálculo de la teórica → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            },
+            "description": "CP-03 (CA-03): la receta rinde 10.00 con 2.500 kg por tanda; planificar 1.00 exige 0.250 kg."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"recetaRinde 10.00\", () => pm.expect(j.recetaRinde).to.eql(10));",
+                  "pm.test(\"factor 0.100\", () => pm.expect(j.factor).to.eql(0.1));",
+                  "pm.test(\"teórico 0.250\", () => { var i = j.ingredientes.find(x => x.idMateriaPrima === 1); pm.expect(i.teorico).to.eql(0.25); });",
+                  "pm.test(\"porTanda 2.500\", () => { var i = j.ingredientes.find(x => x.idMateriaPrima === 1); pm.expect(i.porTanda).to.eql(2.5); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 Cantidad real omitida → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "CP-04 (CA-04): sin `cantidadReal` la validación de forma responde 400 antes del servicio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 cantidad_real NOT NULL (ver descripción) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?size=100"
+            },
+            "description": "CP-05 (V2 §C-08, verificación SQL): ejecutar en MySQL\nSHOW CREATE TABLE consumo_materia_prima;\n-- cantidad_real debe ser decimal(10,3) NOT NULL\n-- UNIQUE KEY uk_consumo_mp (id_detalle_plan, id_materia_prima)\n-- CHECK ck_cmp_teorica (cantidad_teorica >= 0) y ck_cmp_real (cantidad_real >= 0)\nUn INSERT directo con cantidad_real NULL debe ser rechazado por la base. Esta petición solo comprueba que el listado sigue respondiendo 200."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 Cantidad real negativa → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "CP-06 (CA-04): un negativo no lleva `@PositiveOrZero` en el DTO; llega al servicio y responde CANTIDAD_INVALIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": -5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"CANTIDAD_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"CANTIDAD_INVALIDA\"));",
+                  "pm.test(\"mensaje\", () => pm.expect(pm.response.json().message).to.eql(\"La cantidad real no puede ser negativa.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 La fecha se asigna sola → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20&sort=fechaRegistro,asc"
+            },
+            "description": "CP-07 (CA-05): la fecha no se envía; la base la asigna con `DEFAULT CURRENT_TIMESTAMP` y el listado la devuelve."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "var c = j.content.find(x => x.idConsumo === Number(pm.collectionVariables.get('idConsumo')));",
+                  "pm.test(\"consumo encontrado\", () => pm.expect(c).to.not.be.undefined);",
+                  "pm.test(\"fechaRegistro del servidor\", () => pm.expect(c.fechaRegistro).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 Eficiencia normal → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?size=20"
+            },
+            "description": "CP-08 (CA-06): 0.250 de teórico sobre 0.300 de real da eficiencia 83.33."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "var c = j.content.find(x => x.idConsumo === Number(pm.collectionVariables.get('idConsumo')));",
+                  "pm.test(\"consumo encontrado\", () => pm.expect(c).to.not.be.undefined);",
+                  "pm.test(\"eficiencia 83.33\", () => pm.expect(c.eficiencia).to.eql(83.33));",
+                  "pm.test(\"cantidadReal 0.300\", () => pm.expect(c.cantidadReal).to.eql(0.3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 División por cero → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalleCero}}/consumos"
+            },
+            "description": "CP-09 (R-03): real cero con teórico 0.250. La eficiencia es null —no Infinity ni error— y la desviación sigue siendo -100.00. No hay movimiento de inventario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"cantidadTeorica 0.250\", () => pm.expect(j.cantidadTeorica).to.eql(0.25));",
+                  "pm.test(\"cantidadReal 0.000\", () => pm.expect(j.cantidadReal).to.eql(0));",
+                  "pm.test(\"eficiencia null\", () => pm.expect(j.eficiencia).to.eql(null));",
+                  "pm.test(\"desviación -100.00\", () => pm.expect(j.desviacionPorcentaje).to.eql(-100));",
+                  "pm.test(\"sin inventario\", () => pm.expect(j).to.not.have.property(\"inventario\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 y CP-18 Ingrediente fuera de receta → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalleFueraReceta}}/consumos"
+            },
+            "description": "CP-10 y CP-18 (R-08): la materia prima 4 (Mantequilla) no está en la receta del producto 1. Se acepta con teórico 0.000, eficiencia 0.00, desviación null y fueraDeReceta true. El smoke devolvió inventario 2.00 → 1.50. Ajustar `idMateriaPrimaFueraReceta` si la base no tiene esa materia prima.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrimaFueraReceta}},\n  \"cantidadReal\": 0.500\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idConsumoFueraReceta', j.idConsumo);",
+                  "pm.test(\"CP-10 teórica cero\", () => pm.expect(j.cantidadTeorica).to.eql(0));",
+                  "pm.test(\"CP-10 eficiencia 0.00\", () => pm.expect(j.eficiencia).to.eql(0));",
+                  "pm.test(\"CP-10 desviación null\", () => pm.expect(j.desviacionPorcentaje).to.eql(null));",
+                  "pm.test(\"CP-18 fueraDeReceta true\", () => pm.expect(j.fueraDeReceta).to.eql(true));",
+                  "pm.test(\"CP-18 inventario 2.00 → 1.50\", () => pm.expect(Math.round((j.inventario.anterior - j.inventario.posterior) * 100) / 100).to.eql(0.5));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 Ambas cantidades cero → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalleFueraCero}}/consumos"
+            },
+            "description": "CP-11: materia prima fuera de receta con real cero. Ni eficiencia ni desviación son calculables y no hay movimiento de inventario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrimaFueraReceta}},\n  \"cantidadReal\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"cantidadTeorica 0.000\", () => pm.expect(j.cantidadTeorica).to.eql(0));",
+                  "pm.test(\"cantidadReal 0.000\", () => pm.expect(j.cantidadReal).to.eql(0));",
+                  "pm.test(\"eficiencia null\", () => pm.expect(j.eficiencia).to.eql(null));",
+                  "pm.test(\"desviación null\", () => pm.expect(j.desviacionPorcentaje).to.eql(null));",
+                  "pm.test(\"fueraDeReceta true\", () => pm.expect(j.fueraDeReceta).to.eql(true));",
+                  "pm.test(\"sin inventario\", () => pm.expect(j).to.not.have.property(\"inventario\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 Eficiencia mayor que 100% → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanEficiencia}}/consumos?size=20"
+            },
+            "description": "CP-12 (R-04): 0.250 de teórico sobre 0.100 de real. Consumir menos de lo previsto da eficiencia 250.00 y desviación -60.00."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "var c = j.content.find(x => x.idConsumo === Number(pm.collectionVariables.get('idConsumoEficiencia')));",
+                  "pm.test(\"consumo encontrado\", () => pm.expect(c).to.not.be.undefined);",
+                  "pm.test(\"eficiencia 250.00\", () => pm.expect(c.eficiencia).to.eql(250));",
+                  "pm.test(\"desviación -60.00\", () => pm.expect(c.desviacionPorcentaje).to.eql(-60));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Cálculo de la desviación → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?size=20"
+            },
+            "description": "CP-13 (CA-06/R-04): de 0.250 a 0.300 se gastó 20.00 % más de lo previsto; la desviación es positiva."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "var c = j.content.find(x => x.idConsumo === Number(pm.collectionVariables.get('idConsumo')));",
+                  "pm.test(\"consumo encontrado\", () => pm.expect(c).to.not.be.undefined);",
+                  "pm.test(\"desviación 20.00\", () => pm.expect(c.desviacionPorcentaje).to.eql(20));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Plan no EN_PROCESO → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetallePlanificado}}/consumos"
+            },
+            "description": "CP-14 (CA-01): el plan está PLANIFICADO y todavía no consume.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PLAN_NO_EN_PROCESO\", () => pm.expect(pm.response.json().code).to.eql(\"PLAN_NO_EN_PROCESO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 Materia prima inexistente → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "CP-15 (CA-02): la materia prima 9999 no existe o está inactiva.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": 9999,\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"MATERIA_PRIMA_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"MATERIA_PRIMA_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Consumo duplicado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "CP-16 (R-06): la materia prima 1 ya tiene el consumo de CP-01 en esta línea. Para cambiar la cantidad se usa el PUT, no un segundo POST.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"CONSUMO_DUPLICADO\", () => pm.expect(pm.response.json().code).to.eql(\"CONSUMO_DUPLICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 Duplicado por SQL directo (ver descripción) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?size=100"
+            },
+            "description": "CP-17 (V2 §C-13, verificación SQL): ejecutar en MySQL\nINSERT INTO consumo_materia_prima\n  (id_detalle_plan, id_materia_prima, cantidad_teorica, cantidad_real)\nVALUES ({{idDetalle}}, {{idMateriaPrima}}, 0.250, 0.100);\n-- Debe fallar con error 1062 por uk_consumo_mp.\nSELECT COUNT(*) FROM consumo_materia_prima\nWHERE id_detalle_plan = {{idDetalle}} AND id_materia_prima = {{idMateriaPrima}};  -- debe ser 1\nEsta petición solo comprueba que el listado sigue respondiendo 200."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 Ingrediente fuera de receta en el listado → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanFueraReceta}}/consumos?size=20"
+            },
+            "description": "CP-18 (R-08): el listado conserva la marca de consumo fuera de receta y su teórico cero."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "var c = j.content.find(x => x.idConsumo === Number(pm.collectionVariables.get('idConsumoFueraReceta')));",
+                  "pm.test(\"consumo encontrado\", () => pm.expect(c).to.not.be.undefined);",
+                  "pm.test(\"fueraDeReceta true\", () => pm.expect(c.fueraDeReceta).to.eql(true));",
+                  "pm.test(\"cantidadTeorica 0.000\", () => pm.expect(c.cantidadTeorica).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 El inventario se descuenta → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalleInventario}}/consumos"
+            },
+            "description": "CP-19 (HU-23): registrar descuenta la cantidad real del inventario en la misma transacción. La línea es propia para no chocar con el duplicado de CP-01.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idConsumoInventario', j.idConsumo);",
+                  "pm.test(\"inventario con saldos\", () => { pm.expect(j.inventario.anterior).to.be.a(\"number\"); pm.expect(j.inventario.posterior).to.be.a(\"number\"); });",
+                  "pm.test(\"descuento de 0.10\", () => pm.expect(Math.round((j.inventario.anterior - j.inventario.posterior) * 100) / 100).to.eql(0.1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-20 Redondeo de 3 a 2 decimales → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalleRedondeo}}/consumos"
+            },
+            "description": "CP-20 (R-09): el consumo guarda 3 decimales (0.255) y el inventario solo 2. El descuento es 0.26 por HALF_UP, no 0.25.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.255\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"cantidadReal 0.255\", () => pm.expect(j.cantidadReal).to.eql(0.255));",
+                  "pm.test(\"inventario baja 0.26 (HALF_UP)\", () => pm.expect(Math.round((j.inventario.anterior - j.inventario.posterior) * 100) / 100).to.eql(0.26));",
+                  "pm.test(\"posterior = anterior - 0.26\", () => pm.expect(Math.round((j.inventario.anterior - j.inventario.posterior) * 100) / 100).to.eql(0.26));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 Stock insuficiente → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalleStock}}/consumos"
+            },
+            "description": "CP-21: consumir más de lo disponible responde 409 y la transacción revierte el consumo; no queda registro sin su movimiento.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 999999.99\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"STOCK_INSUFICIENTE\", () => pm.expect(pm.response.json().code).to.eql(\"STOCK_INSUFICIENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 Corregir al alza ajusta por diferencia → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "description": "CP-22 (R-07): de 0.300 a 0.500 se descuentan 0.20 más, no 0.500. El smoke devolvió 33.03 → 32.83. El kardex deja una sola SALIDA_PRODUCCION por la diferencia.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.500\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"cantidadTeorica conservada 0.250\", () => pm.expect(j.cantidadTeorica).to.eql(0.25));",
+                  "pm.test(\"cantidadReal 0.500\", () => pm.expect(j.cantidadReal).to.eql(0.5));",
+                  "pm.test(\"eficiencia 50.00\", () => pm.expect(j.eficiencia).to.eql(50));",
+                  "pm.test(\"desviación 100.00\", () => pm.expect(j.desviacionPorcentaje).to.eql(100));",
+                  "pm.test(\"solo descuenta 0.20 de diferencia\", () => pm.expect(Math.round((j.inventario.anterior - j.inventario.posterior) * 100) / 100).to.eql(0.2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Corregir a la baja devuelve la diferencia → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "description": "CP-23 (R-07): de 0.500 a 0.100 se devuelven 0.40 con AJUSTE_POSITIVO. El smoke devolvió 32.83 → 33.23 y un solo movimiento por la diferencia.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"cantidadReal 0.100\", () => pm.expect(j.cantidadReal).to.eql(0.1));",
+                  "pm.test(\"eficiencia 250.00\", () => pm.expect(j.eficiencia).to.eql(250));",
+                  "pm.test(\"desviación -60.00\", () => pm.expect(j.desviacionPorcentaje).to.eql(-60));",
+                  "pm.test(\"devuelve 0.40 al inventario\", () => pm.expect(Math.round((j.inventario.posterior - j.inventario.anterior) * 100) / 100).to.eql(0.4));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-24 VENTAS no puede registrar consumos → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "CP-24: VENTAS no participa del módulo de producción. El 403 lo aplica @PreAuthorize antes del servicio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "item": [
+        {
+          "name": "GET /planes-produccion/{idPlan}/consumos con ADMIN → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /planes-produccion/{idPlan}/consumos con PRODUCCION → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /planes-produccion/{idPlan}/consumos con CONSULTA → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /planes-produccion/{idPlan}/consumos con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /planes-produccion/{idPlan}/consumos con COMPRAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /detalles-plan/{idDetallePlan}/consumo-teorico con ADMIN → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /detalles-plan/{idDetallePlan}/consumo-teorico con PRODUCCION → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /detalles-plan/{idDetallePlan}/consumo-teorico con CONSULTA → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /detalles-plan/{idDetallePlan}/consumo-teorico con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /detalles-plan/{idDetallePlan}/consumo-teorico con COMPRAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{idDetallePlan}/consumos con ADMIN → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetallePostAdmin}}/consumos"
+            },
+            "description": "Plan propio para el rol permitido (idPlanPostAdmin); los roles denegados reciben el 403 antes del servicio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{idDetallePlan}/consumos con PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetallePostProd}}/consumos"
+            },
+            "description": "Plan propio para el rol permitido (idPlanPostProd); los roles denegados reciben el 403 antes del servicio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{idDetallePlan}/consumos con CONSULTA → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetallePostAdmin}}/consumos"
+            },
+            "description": "Plan propio para el rol permitido (idPlanPostAdmin); los roles denegados reciben el 403 antes del servicio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{idDetallePlan}/consumos con VENTAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetallePostAdmin}}/consumos"
+            },
+            "description": "Plan propio para el rol permitido (idPlanPostAdmin); los roles denegados reciben el 403 antes del servicio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /detalles-plan/{idDetallePlan}/consumos con COMPRAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetallePostAdmin}}/consumos"
+            },
+            "description": "Plan propio para el rol permitido (idPlanPostAdmin); los roles denegados reciben el 403 antes del servicio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con ADMIN → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con PRODUCCION → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumoProd}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con CONSULTA → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con VENTAS → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /consumos/{id} con COMPRAS → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "item": [
+        {
+          "name": "SEC-01 GET listado sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            },
+            "description": "Sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET teórico sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            },
+            "description": "Sin cabecera Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 POST registrar sin token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "Sin cabecera Authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 PUT corregir sin token → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "description": "Sin cabecera Authorization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET listado token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            },
+            "description": "Token literal que no es un JWT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET teórico token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            },
+            "description": "Token literal que no es un JWT."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 POST registrar token malformado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "Token literal que no es un JWT.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 PUT corregir token malformado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "description": "Token literal que no es un JWT.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET listado token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            },
+            "description": "Rellenar a mano `tokenExpirado` con un JWT vencido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET teórico token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            },
+            "description": "Rellenar a mano `tokenExpirado` con un JWT vencido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 POST registrar token expirado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "Rellenar a mano `tokenExpirado` con un JWT vencido.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 PUT corregir token expirado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "description": "Rellenar a mano `tokenExpirado` con un JWT vencido.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET listado rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            },
+            "description": "VENTAS no participa del consumo de materia prima."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET teórico rol sin permiso → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            },
+            "description": "VENTAS no participa del consumo de materia prima."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 POST registrar rol sin permiso → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "VENTAS no participa del consumo de materia prima.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 PUT corregir rol sin permiso → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "description": "VENTAS no participa del consumo de materia prima.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET listado usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/consumos?page=0&size=20"
+            },
+            "description": "Rellenar a mano `tokenInactivo` con el token de un usuario desactivado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET teórico usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumo-teorico"
+            },
+            "description": "Rellenar a mano `tokenInactivo` con el token de un usuario desactivado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 POST registrar usuario inactivo → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detalles-plan/{{idDetalle}}/consumos"
+            },
+            "description": "Rellenar a mano `tokenInactivo` con el token de un usuario desactivado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idMateriaPrima\": {{idMateriaPrima}},\n  \"cantidadReal\": 0.100\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 PUT corregir usuario inactivo → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/consumos/{{idConsumo}}"
+            },
+            "description": "Rellenar a mano `tokenInactivo` con el token de un usuario desactivado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cantidadReal\": 0.200\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "idPlan",
+      "value": ""
+    },
+    {
+      "key": "idDetalle",
+      "value": ""
+    },
+    {
+      "key": "idConsumo",
+      "value": ""
+    },
+    {
+      "key": "idMateriaPrima",
+      "value": "1"
+    },
+    {
+      "key": "idMateriaPrimaFueraReceta",
+      "value": "4"
+    },
+    {
+      "key": "idProducto",
+      "value": "1"
+    },
+    {
+      "key": "idReceta",
+      "value": "1"
+    },
+    {
+      "key": "fechaHoy",
+      "value": ""
+    },
+    {
+      "key": "fechaFutura",
+      "value": ""
+    },
+    {
+      "key": "idPlanEficiencia",
+      "value": ""
+    },
+    {
+      "key": "idDetalleEficiencia",
+      "value": ""
+    },
+    {
+      "key": "idConsumoEficiencia",
+      "value": ""
+    },
+    {
+      "key": "idPlanCero",
+      "value": ""
+    },
+    {
+      "key": "idDetalleCero",
+      "value": ""
+    },
+    {
+      "key": "idPlanRedondeo",
+      "value": ""
+    },
+    {
+      "key": "idDetalleRedondeo",
+      "value": ""
+    },
+    {
+      "key": "idPlanFueraReceta",
+      "value": ""
+    },
+    {
+      "key": "idDetalleFueraReceta",
+      "value": ""
+    },
+    {
+      "key": "idConsumoFueraReceta",
+      "value": ""
+    },
+    {
+      "key": "idPlanFueraCero",
+      "value": ""
+    },
+    {
+      "key": "idDetalleFueraCero",
+      "value": ""
+    },
+    {
+      "key": "idPlanStock",
+      "value": ""
+    },
+    {
+      "key": "idDetalleStock",
+      "value": ""
+    },
+    {
+      "key": "idPlanInventario",
+      "value": ""
+    },
+    {
+      "key": "idDetalleInventario",
+      "value": ""
+    },
+    {
+      "key": "idConsumoInventario",
+      "value": ""
+    },
+    {
+      "key": "idPlanPlanificado",
+      "value": ""
+    },
+    {
+      "key": "idDetallePlanificado",
+      "value": ""
+    },
+    {
+      "key": "idPlanCompletado",
+      "value": ""
+    },
+    {
+      "key": "idDetalleCompletado",
+      "value": ""
+    },
+    {
+      "key": "idPlanPostAdmin",
+      "value": ""
+    },
+    {
+      "key": "idDetallePostAdmin",
+      "value": ""
+    },
+    {
+      "key": "idPlanPostProd",
+      "value": ""
+    },
+    {
+      "key": "idDetallePostProd",
+      "value": ""
+    },
+    {
+      "key": "idPlanPutProd",
+      "value": ""
+    },
+    {
+      "key": "idDetallePutProd",
+      "value": ""
+    },
+    {
+      "key": "idConsumoProd",
+      "value": ""
+    }
+  ]
+}
