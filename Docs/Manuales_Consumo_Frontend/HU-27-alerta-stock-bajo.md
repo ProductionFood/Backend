@@ -13,9 +13,8 @@ y mostrar la sugerencia de compra agrupada por proveedor. Complementa
 - **Dependencias:** el inventario y el stock mínimo de materia prima son de HU-14/HU-15; la compra
   que se prellena con la sugerencia es de HU-13. Esta historia es de **solo lectura**.
 
-> **Estado:** backend verificado con QA ciego (CP-01…CP-26 y SEC-01…SEC-05, con las excepciones de
-> la ficha: solo CP-21, que espera a HU-24). El consumo desde Angular sigue pendiente. Los ids, nombres, costos y proveedores
-> dependen de la base.
+> **Estado:** backend verificado con QA ciego (CP-01…CP-26 y SEC-01…SEC-05 pasan). El consumo desde Angular
+> sigue pendiente. Los ids, nombres, costos y proveedores dependen de la base.
 
 ---
 
@@ -181,6 +180,11 @@ decodifica como UTF-8.
 ---
 
 ## 4. Indicador global y prellenado de compra
+
+> **Coherencia con el dashboard (CP-21, verificado):** el dashboard (`GET /api/v1/dashboard` →
+> `stockBajo`) usa `AlertaService.listar(false)`, por eso coincide exactamente con `/alertas` y
+> `/alertas/resumen` (por defecto sin inactivas): mismo total, mismas materias primas y mismo orden.
+> No hay caché: un cambio de stock se ve en la llamada siguiente.
 
 **Indicador global.** Al iniciar sesión, y luego cada cierto tiempo, llamar a `/resumen` y pintar
 una insignia en el menú de inventario:
