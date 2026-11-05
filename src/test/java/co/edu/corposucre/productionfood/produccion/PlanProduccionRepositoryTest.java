@@ -213,10 +213,12 @@ class PlanProduccionRepositoryTest {
         var segunda = sembrarPlan(LocalDate.of(1990, 11, 10), EstadoPlan.EN_PROCESO, idUsuario);
         var tercera = sembrarPlan(LocalDate.of(1990, 11, 15), EstadoPlan.COMPLETADO, idUsuario);
 
-        var pagina0 = repository.buscar(null, null, null, null, pagina(0, 1));
-        var pagina1 = repository.buscar(null, null, null, null, pagina(1, 1));
-        var pagina2 = repository.buscar(null, null, null, null, pagina(2, 1));
-        var pagina3 = repository.buscar(null, null, null, null, pagina(3, 1));
+        // Filtrado por el responsable propio: la base puede tener planes de otras corridas
+        // (smoke, QA) y sin el filtro la paginación dependería de esos datos residuales.
+        var pagina0 = repository.buscar(null, idUsuario, null, null, pagina(0, 1));
+        var pagina1 = repository.buscar(null, idUsuario, null, null, pagina(1, 1));
+        var pagina2 = repository.buscar(null, idUsuario, null, null, pagina(2, 1));
+        var pagina3 = repository.buscar(null, idUsuario, null, null, pagina(3, 1));
 
         assertThat(pagina0).hasSize(1);
         assertThat(pagina1).hasSize(1);
@@ -228,7 +230,7 @@ class PlanProduccionRepositoryTest {
                 pagina2.stream()))
                 .extracting(PlanProduccion::getIdPlan)
                 .containsExactly(primera, segunda, tercera);
-        assertThat(repository.contar(null, null, null, null)).isEqualTo(3);
+        assertThat(repository.contar(null, idUsuario, null, null)).isEqualTo(3);
     }
 
     @Test
@@ -238,7 +240,7 @@ class PlanProduccionRepositoryTest {
         sembrarPlan(LocalDate.of(1990, 11, 10), EstadoPlan.CANCELADO, idUsuario);
         sembrarPlan(LocalDate.of(1990, 11, 15), EstadoPlan.COMPLETADO, idUsuario);
 
-        var ascendente = repository.buscar(null, null, null, null,
+        var ascendente = repository.buscar(null, idUsuario, null, null,
                 PageRequest.of(0, 10, "estado", PlanProduccionRepository.ORDEN,
                         PlanProduccionRepository.ORDEN_POR_DEFECTO));
 
@@ -246,7 +248,7 @@ class PlanProduccionRepositoryTest {
                 .containsExactly(EstadoPlan.CANCELADO, EstadoPlan.COMPLETADO,
                         EstadoPlan.PLANIFICADO);
 
-        var descendente = repository.buscar(null, null, null, null,
+        var descendente = repository.buscar(null, idUsuario, null, null,
                 PageRequest.of(0, 10, "estado,desc", PlanProduccionRepository.ORDEN,
                         PlanProduccionRepository.ORDEN_POR_DEFECTO));
 
@@ -266,7 +268,7 @@ class PlanProduccionRepositoryTest {
         // 'u.nombre' no pertenece a la lista blanca: el repositorio no la concatena en el
         // ORDER BY —una columna inexistente responde ERROR 1054, el borde que dolió en HU-15—
         // y aplica el orden por defecto completo, fecha_produccion DESC.
-        var filas = repository.buscar(null, null, null, null,
+        var filas = repository.buscar(null, idUsuario, null, null,
                 new PageRequest(0, 10, "u.nombre", true));
 
         assertThat(filas).extracting(PlanProduccion::getIdPlan)
