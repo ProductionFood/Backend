@@ -28,6 +28,7 @@ quien consume, complemento de `../../../PFDocs/00-base/04-CONTRATO-API.md`.
 | [HU-18 — Registro de devoluciones](HU-18-registro-devoluciones.md) | Devoluciones (bandeja, registro, aprobación con reposición y kardex) | Backend verificado 2026-11-02 (QA ciego 25/25 CP y 25/25 SEC) · frontend pendiente |
 | [HU-19 — Lotes de producto terminado](HU-19-lotes-producto-terminado.md) | Lotes de producto (listado con filtros, alta, detalle y kardex) | Backend verificado en caliente 2026-10-25 · frontend pendiente |
 | [HU-20 — Planes de producción](HU-20-planes-produccion.md) | Planes de producción (listado con filtros, alta, edición y estados) | Backend verificado 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC) · frontend pendiente |
+| [HU-21 — Productos del plan de producción](HU-21-detalle-plan-produccion.md) | Detalle del plan (productos, cantidades, avance y consumo teórico) | Backend verificado 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC) · frontend pendiente |
 
 ## Qué debe tener un manual
 

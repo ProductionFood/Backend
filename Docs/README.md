@@ -60,3 +60,4 @@ Docs/
 | HU-18 Registro de devoluciones | Entregada 2026-11-02 (QA ciego 25/25 CP y 25/25 SEC; frontend pendiente) |
 | HU-19 Lotes de producto terminado | Entregada 2026-10-25 (backend verificado en caliente; frontend pendiente) |
 | HU-20 Planes de producción | Entregada 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC; frontend pendiente) |
+| HU-21 Productos del plan de producción | Entregada 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC; frontend pendiente) |
