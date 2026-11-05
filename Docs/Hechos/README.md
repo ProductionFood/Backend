@@ -77,10 +77,12 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-19 | Lotes de producto terminado | 2026-10-25 · [`HU-19-lotes-producto-terminado.md`](HU-19-lotes-producto-terminado.md) |
 | HU-20 | Planes de producción | 2026-11-05 · [`HU-20-planes-produccion.md`](HU-20-planes-produccion.md) |
 | HU-21 | Productos del plan de producción | 2026-11-05 · [`HU-21-detalle-plan-produccion.md`](HU-21-detalle-plan-produccion.md) |
+| HU-22 | Consumo de materia prima | 2026-11-05 · [`HU-22-consumo-materia-prima.md`](HU-22-consumo-materia-prima.md) |
 
-> HU-20 y HU-21 quedaron verificadas con QA ciego el 2026-11-05 (CP-01…CP-23, SEC-01…05 en los
-> cinco endpoints, matriz de roles y verificaciones SQL). El consumo desde el frontend sigue
-> pendiente.
+> HU-20, HU-21 y HU-22 quedaron verificadas con QA ciego el 2026-11-05. HU-20 y HU-21 pasaron
+> CP-01…CP-23, SEC-01…05 en sus endpoints y la matriz de roles. HU-22 pasó CP-01…CP-24,
+> SEC-01…05 en los cuatro endpoints, la matriz de roles 20/20 y las verificaciones SQL. El
+> consumo desde el frontend sigue pendiente.
 >
 > HU-09 quedó verificada en caliente contra MySQL el 2026-10-23 (CP-01…CP-20 y SEC-01…05).
 > El consumo desde el frontend sigue pendiente, igual que en las HUs anteriores.
