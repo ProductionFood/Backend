@@ -30,6 +30,7 @@ quien consume, complemento de `../../../PFDocs/00-base/04-CONTRATO-API.md`.
 | [HU-20 — Planes de producción](HU-20-planes-produccion.md) | Planes de producción (listado con filtros, alta, edición y estados) | Backend verificado 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC) · frontend pendiente |
 | [HU-21 — Productos del plan de producción](HU-21-detalle-plan-produccion.md) | Detalle del plan (productos, cantidades, avance y consumo teórico) | Backend verificado 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC) · frontend pendiente |
 | [HU-22 — Consumo de materia prima](HU-22-consumo-materia-prima.md) | Consumo por línea (teórico, registro con descuento de inventario, corrección y listado) | Backend verificado 2026-11-05 (QA ciego 24/24 CP, 20/20 SEC y roles 20/20) · frontend pendiente |
+| [HU-24 — Dashboard resumen](HU-24-dashboard-resumen.md) | Dashboard del día (cinco tarjetas, pedidos de hoy y lotes por vencer paginados, tarjetas por rol) | Backend verificado 2026-11-05 (QA ciego CP-01…CP-21 y SEC-01…05 en los 3 endpoints) · frontend pendiente |
 | [HU-25 — Consulta de pedidos](HU-25-consulta-pedidos.md) | Pedidos (filtros combinables, importes bruto/devoluciones/neto, detalle opcional, resumen, ventas por cliente y ranking de productos) | Backend verificado 2026-11-05 (QA ciego 25/25 CP y SEC-01…05 con 2 reservas) · frontend pendiente |
 
 ## Qué debe tener un manual

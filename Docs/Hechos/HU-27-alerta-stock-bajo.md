@@ -7,7 +7,7 @@
 | Endpoints | `GET /api/v1/inventario/alertas`, `GET /api/v1/inventario/alertas/resumen`, `GET /api/v1/inventario/alertas/sugerencia-compra` |
 | Colección Postman | `Docs/Postman/ProductionFood-HU27.postman_collection.json` (`Preparación`, `Alertas (CP-01…CP-26)`, `Roles (matriz)`, `Seguridad (SEC-01…SEC-05)`) |
 | Pull requests | #156 repositorio y servicio · #157 sugerencia de compra · #158 controlador · #159 corrección D-02 |
-| Estado QA | **QA ciego verificado · CP-01…CP-26 y SEC-01…SEC-05 pasan, salvo CP-21 (depende del dashboard de HU-24, aún inexistente) · frontend pendiente** |
+| Estado QA | **QA ciego verificado · CP-01…CP-26 y SEC-01…SEC-05 pasan · frontend pendiente** |
 
 > Esta ficha documenta las alertas de stock bajo: qué materias primas están en o bajo su mínimo,
 > cuánto falta, cuánto costaría reponerlo y una sugerencia de compra agrupada por proveedor. El
@@ -181,10 +181,19 @@ de roles y seguridad.
   aparecer de inmediato como `BAJO` con el faltante correcto y sube `/resumen`; un segundo consumo
   la pasa a `AGOTADO` y primera de la lista; corregir el consumo a la baja la saca de alertas, y
   con disponible igual al mínimo no hay alerta. **Pasa**, sin caché ni retraso.
-- **CP-21 (coherencia con el dashboard):** no ejecutable: HU-24 no existe aún. Lo verificado: la
-  API coincide con la vista de la base. Reejecutar cuando HU-24 esté mergeada.
-- **Observación:** `generadoEn` sale en hora local y `ultimaActualizacion` en la hora de la base
-  (5 h de diferencia); no se corrige aquí por ser transversal.
+- **CP-21 (coherencia con el dashboard):** ejecutado en el QA ciego de HU-24 (esquema aislado,
+  API en `:8086`): `stockBajo` del dashboard coincide con `GET /inventario/alertas` y
+  `/alertas/resumen`: mismo total/cantidad, mismas agotadas, mismas bajas y exactamente las mismas
+  materias primas, en el mismo orden y con los mismos `disponible`/`minimo`/`faltante`/`nivel`.
+  **Pasa** en 6 estados (al menos 2 `BAJO`, al menos 1 `AGOTADO`, una en el mínimo exacto que no
+  alerta, una inactiva con stock bajo que no cuenta por defecto y una con mínimo 0 que no alerta),
+  también con 150 materias en alerta y con empates. Tras cambiar el stock (compra recibida o
+  ajuste) el cambio aparece en la llamada siguiente: sin caché.
+- **Observación (hora):** el QA de HU-24 halló que una conexión del pool de MySQL tenía
+  `time_zone` `+00:00`, causa raíz de las horas mezcladas (p. ej. 5 h de diferencia entre
+  `generadoEn` y `ultimaActualizacion`). Se corrigió en HU-24 (PR #169, `connection-init-sql`
+  `SET time_zone='-05:00'` en Hikari) y ya todas las conexiones están en `-05:00`: no hay desfase
+  para datos nuevos; los datos escritos antes del fix pueden conservar hora mezclada.
 - **SEC-03 y SEC-05:** el QA los reportó parcial y fallido, pero se reprodujeron a mano contra
   la API y **pasan**: un token vencido responde `401 NO_AUTENTICADO` y un usuario desactivado con
   token vigente responde `403 USUARIO_INACTIVO` en los tres endpoints. El hallazgo D-01 del QA

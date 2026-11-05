@@ -10,6 +10,10 @@ spring:
     hikari:
       maximum-pool-size: 10
       minimum-idle: 5
+      # R-01 (HU-24): todas las conexiones del pool usan la hora de Colombia (sin DST, -05:00),
+      # la misma zona en la que MySQL evalua curdate()/now(). Sin esto, una conexion con la zona
+      # por defecto del servidor devuelve otro dia a partir de las 7 p.m.
+      connection-init-sql: "SET time_zone = '-05:00'"
 
   flyway:
     locations: classpath:db/migration
