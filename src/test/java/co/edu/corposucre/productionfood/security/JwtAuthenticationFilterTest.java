@@ -117,7 +117,7 @@ class JwtAuthenticationFilterTest {
         assertThat(res.getStatus()).isEqualTo(401);
         assertThat(res.getContentAsString()).contains("\"code\":\"NO_AUTENTICADO\"");
         assertThat(res.getContentAsString())
-                .contains("Su sesión ha expirado. Inicie sesión nuevamente.");
+                .contains(MensajesSeguridad.MSG_TOKEN_INVALIDO);
         assertThat(chain.getRequest()).isNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
@@ -136,7 +136,7 @@ class JwtAuthenticationFilterTest {
         assertThat(res.getStatus()).isEqualTo(401);
         assertThat(res.getContentAsString()).contains("\"code\":\"NO_AUTENTICADO\"");
         assertThat(res.getContentAsString())
-                .contains("Su sesión ha expirado. Inicie sesión nuevamente.");
+                .contains(MensajesSeguridad.MSG_TOKEN_INVALIDO);
         assertThat(chain.getRequest()).isNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         // Un token que no identifica a nadie no debe ni siquiera llegar a la base.
@@ -242,6 +242,42 @@ class JwtAuthenticationFilterTest {
 
         assertThat(chain.getRequest()).isNotNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    @DisplayName("Token expirado deja el mensaje de sesión expirada para el entry point")
+    void tokenExpiradoMarcaMensajeDeExpiracion() throws Exception {
+        when(jwtService.validarYExtraer("token-expirado"))
+                .thenThrow(new io.jsonwebtoken.ExpiredJwtException(null, null, "expirado"));
+        var req = peticionConToken("token-expirado");
+
+        filtro.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(req.getAttribute(MensajesSeguridad.ATRIBUTO_MENSAJE_401))
+                .isEqualTo(MensajesSeguridad.MSG_NO_AUTENTICADO);
+    }
+
+    @Test
+    @DisplayName("Token malformado o de firma inválida deja el mensaje de token inválido")
+    void tokenInvalidoMarcaMensajeDeTokenInvalido() throws Exception {
+        when(jwtService.validarYExtraer("basura"))
+                .thenThrow(new io.jsonwebtoken.security.SignatureException("firma"));
+        var req = peticionConToken("basura");
+
+        filtro.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(req.getAttribute(MensajesSeguridad.ATRIBUTO_MENSAJE_401))
+                .isEqualTo(MensajesSeguridad.MSG_TOKEN_INVALIDO);
+    }
+
+    @Test
+    @DisplayName("Sin cabecera Authorization el filtro no marca causa alguna")
+    void sinCabeceraNoMarcaCausa() throws Exception {
+        var req = new MockHttpServletRequest("GET", "/api/v1/roles");
+
+        filtro.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(req.getAttribute(MensajesSeguridad.ATRIBUTO_MENSAJE_401)).isNull();
     }
 
     private MockHttpServletRequest peticionConToken(String token) {
