@@ -7,7 +7,7 @@
 | Endpoints | `GET /api/v1/reportes/eficiencia`, `GET /api/v1/reportes/eficiencia/{idPlan}`, `GET /api/v1/reportes/eficiencia/materias-primas` |
 | Fecha de implementación | 2026-11-05 |
 | Colección Postman | `Docs/Postman/ProductionFood-HU26.postman_collection.json` (`Preparación`, `Reporte por período`, `Desviación por materia prima`, `Detalle de un plan`, `Errores`, `Roles (matriz)`, `Seguridad (SEC-01…SEC-05)`) |
-| Pull requests | #178 repositorio · #179 servicio · #180 controlador y batería de seguridad · #181 corrección de precisión del `rendimientoAjustado` (D-1) · PR docs: pendiente · PR final: pendiente |
+| Pull requests | #178 repositorio · #179 servicio · #180 controlador y batería de seguridad · #181 corrección de precisión del `rendimientoAjustado` (D-1) · #182 documentación · PR final #183 (sin mergear) |
 | Estado QA | **QA ciego verificado · CP-01…CP-25 y SEC-01…SEC-05 pasan (SEC-03 cubierto por prueba automática, ver más abajo) · D-1 corregido · puntos ambiguos A-1…A-9 pendientes de decisión · frontend pendiente** |
 
 > Esta ficha documenta el reporte de eficiencia de producción: por período, por plan y por materia
@@ -170,7 +170,7 @@ rendimiento, ajustado, promedios sin nulos, división por cero, cancelados, tend
 fechas), el contrato HTTP y la matriz de roles y seguridad.
 
 - **92 tests** en las clases `Eficiencia*Test`.
-- `mvn test` sobre la suite completa: **2203 tests, 0 fallos, 1 omitido**. El omitido es el caso
+- `mvn test` sobre la suite completa: **2204 tests, 0 fallos, 1 omitido**. El omitido es el caso
   que necesita una fila con `cantidad_real` `NULL`, que no se puede sembrar por la restricción
   `NOT NULL` de la tabla (V2, C-08); el código la excluye de todos modos.
 - **SEC-03 (token expirado)** queda cubierto por `EficienciaSeguridadTest`, que prueba que un
