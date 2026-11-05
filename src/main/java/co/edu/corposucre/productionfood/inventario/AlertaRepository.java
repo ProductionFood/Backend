@@ -79,7 +79,7 @@ public class AlertaRepository {
                     WHERE c.estado = 'RECIBIDA' AND d.id_materia_prima = v.id_materia_prima
                     ORDER BY c.fecha DESC, c.id_compra DESC
                     LIMIT 1)
-                WHERE v.estado_stock IN ('BAJO', 'AGOTADO') AND v.estado = 1
+                WHERE v.estado_stock IN ('BAJO', 'AGOTADO') AND v.estado = 1 AND v.faltante > 0
                 ORDER BY FIELD(v.estado_stock, 'AGOTADO', 'BAJO'), v.faltante DESC
                 """,
                 new MapSqlParameterSource(),
