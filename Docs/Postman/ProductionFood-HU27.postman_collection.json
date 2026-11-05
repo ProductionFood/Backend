@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "hu27-alerta-stock-bajo",
     "name": "ProductionFood - HU-27 Alerta de stock bajo",
-    "description": "Casos de la HU-27 (alerta de stock bajo): GET /api/v1/inventario/alertas (listado con ?incluirInactivas), GET /api/v1/inventario/alertas/resumen (indicador global) y GET /api/v1/inventario/alertas/sugerencia-compra (agrupada por proveedor). Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles y guarda sus tokens; 'Alertas (CP-01…CP-26)' ejecuta los casos funcionales; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren la autorización. CP-21, CP-22 y CP-23 necesitan datos controlados o SQL anotado en su descripción (en una base compartida quedan parciales). SEC-03 y SEC-05 necesitan que rellenes a mano `tokenExpirado` y `tokenInactivo`. Nota: el parámetro inválido responde PARAMETRO_INVALIDO (la especificación decía RANGO_INVALIDO).",
+    "description": "Casos de la HU-27 (alerta de stock bajo): GET /api/v1/inventario/alertas (listado con ?incluirInactivas), GET /api/v1/inventario/alertas/resumen (indicador global) y GET /api/v1/inventario/alertas/sugerencia-compra (agrupada por proveedor). Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles y guarda sus tokens; 'Alertas (CP-01…CP-26)' ejecuta los casos funcionales; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren la autorización. CP-21, CP-22 y CP-23 necesitan datos controlados o SQL anotado en su descripción (en una base compartida quedan parciales). SEC-03 y SEC-05 necesitan que rellenes a mano `tokenExpirado` (JWT vencido) y `tokenInactivo` (token de un usuario ya desactivado; esperado 403 USUARIO_INACTIVO). Nota: el parámetro inválido responde PARAMETRO_INVALIDO (la especificación decía RANGO_INVALIDO).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1865,7 +1865,7 @@
             "url": {
               "raw": "{{baseUrl}}/api/v1/inventario/alertas"
             },
-            "description": "SEC-05: rellenar a mano `tokenInactivo` con un token vigente de un usuario con `estado = 0`. Hallazgo del QA: el backend responde 401 en lugar de 403 USUARIO_INACTIVO; es un defecto transversal del filtro JWT, fuera de HU-27."
+            "description": "SEC-05: rellenar a mano `tokenInactivo` con un token vigente de un usuario con `estado = 0`. Esperado: 403 USUARIO_INACTIVO (verificado a mano contra la API)."
           },
           "event": [
             {
@@ -1873,7 +1873,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"→ 401 o 403\", () => pm.expect([401, 403]).to.include(pm.response.code));"
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));"
                 ]
               }
             }
