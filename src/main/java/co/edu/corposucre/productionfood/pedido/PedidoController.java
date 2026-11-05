@@ -2,11 +2,14 @@ package co.edu.corposucre.productionfood.pedido;
 
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -22,6 +26,9 @@ import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
+import co.edu.corposucre.productionfood.pedido.dto.ProductoVendidoResponse;
+import co.edu.corposucre.productionfood.pedido.dto.ResumenPedidosResponse;
+import co.edu.corposucre.productionfood.pedido.dto.VentasClienteResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -51,6 +58,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  *
  * <p>La matriz de roles (00-base/03-MATRIZ-ROLES.md) da lectura a ADMIN, VENTAS, PRODUCCION y
  * CONSULTA, y escritura (alta, edición de cabecera y transiciones de estado) a ADMIN y VENTAS.
+ *
+ * <p>HU-25 añade tres consultas de agregación de solo lectura ({@code /resumen},
+ * {@code /por-cliente} y {@code /productos-mas-vendidos}) reservadas a ADMIN y VENTAS: son cifras
+ * de venta, más sensibles que el listado, que conserva su lectura amplia. Esos paths literales
+ * están protegidos frente a cualquier escritura por {@link #escriturasNoPermitidas}.
  */
 @RestController
 @RequestMapping("/api/v1/pedidos")
@@ -101,6 +113,90 @@ public class PedidoController {
             @RequestParam(defaultValue = "false") boolean incluirDetalle) {
         return pedidoService.listar(idCliente, estado, fechaInicio, fechaFin, page, size, sort,
                 incluirDetalle);
+    }
+
+    @GetMapping("/resumen")
+    @PreAuthorize("hasAnyRole('ADMIN','VENTAS')")
+    @Operation(summary = "Resumen de pedidos por período",
+               description = "Resume los pedidos del período agrupados por estado: cantidad y "
+                        + "total de los entregados, de los que están en curso (PENDIENTE y "
+                        + "EN_PREPARACION, venta comprometida) y de los cancelados, que se "
+                        + "informan por separado. Los CANCELADO quedan fuera de la venta (R-03). "
+                        + "La venta bruta es el total de los entregados, las devoluciones son "
+                        + "solo las aprobadas de esos pedidos y la venta neta es bruta menos "
+                        + "devoluciones (R-04); el ticket promedio se calcula sobre los "
+                        + "entregados y es null si no hubo ninguno. Los importes salen siempre "
+                        + "del precio histórico de cada línea (R-02). fechaInicio y fechaFin son "
+                        + "opcionales, inclusivos y en formato ISO (yyyy-MM-dd); un rango "
+                        + "invertido responde 400 RANGO_FECHAS_INVALIDO y una fecha mal formada "
+                        + "400 PARAMETRO_INVALIDO. Un período sin pedidos responde 200 con las "
+                        + "cifras en 0. A diferencia del listado, no admite PRODUCCION ni "
+                        + "CONSULTA: se reserva a ADMIN y VENTAS.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Resumen del período, con pedidos o "
+                + "con todo en cero"),
+        @ApiResponse(responseCode = "400", description = "Rango de fechas invertido o fecha mal "
+                + "formada (RANGO_FECHAS_INVALIDO, PARAMETRO_INVALIDO)"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos")
+    })
+    public ResumenPedidosResponse resumen(
+            @RequestParam(required = false) LocalDate fechaInicio,
+            @RequestParam(required = false) LocalDate fechaFin) {
+        return pedidoService.resumen(fechaInicio, fechaFin);
+    }
+
+    @GetMapping("/por-cliente")
+    @PreAuthorize("hasAnyRole('ADMIN','VENTAS')")
+    @Operation(summary = "Ventas de pedidos por cliente",
+               description = "Agrupa por cliente la venta del período: cantidad de pedidos, "
+                        + "total al precio histórico de cada línea (R-02) y porcentaje del total "
+                        + "del cliente sobre el del período. Solo cuenta la venta: los pedidos "
+                        + "CANCELADO quedan fuera (R-03); el total es bruto, sin descontar "
+                        + "devoluciones (R-04 se informa en el resumen). El listado viene "
+                        + "ordenado por total descendente. fechaInicio y fechaFin son "
+                        + "opcionales, inclusivos y en formato ISO (yyyy-MM-dd); un rango "
+                        + "invertido responde 400 RANGO_FECHAS_INVALIDO y una fecha mal formada "
+                        + "400 PARAMETRO_INVALIDO. Un período sin pedidos responde 200 con la "
+                        + "lista vacía. Igual que el resumen, se reserva a ADMIN y VENTAS.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Lista de ventas por cliente, con "
+                + "pedidos o vacía"),
+        @ApiResponse(responseCode = "400", description = "Rango de fechas invertido o fecha mal "
+                + "formada (RANGO_FECHAS_INVALIDO, PARAMETRO_INVALIDO)"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos")
+    })
+    public List<VentasClienteResponse> ventasPorCliente(
+            @RequestParam(required = false) LocalDate fechaInicio,
+            @RequestParam(required = false) LocalDate fechaFin) {
+        return pedidoService.ventasPorCliente(fechaInicio, fechaFin);
+    }
+
+    @GetMapping("/productos-mas-vendidos")
+    @PreAuthorize("hasAnyRole('ADMIN','VENTAS')")
+    @Operation(summary = "Ranking de productos más vendidos",
+               description = "Ranking de productos de los pedidos del período, ordenado por "
+                        + "unidades vendidas y no por importe (R-07): un producto barato vendido "
+                        + "muchas veces supera a uno caro vendido pocas. Cada fila trae las "
+                        + "unidades, el importe como columna adicional y el número de pedidos "
+                        + "distintos en que aparece. Los pedidos CANCELADO no cuentan (R-03). "
+                        + "fechaInicio y fechaFin son opcionales, inclusivos y en formato ISO "
+                        + "(yyyy-MM-dd); un rango invertido responde 400 RANGO_FECHAS_INVALIDO y "
+                        + "una fecha mal formada 400 PARAMETRO_INVALIDO. Un período sin pedidos "
+                        + "responde 200 con la lista vacía. Se reserva a ADMIN y VENTAS.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Ranking de productos, con ventas o "
+                + "vacío"),
+        @ApiResponse(responseCode = "400", description = "Rango de fechas invertido o fecha mal "
+                + "formada (RANGO_FECHAS_INVALIDO, PARAMETRO_INVALIDO)"),
+        @ApiResponse(responseCode = "401", description = "Sin token"),
+        @ApiResponse(responseCode = "403", description = "Sin permisos")
+    })
+    public List<ProductoVendidoResponse> productosMasVendidos(
+            @RequestParam(required = false) LocalDate fechaInicio,
+            @RequestParam(required = false) LocalDate fechaFin) {
+        return pedidoService.productosMasVendidos(fechaInicio, fechaFin);
     }
 
     @GetMapping("/{id}")
@@ -207,5 +303,34 @@ public class PedidoController {
                     ResponseEntity.ok(pedidoService.cambiarEstado(id, req));
             default -> throw pedidoService.transicionInvalida(id, req.estado());
         };
+    }
+
+    /**
+     * Reserva los paths de solo lectura de HU-25 frente a cualquier intento de escritura.
+     *
+     * <p>{@code /resumen}, {@code /por-cliente} y {@code /productos-mas-vendidos} no tienen
+     * endpoint de escritura (HU-25 R-01). Sin este mapping explícito, un PUT —por ejemplo—
+     * encajaría en el {@code @PutMapping("/{id}")} de HU-16 y fallaría al convertir el segmento
+     * a entero, respondiendo 400 PARAMETRO_INVALIDO en lugar del 405 que exige el contrato. El
+     * path literal es más específico que {@code /{id}} y solo declara los métodos de escritura,
+     * de modo que los GET de los tres reportes siguen resolviéndose sin ambigüedad a sus
+     * handlers, y el alta ({@code POST /pedidos}), la edición y el PATCH de estado por id no
+     * cambian.
+     *
+     * <p>El método no hace nada: lanza {@link HttpRequestMethodNotSupportedException}, que
+     * {@code GlobalExceptionHandler} ya serializa como 405 METODO_NO_PERMITIDO con el cuerpo
+     * estándar. No lleva {@code @PreAuthorize} porque no toca datos ni pasa por el servicio; la
+     * autenticación la exige la cadena de seguridad global, así que un anónimo recibe 401 y no
+     * 405.
+     *
+     * @param request petición entrante, solo para leer el método HTTP que se debe rechazar
+     * @throws HttpRequestMethodNotSupportedException siempre; es el mecanismo de respuesta 405
+     */
+    @RequestMapping(value = {"/resumen", "/por-cliente", "/productos-mas-vendidos"},
+            method = {RequestMethod.POST, RequestMethod.PUT,
+                      RequestMethod.PATCH, RequestMethod.DELETE})
+    public void escriturasNoPermitidas(HttpServletRequest request)
+            throws HttpRequestMethodNotSupportedException {
+        throw new HttpRequestMethodNotSupportedException(request.getMethod());
     }
 }

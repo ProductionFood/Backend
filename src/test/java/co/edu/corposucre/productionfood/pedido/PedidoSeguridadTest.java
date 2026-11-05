@@ -39,6 +39,7 @@ import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoClienteRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
+import co.edu.corposucre.productionfood.pedido.dto.ResumenPedidosResponse;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.security.AccesoDenegadoHandler;
 import co.edu.corposucre.productionfood.security.EntryPointNoAutenticado;
@@ -89,6 +90,9 @@ class PedidoSeguridadTest {
     private static final String COLECCION = "/api/v1/pedidos";
     private static final String RECURSO = "/api/v1/pedidos/1";
     private static final String ESTADO = "/api/v1/pedidos/1/estado";
+    private static final String RESUMEN = "/api/v1/pedidos/resumen";
+    private static final String POR_CLIENTE = "/api/v1/pedidos/por-cliente";
+    private static final String MAS_VENDIDOS = "/api/v1/pedidos/productos-mas-vendidos";
     private static final String CUERPO_CREAR = "crear";
     private static final String CUERPO_ACTUALIZAR = "actualizar";
     private static final String CUERPO_ESTADO = "estado";
@@ -112,7 +116,8 @@ class PedidoSeguridadTest {
     UsuarioRepository usuarioRepository;
 
     /**
-     * Los cinco endpoints de la historia: colección, recurso por id, alta, edición de cabecera y
+     * Los ocho endpoints de las historias: colección, recurso por id, los tres reportes de HU-25
+     * (resumen, por cliente y productos más vendidos), alta, edición de cabecera y
      * transición de estado. Los cuerpos de las peticiones de escritura son válidos a propósito: si
      * la autorización no cortara la petición, el resultado sería 200 o 201 y no un 400 que
      * enmascararía el fallo de seguridad.
@@ -121,6 +126,9 @@ class PedidoSeguridadTest {
         return Stream.of(
                 arguments(HttpMethod.GET, COLECCION, null),
                 arguments(HttpMethod.GET, RECURSO, null),
+                arguments(HttpMethod.GET, RESUMEN, null),
+                arguments(HttpMethod.GET, POR_CLIENTE, null),
+                arguments(HttpMethod.GET, MAS_VENDIDOS, null),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR),
                 arguments(HttpMethod.PUT, RECURSO, CUERPO_ACTUALIZAR),
                 arguments(HttpMethod.PATCH, ESTADO, CUERPO_ESTADO));
@@ -128,13 +136,23 @@ class PedidoSeguridadTest {
 
     /**
      * Cada endpoint con un rol al que se le niega el permiso. COMPRAS no participa en la venta y
-     * cae en las cinco rutas; en las escrituras tampoco PRODUCCION, que solo lee, ni CONSULTA, que
+     * cae en todas las rutas; los tres reportes de HU-25 son más restrictivos que el resto de
+     * lecturas: ni PRODUCCION ni CONSULTA los consultan, solo ADMIN y VENTAS. En las escrituras tampoco PRODUCCION, que solo lee, ni CONSULTA, que
      * nunca escribe.
      */
     private static Stream<Arguments> endpointsSinPermiso() {
         return Stream.of(
                 arguments(HttpMethod.GET, COLECCION, null, "COMPRAS"),
                 arguments(HttpMethod.GET, RECURSO, null, "COMPRAS"),
+                arguments(HttpMethod.GET, RESUMEN, null, "COMPRAS"),
+                arguments(HttpMethod.GET, RESUMEN, null, "PRODUCCION"),
+                arguments(HttpMethod.GET, RESUMEN, null, "CONSULTA"),
+                arguments(HttpMethod.GET, POR_CLIENTE, null, "COMPRAS"),
+                arguments(HttpMethod.GET, POR_CLIENTE, null, "PRODUCCION"),
+                arguments(HttpMethod.GET, POR_CLIENTE, null, "CONSULTA"),
+                arguments(HttpMethod.GET, MAS_VENDIDOS, null, "COMPRAS"),
+                arguments(HttpMethod.GET, MAS_VENDIDOS, null, "PRODUCCION"),
+                arguments(HttpMethod.GET, MAS_VENDIDOS, null, "CONSULTA"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "COMPRAS"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "PRODUCCION"),
                 arguments(HttpMethod.POST, COLECCION, CUERPO_CREAR, "CONSULTA"),
@@ -258,6 +276,65 @@ class PedidoSeguridadTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.content[0].idPedido").value(1));
+    }
+
+    @ParameterizedTest(name = "GET resumen con rol {0} responde 200")
+    @ValueSource(strings = {"ADMIN", "VENTAS"})
+    @DisplayName("HU-25: solo ADMIN y VENTAS obtienen el resumen de pedidos")
+    void getResumenConRolPermitidoResponde200(String rol) throws Exception {
+        when(pedidoService.resumen(any(), any())).thenReturn(new ResumenPedidosResponse(null,
+                totales(), totales(), totales(), BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, null));
+        var token = tokenDeRol(rol);
+
+        mockMvc.perform(conToken(peticion(HttpMethod.GET, RESUMEN, null), token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entregados.cantidad").value(0));
+    }
+
+    @ParameterizedTest(name = "GET por-cliente con rol {0} responde 200")
+    @ValueSource(strings = {"ADMIN", "VENTAS"})
+    @DisplayName("HU-25: solo ADMIN y VENTAS obtienen las ventas por cliente")
+    void getPorClienteConRolPermitidoResponde200(String rol) throws Exception {
+        when(pedidoService.ventasPorCliente(any(), any())).thenReturn(List.of());
+        var token = tokenDeRol(rol);
+
+        mockMvc.perform(conToken(peticion(HttpMethod.GET, POR_CLIENTE, null), token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @ParameterizedTest(name = "GET productos-mas-vendidos con rol {0} responde 200")
+    @ValueSource(strings = {"ADMIN", "VENTAS"})
+    @DisplayName("HU-25: solo ADMIN y VENTAS obtienen el ranking de productos")
+    void getMasVendidosConRolPermitidoResponde200(String rol) throws Exception {
+        when(pedidoService.productosMasVendidos(any(), any())).thenReturn(List.of());
+        var token = tokenDeRol(rol);
+
+        mockMvc.perform(conToken(peticion(HttpMethod.GET, MAS_VENDIDOS, null), token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @ParameterizedTest(name = "{0} sobre {1} con rol ADMIN responde 405")
+    @MethodSource("escriturasSobreReportes")
+    @DisplayName("HU-25 R-01: las escrituras sobre los reportes responden 405 aun con rol de escritura")
+    void escrituraSobreReporteResponde405(HttpMethod metodo, String ruta) throws Exception {
+        var token = tokenDeRol("ADMIN");
+
+        mockMvc.perform(conToken(peticion(metodo, ruta, null), token))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METODO_NO_PERMITIDO"));
+    }
+
+    private static Stream<Arguments> escriturasSobreReportes() {
+        return Stream.of(RESUMEN, POR_CLIENTE, MAS_VENDIDOS)
+                .flatMap(ruta -> Stream.of(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH,
+                        HttpMethod.DELETE).map(metodo -> arguments(metodo, ruta)));
+    }
+
+    private static ResumenPedidosResponse.TotalesEstado totales() {
+        return new ResumenPedidosResponse.TotalesEstado(0, BigDecimal.ZERO);
     }
 
     @ParameterizedTest(name = "GET recurso con rol {0} responde 200")
