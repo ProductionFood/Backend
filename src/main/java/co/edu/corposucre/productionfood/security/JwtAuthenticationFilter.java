@@ -18,6 +18,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import co.edu.corposucre.productionfood.usuario.UsuarioRepository;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 
 @Component
@@ -81,7 +82,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 try {
                     idUsuario = Integer.parseInt(claims.getSubject());
                 } catch (NumberFormatException ex) {
-                    escribirNoAutenticado(res, req);
+                    escribirTokenInvalido(res, req);
                     return;
                 }
 
@@ -91,7 +92,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // ya no existe (borrado o de otro entorno). No es una baja, es una
                 // petición sin identidad recognizable, así que responde 401 y no 403.
                 if (usuario.isEmpty()) {
-                    escribirNoAutenticado(res, req);
+                    escribirTokenInvalido(res, req);
                     return;
                 }
 
@@ -117,16 +118,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         null, authorities);
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
                 SecurityContextHolder.getContext().setAuthentication(auth);
+            } catch (ExpiredJwtException ex) {
+                SecurityContextHolder.clearContext();
+                req.setAttribute(MensajesSeguridad.ATRIBUTO_MENSAJE_401,
+                        MensajesSeguridad.MSG_NO_AUTENTICADO);
             } catch (JwtException ex) {
                 SecurityContextHolder.clearContext();
+                req.setAttribute(MensajesSeguridad.ATRIBUTO_MENSAJE_401,
+                        MensajesSeguridad.MSG_TOKEN_INVALIDO);
             }
         }
         chain.doFilter(req, res);
     }
 
-    private void escribirNoAutenticado(HttpServletResponse res, HttpServletRequest req)
+    private void escribirTokenInvalido(HttpServletResponse res, HttpServletRequest req)
             throws IOException {
         RespuestaSeguridad.escribir(res, req, HttpStatus.UNAUTHORIZED,
-                "NO_AUTENTICADO", MensajesSeguridad.MSG_NO_AUTENTICADO);
+                "NO_AUTENTICADO", MensajesSeguridad.MSG_TOKEN_INVALIDO);
     }
 }
