@@ -14,9 +14,9 @@ import jakarta.servlet.http.HttpServletResponse;
  * Peticiones sin token, con token malformado o expirado responden
  * 401 NO_AUTENTICADO (04-CONTRATO-API §6, SEC-01..SEC-03).
  *
- * El mensaje es la constante compartida {@link MensajesSeguridad#MSG_NO_AUTENTICADO}:
- * este camino y el del filtro tienen que ser indistinguibles para el cliente, y no
- * basta con escribir el mismo texto en dos ficheros para que siga siéndolo.
+ * El code es siempre el mismo; el mensaje distingue la causa. JwtAuthenticationFilter
+ * deja el texto en {@link MensajesSeguridad#ATRIBUTO_MENSAJE_401}; sin atributo no
+ * hubo token, así que se usa {@link MensajesSeguridad#MSG_SIN_TOKEN}.
  */
 @Component
 public class EntryPointNoAutenticado implements AuthenticationEntryPoint {
@@ -24,7 +24,9 @@ public class EntryPointNoAutenticado implements AuthenticationEntryPoint {
     @Override
     public void commence(HttpServletRequest req, HttpServletResponse res,
                          AuthenticationException ex) throws IOException {
+        Object causa = req.getAttribute(MensajesSeguridad.ATRIBUTO_MENSAJE_401);
+        String mensaje = causa instanceof String m ? m : MensajesSeguridad.MSG_SIN_TOKEN;
         RespuestaSeguridad.escribir(res, req, HttpStatus.UNAUTHORIZED,
-                "NO_AUTENTICADO", MensajesSeguridad.MSG_NO_AUTENTICADO);
+                "NO_AUTENTICADO", mensaje);
     }
 }
