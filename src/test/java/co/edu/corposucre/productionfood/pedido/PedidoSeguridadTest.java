@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.pedido;
 
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
@@ -249,7 +250,7 @@ class PedidoSeguridadTest {
     @ValueSource(strings = {"ADMIN", "VENTAS", "PRODUCCION", "CONSULTA"})
     @DisplayName("Los roles con permiso de lectura listan los pedidos")
     void getColeccionConRolPermitidoResponde200(String rol) throws Exception {
-        when(pedidoService.listar(any(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(pedidoService.listar(any(), any(), any(), any(), anyInt(), anyInt(), any(), anyBoolean()))
                 .thenReturn(PageResponse.of(List.of(pedido(1)), 0, 20, 1));
         var token = tokenDeRol(rol);
 
@@ -366,13 +367,13 @@ class PedidoSeguridadTest {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), "PENDIENTE",
                 new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
-                new BigDecimal("0.00"), 0, true);
+                new BigDecimal("0.00"), 0, true, null);
     }
 
     private static PedidoResponse pedidoEn(int id, String estado) {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), estado,
                 new BigDecimal("120.00"), new BigDecimal("120.00"), new BigDecimal("0.00"),
-                new BigDecimal("120.00"), 3, "PENDIENTE".equals(estado));
+                new BigDecimal("120.00"), 3, "PENDIENTE".equals(estado), null);
     }
 }

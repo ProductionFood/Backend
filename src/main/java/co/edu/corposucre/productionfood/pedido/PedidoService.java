@@ -1,6 +1,10 @@
 package co.edu.corposucre.productionfood.pedido;
 
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -16,9 +20,11 @@ import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioPtService;
 import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
+import co.edu.corposucre.productionfood.lote.dto.ProductoRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
+import co.edu.corposucre.productionfood.pedido.dto.DetallePedidoResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoClienteRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
 
@@ -56,6 +62,12 @@ public class PedidoService {
             "id", "p.id_pedido");
 
     private static final String ORDEN_POR_DEFECTO = "fechaPedido,desc";
+
+    /**
+     * Tope de pedidos por página cuando el listado incluye el detalle (HU-25 R-06): cargar las
+     * líneas de una página grande es costoso, así que {@code size} se recorta a este valor.
+     */
+    static final int TAMANO_MAXIMO_CON_DETALLE = 20;
 
     private final PedidoRepository pedidoRepository;
 
@@ -113,7 +125,7 @@ public class PedidoService {
         var idPedido = pedidoRepository.insertar(pedido);
 
         return pedidoRepository.buscarPorId(idPedido)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", idPedido));
     }
 
@@ -171,7 +183,7 @@ public class PedidoService {
         pedidoRepository.actualizar(cambios);
 
         return pedidoRepository.buscarPorId(id)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
     }
 
@@ -203,7 +215,8 @@ public class PedidoService {
     @Transactional(readOnly = true)
     public PageResponse<PedidoResponse> listar(Integer idCliente, EstadoPedido estado,
                                                LocalDate fechaInicio, LocalDate fechaFin,
-                                               int page, int size, String sort) {
+                                               int page, int size, String sort,
+                                               boolean incluirDetalle) {
         if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
             // Código del contrato transversal (04-CONTRATO-API.md §4), no el genérico
             // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
@@ -217,14 +230,24 @@ public class PedidoService {
             throw new ClienteInexistenteFiltroException(idCliente);
         }
 
-        var orden = PageRequest.of(page, size, sort, ORDEN, ORDEN_POR_DEFECTO);
+        // CP-10: el recorte va antes de PageRequest.of para que un size sobre la cota de detalle
+        // se recorte y no responda 400; un size igual a 0 o negativo sigue rechazándose allí.
+        var sizeEfectivo = incluirDetalle ? Math.min(size, TAMANO_MAXIMO_CON_DETALLE) : size;
+        var orden = PageRequest.of(page, sizeEfectivo, sort, ORDEN, ORDEN_POR_DEFECTO);
         // El offset se calcula en long: page no tiene cota superior, así que page * size
         // desbordaría int a un valor negativo y el OFFSET del SQL fallaría.
         long offset = (long) orden.page() * orden.size();
 
-        var filas = pedidoRepository.buscar(idCliente, estado, fechaInicio, fechaFin,
-                orden.propiedad(), orden.ascendente(), orden.size(), offset);
-        var contenido = filas.stream().map(PedidoService::aResponse).toList();
+        List<PedidoResponse> contenido;
+        if (incluirDetalle) {
+            var filas = pedidoRepository.buscarConDetalle(idCliente, estado, fechaInicio,
+                    fechaFin, orden.propiedad(), orden.ascendente(), orden.size(), offset);
+            contenido = agruparConDetalle(filas);
+        } else {
+            var filas = pedidoRepository.buscar(idCliente, estado, fechaInicio, fechaFin,
+                    orden.propiedad(), orden.ascendente(), orden.size(), offset);
+            contenido = filas.stream().map(f -> aResponse(f, null)).toList();
+        }
         var total = pedidoRepository.contar(idCliente, estado, fechaInicio, fechaFin);
 
         return PageResponse.of(contenido, orden.page(), orden.size(), total);
@@ -240,7 +263,7 @@ public class PedidoService {
     @Transactional(readOnly = true)
     public PedidoResponse obtener(Integer id) {
         return pedidoRepository.buscarPorId(id)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
     }
 
@@ -302,7 +325,7 @@ public class PedidoService {
         }
 
         return pedidoRepository.buscarPorId(id)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
     }
 
@@ -397,7 +420,7 @@ public class PedidoService {
      * {@code editable} se deriva de la máquina de estados: solo un pedido {@code PENDIENTE}
      * admite cambios.
      */
-    private static PedidoResponse aResponse(Pedido pedido) {
+    private static PedidoResponse aResponse(Pedido pedido, List<DetallePedidoResponse> detalle) {
         return new PedidoResponse(
                 pedido.getIdPedido(),
                 new PedidoClienteRefResponse(pedido.getIdCliente(), pedido.getNombreCliente()),
@@ -409,6 +432,53 @@ public class PedidoService {
                 pedido.getDevoluciones(),
                 pedido.getTotalNeto(),
                 pedido.getCantidadItems(),
-                pedido.getEstado() == EstadoPedido.PENDIENTE);
+                pedido.getEstado() == EstadoPedido.PENDIENTE,
+                detalle);
+    }
+
+    /**
+     * Agrupa las filas planas del listado con detalle por pedido, preservando el orden de la
+     * página (HU-25 R-06).
+     *
+     * <p>El {@code LinkedHashMap} conserva el orden de la primera aparición de cada pedido, que
+     * es el de la consulta; las líneas de cada uno quedan en el orden del {@code ORDER BY}. Una
+     * fila sin línea crea el pedido con la lista vacía, no la omite.
+     */
+    private static List<PedidoResponse> agruparConDetalle(List<PedidoDetalleFila> filas) {
+        var pedidos = new LinkedHashMap<Integer, Pedido>();
+        var detalles = new LinkedHashMap<Integer, List<DetallePedidoResponse>>();
+        for (var fila : filas) {
+            var id = fila.pedido().getIdPedido();
+            pedidos.putIfAbsent(id, fila.pedido());
+            var lineas = detalles.computeIfAbsent(id, k -> new ArrayList<>());
+            if (fila.conDetalle()) {
+                lineas.add(aLinea(fila.linea()));
+            }
+        }
+
+        var respuestas = new ArrayList<PedidoResponse>(pedidos.size());
+        for (var pedido : pedidos.values()) {
+            respuestas.add(aResponse(pedido, detalles.get(pedido.getIdPedido())));
+        }
+        return respuestas;
+    }
+
+    /**
+     * Convierte una línea del listado en la misma forma que expone
+     * {@code GET /pedidos/{id}/detalles}, salvo lotes y total (van en {@code null}).
+     *
+     * <p>El subtotal es {@code cantidad * precioUnitario} a escala 2 con {@code HALF_UP}, igual
+     * que en {@code DetallePedidoService}: la cifra oficial nunca la entrega el cliente.
+     */
+    private static DetallePedidoResponse aLinea(DetallePedido linea) {
+        return new DetallePedidoResponse(
+                linea.idDetallePedido(),
+                new ProductoRefResponse(linea.idProducto(), linea.nombreProducto(), linea.unidad()),
+                linea.cantidad().setScale(2, RoundingMode.HALF_UP),
+                linea.precioUnitario().setScale(2, RoundingMode.HALF_UP),
+                linea.cantidad().multiply(linea.precioUnitario())
+                        .setScale(2, RoundingMode.HALF_UP),
+                null,
+                null);
     }
 }

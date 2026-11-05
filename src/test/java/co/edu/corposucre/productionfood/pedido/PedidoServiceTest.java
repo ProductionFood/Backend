@@ -3,6 +3,9 @@ package co.edu.corposucre.productionfood.pedido;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -30,6 +33,7 @@ import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
+import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
 
 class PedidoServiceTest {
 
@@ -206,7 +210,8 @@ class PedidoServiceTest {
         when(pedidoRepository.contar(ID_CLIENTE, EstadoPedido.PENDIENTE, inicio, fin))
                 .thenReturn(21L);
 
-        var r = service.listar(ID_CLIENTE, EstadoPedido.PENDIENTE, inicio, fin, 2, 10, null);
+        var r = service.listar(ID_CLIENTE, EstadoPedido.PENDIENTE, inicio, fin, 2, 10, null,
+                false);
 
         assertThat(r.content()).hasSize(1);
         assertThat(r.content().get(0).idPedido()).isEqualTo(7);
@@ -231,7 +236,8 @@ class PedidoServiceTest {
                 .thenReturn(List.of(f));
         when(pedidoRepository.contar(null, null, null, null)).thenReturn(1L);
 
-        var r = service.listar(null, null, null, null, 0, 20, null).content().get(0);
+        var r = service.listar(null, null, null, null, 0, 20, null, false)
+                .content().get(0);
 
         assertThat(r.totalPedido()).isEqualByComparingTo("500.00");
         assertThat(r.totalBruto()).isEqualByComparingTo("500.00");
@@ -261,7 +267,7 @@ class PedidoServiceTest {
                 .thenReturn(List.of());
         when(pedidoRepository.contar(null, null, null, null)).thenReturn(0L);
 
-        service.listar(null, null, null, null, 0, 20, "total,asc");
+        service.listar(null, null, null, null, 0, 20, "total,asc", false);
 
         verify(pedidoRepository).buscar(null, null, null, null, "total_pedido", true, 20, 0L);
     }
@@ -272,7 +278,7 @@ class PedidoServiceTest {
     void listarConClienteInexistenteResponde404() {
         when(clienteRepository.existsById(9999)).thenReturn(false);
 
-        assertThatThrownBy(() -> service.listar(9999, null, null, null, 0, 10, null))
+        assertThatThrownBy(() -> service.listar(9999, null, null, null, 0, 10, null, false))
                 .isInstanceOf(ClienteInexistenteFiltroException.class)
                 .hasFieldOrPropertyWithValue("codigo", "CLIENTE_INEXISTENTE")
                 .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.NOT_FOUND);
@@ -288,7 +294,7 @@ class PedidoServiceTest {
                 eq(20), eq(0L))).thenReturn(List.of());
         when(pedidoRepository.contar(ID_CLIENTE, null, null, null)).thenReturn(0L);
 
-        var r = service.listar(ID_CLIENTE, null, null, null, 0, 20, null);
+        var r = service.listar(ID_CLIENTE, null, null, null, 0, 20, null, false);
 
         assertThat(r.totalElements()).isZero();
         verify(clienteRepository, never()).existeActivo(any());
@@ -299,7 +305,8 @@ class PedidoServiceTest {
     void listarRangoInvertidoSeValidaAntesQueElCliente() {
         var hoy = LocalDate.now();
 
-        assertThatThrownBy(() -> service.listar(9999, null, hoy, hoy.minusDays(1), 0, 10, null))
+        assertThatThrownBy(() -> service.listar(9999, null, hoy, hoy.minusDays(1),
+                0, 10, null, false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
     }
@@ -309,7 +316,8 @@ class PedidoServiceTest {
     void listarConRangoInvertidoResponde400() {
         var hoy = LocalDate.now();
 
-        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null))
+        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1),
+                0, 10, null, false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
 
@@ -319,11 +327,120 @@ class PedidoServiceTest {
     @Test
     @DisplayName("listar con un campo de orden fuera de la lista blanca responde 400")
     void listarConCampoDeOrdenNoListadoResponde400() {
-        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "cliente"))
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "cliente", false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
 
         verifyNoInteractions(pedidoRepository);
+    }
+
+    private static PedidoDetalleFila filaConLinea(int idPedido, Integer idLinea, String cantidad,
+                                                  String precio) {
+        var cabecera = fila(idPedido, EstadoPedido.PENDIENTE, null, new BigDecimal("150.00"), 1);
+        var linea = idLinea == null ? null
+                : new DetallePedido(idLinea, idPedido, 5, "Pan integral", "u",
+                        new BigDecimal(cantidad), new BigDecimal(precio));
+        return new PedidoDetalleFila(cabecera, linea);
+    }
+
+    @Test
+    @DisplayName("HU-25 CA-04: listar sin incluirDetalle nunca consulta el detalle y deja "
+            + "detalle en null")
+    void listarSinIncluirDetalleNoTocaElDetalle() {
+        when(pedidoRepository.buscar(eq(null), eq(null), eq(null), eq(null),
+                eq("p.fecha_pedido"), eq(false), eq(20), eq(0L)))
+                .thenReturn(List.of(fila(7, EstadoPedido.PENDIENTE, null,
+                        new BigDecimal("150.00"), 2)));
+
+        var r = service.listar(null, null, null, null, 0, 20, null, false);
+
+        assertThat(r.content().get(0).detalle()).isNull();
+        verify(pedidoRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                eq(true), anyInt(), anyLong());
+        verify(pedidoRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                eq(false), anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("HU-25 R-06: con incluirDetalle agrupa las líneas por pedido en el orden de la "
+            + "página, con subtotal y precio histórico")
+    void listarConIncluirDetalleAgrupaLasLineasPorPedido() {
+        when(pedidoRepository.buscarConDetalle(eq(null), eq(null), eq(null), eq(null),
+                eq("p.fecha_pedido"), eq(false), eq(20), eq(0L))).thenReturn(List.of(
+                filaConLinea(9, 101, "3.00", "10.50"),
+                filaConLinea(9, 102, "2.00", "4.00"),
+                filaConLinea(4, null, null, null),
+                filaConLinea(8, 103, "1.50", "2.00")));
+        when(pedidoRepository.contar(null, null, null, null)).thenReturn(3L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null, true);
+
+        assertThat(r.content()).extracting(PedidoResponse::idPedido).containsExactly(9, 4, 8);
+        var primero = r.content().get(0).detalle();
+        assertThat(primero).hasSize(2);
+        assertThat(primero.get(0).idDetallePedido()).isEqualTo(101);
+        assertThat(primero.get(0).producto().nombre()).isEqualTo("Pan integral");
+        assertThat(primero.get(0).producto().unidad()).isEqualTo("u");
+        assertThat(primero.get(0).cantidad()).isEqualByComparingTo("3.00");
+        assertThat(primero.get(0).precioUnitario()).isEqualByComparingTo("10.50");
+        assertThat(primero.get(0).subtotal()).isEqualByComparingTo("31.50");
+        assertThat(primero.get(0).subtotal().scale()).isEqualTo(2);
+        assertThat(primero.get(0).lotesConsumidos()).isNull();
+        assertThat(primero.get(0).totalPedido()).isNull();
+        assertThat(primero.get(1).idDetallePedido()).isEqualTo(102);
+        // Un pedido sin líneas conserva la lista vacía, no null.
+        assertThat(r.content().get(1).detalle()).isEmpty();
+        assertThat(r.content().get(2).detalle()).hasSize(1);
+        assertThat(r.totalElements()).isEqualTo(3L);
+        verify(pedidoRepository, never()).buscar(any(), any(), any(), any(), any(),
+                anyBoolean(), anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-10: con incluirDetalle un size mayor que 20 se recorta a 20 sin error "
+            + "y la respuesta refleja el tamaño recortado")
+    void listarConIncluirDetalleRecortaElSizeA20() {
+        when(pedidoRepository.buscarConDetalle(any(), any(), any(), any(), any(), anyBoolean(),
+                anyInt(), anyLong())).thenReturn(List.of());
+
+        var r = service.listar(null, null, null, null, 1, 100, null, true);
+
+        assertThat(r.size()).isEqualTo(20);
+        assertThat(r.page()).isEqualTo(1);
+        // El offset se calcula con el size recortado: página 1 de 20 es offset 20, no 100.
+        verify(pedidoRepository).buscarConDetalle(null, null, null, null, "p.fecha_pedido",
+                false, 20, 20L);
+    }
+
+    @Test
+    @DisplayName("HU-25: sin incluirDetalle un size de 100 se respeta, el recorte es solo del "
+            + "detalle")
+    void listarSinDetalleNoRecortaElSize() {
+        var r = service.listar(null, null, null, null, 0, 100, null, false);
+
+        assertThat(r.size()).isEqualTo(100);
+        verify(pedidoRepository).buscar(null, null, null, null, "p.fecha_pedido", false, 100,
+                0L);
+    }
+
+    @Test
+    @DisplayName("HU-25: con incluirDetalle siguen aplicando las validaciones de rango, cliente "
+            + "y orden")
+    void listarConIncluirDetalleConservaLasValidaciones() {
+        var hoy = LocalDate.now();
+        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null,
+                true))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+        when(clienteRepository.existsById(9999)).thenReturn(false);
+        assertThatThrownBy(() -> service.listar(9999, null, null, null, 0, 10, null, true))
+                .isInstanceOf(ClienteInexistenteFiltroException.class);
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "cliente", true))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verify(pedidoRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                anyBoolean(), anyInt(), anyLong());
     }
 
     @Test

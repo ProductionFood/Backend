@@ -38,9 +38,11 @@ import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.config.SecurityConfig;
+import co.edu.corposucre.productionfood.lote.dto.ProductoRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
+import co.edu.corposucre.productionfood.pedido.dto.DetallePedidoResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoClienteRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
 import co.edu.corposucre.productionfood.security.AccesoDenegadoHandler;
@@ -94,7 +96,7 @@ class PedidoControllerTest {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), "PENDIENTE",
                 new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
-                new BigDecimal("0.00"), 0, true);
+                new BigDecimal("0.00"), 0, true, null);
     }
 
     /**
@@ -105,7 +107,7 @@ class PedidoControllerTest {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), estado,
                 new BigDecimal("120.00"), new BigDecimal("120.00"), new BigDecimal("0.00"),
-                new BigDecimal("120.00"), 3, "PENDIENTE".equals(estado));
+                new BigDecimal("120.00"), 3, "PENDIENTE".equals(estado), null);
     }
 
     private static CrearPedidoRequest pedidoDeCreacionValido() {
@@ -188,7 +190,7 @@ class PedidoControllerTest {
     @DisplayName("El listado con filtros los pasa al servicio tal cual")
     void listadoConFiltrosLosPasaAlServicio() throws Exception {
         when(pedidoService.listar(1, EstadoPedido.PENDIENTE, LocalDate.of(2026, 10, 1),
-                LocalDate.of(2026, 10, 31), 0, 20, null))
+                LocalDate.of(2026, 10, 31), 0, 20, null, false))
                 .thenReturn(PageResponse.of(List.of(pedido(41)), 0, 20, 1));
 
         mockMvc.perform(get("/api/v1/pedidos")
@@ -205,21 +207,21 @@ class PedidoControllerTest {
                 .andExpect(jsonPath("$.totalElements").value(1));
 
         verify(pedidoService).listar(1, EstadoPedido.PENDIENTE, LocalDate.of(2026, 10, 1),
-                LocalDate.of(2026, 10, 31), 0, 20, null);
+                LocalDate.of(2026, 10, 31), 0, 20, null, false);
     }
 
     @Test
     @WithMockUser(roles = "PRODUCCION")
     @DisplayName("El listado con sort de la lista blanca lo pasa al servicio")
     void listadoConSortValidoLoPasaAlServicio() throws Exception {
-        when(pedidoService.listar(null, null, null, null, 0, 20, "fechaEntrega,asc"))
+        when(pedidoService.listar(null, null, null, null, 0, 20, "fechaEntrega,asc", false))
                 .thenReturn(PageResponse.of(List.of(pedido(41)), 0, 20, 1));
 
         mockMvc.perform(get("/api/v1/pedidos").param("sort", "fechaEntrega,asc"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].idPedido").value(41));
 
-        verify(pedidoService).listar(null, null, null, null, 0, 20, "fechaEntrega,asc");
+        verify(pedidoService).listar(null, null, null, null, 0, 20, "fechaEntrega,asc", false);
     }
 
     @Test
@@ -229,8 +231,8 @@ class PedidoControllerTest {
         var conImportes = new PedidoResponse(41, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), null, "ENTREGADO",
                 new BigDecimal("500.00"), new BigDecimal("500.00"), new BigDecimal("120.00"),
-                new BigDecimal("380.00"), 2, false);
-        when(pedidoService.listar(null, null, null, null, 0, 20, null))
+                new BigDecimal("380.00"), 2, false, null);
+        when(pedidoService.listar(null, null, null, null, 0, 20, null, false))
                 .thenReturn(PageResponse.of(List.of(conImportes), 0, 20, 1));
 
         mockMvc.perform(get("/api/v1/pedidos"))
@@ -246,21 +248,21 @@ class PedidoControllerTest {
     @WithMockUser(roles = "CONSULTA")
     @DisplayName("HU-25: sort=total se pasa al servicio")
     void listadoConSortTotalLoPasaAlServicio() throws Exception {
-        when(pedidoService.listar(null, null, null, null, 0, 20, "total,desc"))
+        when(pedidoService.listar(null, null, null, null, 0, 20, "total,desc", false))
                 .thenReturn(PageResponse.of(List.of(pedido(41)), 0, 20, 1));
 
         mockMvc.perform(get("/api/v1/pedidos").param("sort", "total,desc"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].idPedido").value(41));
 
-        verify(pedidoService).listar(null, null, null, null, 0, 20, "total,desc");
+        verify(pedidoService).listar(null, null, null, null, 0, 20, "total,desc", false);
     }
 
     @Test
     @WithMockUser(roles = "CONSULTA")
     @DisplayName("HU-25: un idCliente inexistente en el listado responde 404 CLIENTE_INEXISTENTE")
     void listadoConClienteInexistenteResponde404() throws Exception {
-        when(pedidoService.listar(9999, null, null, null, 0, 20, null))
+        when(pedidoService.listar(9999, null, null, null, 0, 20, null, false))
                 .thenThrow(new ClienteInexistenteFiltroException(9999));
 
         mockMvc.perform(get("/api/v1/pedidos").param("idCliente", "9999"))
@@ -272,7 +274,7 @@ class PedidoControllerTest {
     @WithMockUser(roles = "CONSULTA")
     @DisplayName("Un campo de orden fuera de la lista blanca responde 400 CAMPO_ORDEN_INVALIDO")
     void listadoConSortInvalidoResponde400() throws Exception {
-        when(pedidoService.listar(null, null, null, null, 0, 20, "cliente"))
+        when(pedidoService.listar(null, null, null, null, 0, 20, "cliente", false))
                 .thenThrow(new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO",
                         "El campo de ordenamiento 'cliente' no es válido."));
 
@@ -286,7 +288,7 @@ class PedidoControllerTest {
     @DisplayName("Un rango de fechas invertido responde 400 RANGO_FECHAS_INVALIDO")
     void listadoConRangoInvertidoResponde400() throws Exception {
         when(pedidoService.listar(null, null, LocalDate.of(2026, 10, 31),
-                LocalDate.of(2026, 10, 1), 0, 20, null))
+                LocalDate.of(2026, 10, 1), 0, 20, null, false))
                 .thenThrow(new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
                         "La fecha de inicio no puede ser posterior a la fecha de fin."));
 
@@ -301,7 +303,7 @@ class PedidoControllerTest {
     @WithMockUser(roles = "VENTAS")
     @DisplayName("Un size mayor que 100 responde 400 PARAMETRO_INVALIDO")
     void listadoConSizeDe101Responde400() throws Exception {
-        when(pedidoService.listar(null, null, null, null, 0, 101, null))
+        when(pedidoService.listar(null, null, null, null, 0, 101, null, false))
                 .thenThrow(new ParametroInvalidoException("PARAMETRO_INVALIDO",
                         "El parámetro 'size' debe estar entre 1 y 100."));
 
@@ -470,5 +472,90 @@ class PedidoControllerTest {
         var captor = ArgumentCaptor.forClass(CambiarEstadoPedidoRequest.class);
         verify(pedidoService).cambiarEstado(eq(41), captor.capture());
         assertThat(captor.getValue().estado()).isEqualTo(EstadoPedido.EN_PREPARACION);
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("HU-25 CP-09: con incluirDetalle=true cada pedido añade su lista detalle")
+    void listadoConIncluirDetalleDevuelveElDetalle() throws Exception {
+        when(pedidoService.listar(null, null, null, null, 0, 20, null, true))
+                .thenReturn(PageResponse.of(List.of(pedidoConDetalle(41), pedidoSinLineas(42)),
+                        0, 20, 2));
+
+        mockMvc.perform(get("/api/v1/pedidos").param("incluirDetalle", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idPedido").value(41))
+                .andExpect(jsonPath("$.content[0].detalle.length()").value(1))
+                .andExpect(jsonPath("$.content[0].detalle[0].idDetallePedido").value(101))
+                .andExpect(jsonPath("$.content[0].detalle[0].producto.nombre")
+                        .value("Pan integral"))
+                .andExpect(jsonPath("$.content[0].detalle[0].producto.unidad").value("u"))
+                .andExpect(jsonPath("$.content[0].detalle[0].cantidad").value(3.00))
+                .andExpect(jsonPath("$.content[0].detalle[0].precioUnitario").value(10.50))
+                .andExpect(jsonPath("$.content[0].detalle[0].subtotal").value(31.50))
+                .andExpect(jsonPath("$.content[0].detalle[0].lotesConsumidos").doesNotExist())
+                .andExpect(jsonPath("$.content[0].detalle[0].totalPedido").doesNotExist())
+                // Un pedido sin líneas responde la lista vacía, no la omite.
+                .andExpect(jsonPath("$.content[1].detalle").isArray())
+                .andExpect(jsonPath("$.content[1].detalle.length()").value(0));
+
+        verify(pedidoService).listar(null, null, null, null, 0, 20, null, true);
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("HU-25: sin incluirDetalle el JSON no lleva el campo detalle")
+    void listadoSinIncluirDetalleNoSerializaElDetalle() throws Exception {
+        when(pedidoService.listar(null, null, null, null, 0, 20, null, false))
+                .thenReturn(PageResponse.of(List.of(pedido(41)), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/pedidos"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idPedido").value(41))
+                .andExpect(jsonPath("$.content[0].detalle").doesNotExist());
+
+        verify(pedidoService).listar(null, null, null, null, 0, 20, null, false);
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("HU-25 CP-10: con incluirDetalle=true y size=100 la respuesta refleja size 20")
+    void listadoConIncluirDetalleYSize100ReflejaElSizeRecortado() throws Exception {
+        // El controlador solo pasa el parámetro: el recorte lo aplica el servicio y la
+        // respuesta refleja el size efectivo que este devuelve.
+        when(pedidoService.listar(null, null, null, null, 0, 100, null, true))
+                .thenReturn(PageResponse.of(List.of(pedidoConDetalle(41)), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/pedidos")
+                        .param("incluirDetalle", "true").param("size", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.content[0].detalle.length()").value(1));
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("HU-25: un incluirDetalle no booleano responde 400 PARAMETRO_INVALIDO")
+    void listadoConIncluirDetalleNoBooleanoResponde400() throws Exception {
+        mockMvc.perform(get("/api/v1/pedidos").param("incluirDetalle", "quizas"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
+    }
+
+    private static PedidoResponse pedidoConDetalle(int id) {
+        var linea = new DetallePedidoResponse(101, new ProductoRefResponse(5, "Pan integral", "u"),
+                new BigDecimal("3.00"), new BigDecimal("10.50"), new BigDecimal("31.50"), null,
+                null);
+        return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
+                LocalDate.of(2026, 10, 30), null, "PENDIENTE",
+                new BigDecimal("31.50"), new BigDecimal("31.50"), new BigDecimal("0.00"),
+                new BigDecimal("31.50"), 1, true, List.of(linea));
+    }
+
+    private static PedidoResponse pedidoSinLineas(int id) {
+        return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
+                LocalDate.of(2026, 10, 30), null, "PENDIENTE",
+                new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
+                new BigDecimal("0.00"), 0, true, List.of());
     }
 }

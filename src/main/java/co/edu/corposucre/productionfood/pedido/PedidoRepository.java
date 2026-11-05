@@ -44,8 +44,8 @@ public class PedidoRepository {
      * {@code productos.precio} (R-02). Solo descuentan las devoluciones {@code APROBADA}; las
      * pendientes y las rechazadas no (R-04).
      */
-    private static final String SELECT = """
-            SELECT p.id_pedido, p.id_cliente, p.fecha_pedido, p.fecha_entrega, p.estado,
+    private static final String COLUMNAS_CABECERA = """
+            p.id_pedido, p.id_cliente, p.fecha_pedido, p.fecha_entrega, p.estado,
                    c.nombre AS nombre_cliente,
                    COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
                              FROM detalle_pedido dp
@@ -69,8 +69,35 @@ public class PedidoRepository {
                    COALESCE((SELECT COUNT(*)
                              FROM detalle_pedido dp
                              WHERE dp.id_pedido = p.id_pedido), 0) AS cantidad_items
+            """;
+
+    private static final String SELECT = "SELECT " + COLUMNAS_CABECERA + """
             FROM pedidos p
             JOIN clientes c ON c.id_cliente = p.id_cliente
+            """;
+
+    /**
+     * Origen del listado con el detalle unido (HU-25 R-06), para {@link #buscarConDetalle}.
+     *
+     * <p>Trae las mismas columnas de cabecera que {@link #SELECT} —las subconsultas
+     * correlacionadas devuelven el mismo valor en cada fila de su pedido— junto a las de cada
+     * línea, con {@code LEFT JOIN} porque un pedido sin líneas debe aparecer con el detalle vacío
+     * y no desaparecer. El precio sale de {@code detalle_pedido.precio_unitario}, el congelado al
+     * vender, y nunca de {@code productos.precio} (R-02); el producto y su unidad se unen solo
+     * para rotular la línea, igual que {@code GET /pedidos/{id}/detalles}.
+     *
+     * <p>El {@code %s} es la página de cabeceras, que se pagina <strong>antes</strong> de unir el
+     * detalle: un {@code LIMIT} sobre el {@code JOIN} cortaría por filas y una página de 20
+     * devolvería menos de 20 pedidos.
+     */
+    private static final String SELECT_CON_DETALLE = "SELECT " + COLUMNAS_CABECERA + """
+                   , dp.id_detalle_pedido, dp.id_producto, dp.cantidad, dp.precio_unitario,
+                   pr.nombre AS nombre_producto, u.abreviatura AS unidad
+            FROM (%s) p
+            JOIN clientes c ON c.id_cliente = p.id_cliente
+            LEFT JOIN detalle_pedido dp ON dp.id_pedido = p.id_pedido
+            LEFT JOIN productos pr ON pr.id_producto = dp.id_producto
+            LEFT JOIN unidades_medida u ON u.id_unidad = pr.id_unidad
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -114,6 +141,50 @@ public class PedidoRepository {
                 + " LIMIT :tamano OFFSET :desplazamiento";
 
         return jdbc.query(sql, params, new PedidoRowMapper());
+    }
+
+    /**
+     * Devuelve una página de pedidos con su detalle en una única consulta (HU-25 R-06).
+     *
+     * <p>Aplica los mismos filtros y el mismo orden que {@link #buscar}, pero la página de
+     * <strong>pedidos</strong> se corta en una subconsulta y solo después se unen las líneas con
+     * {@code LEFT JOIN}: el {@code size} cuenta pedidos, no filas. Es una sola sentencia para
+     * toda la página, nunca una consulta por pedido. La subpágina proyecta también
+     * {@code total_pedido} porque el orden puede pedirlo ({@code sort=total}) y el alias solo
+     * existiría en la proyección exterior.
+     *
+     * @param idCliente       filtro por cliente, o {@code null} sin filtro
+     * @param estado          filtro por estado, o {@code null} sin filtro
+     * @param fechaInicio     primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin        último día incluido del rango, o {@code null} sin límite superior
+     * @param propiedadOrden  columna o alias ya validado por la lista blanca del servicio
+     * @param ascendente      {@code true} para orden ascendente, {@code false} para descendente
+     * @param size            número de <strong>pedidos</strong> de la página
+     * @param offset          desplazamiento de la página, en {@code long} porque
+     *                        {@code page * size} puede desbordar un int
+     * @return una fila por cada línea de cada pedido de la página, y una fila sin línea por cada
+     *         pedido sin detalle, en el orden de la página
+     */
+    public List<PedidoDetalleFila> buscarConDetalle(Integer idCliente, EstadoPedido estado,
+                                                    LocalDate fechaInicio, LocalDate fechaFin,
+                                                    String propiedadOrden, boolean ascendente,
+                                                    int size, long offset) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(idCliente, estado, fechaInicio, fechaFin, params);
+        params.addValue("tamano", size).addValue("desplazamiento", offset);
+
+        var orden = " ORDER BY " + propiedadOrden + (ascendente ? " ASC" : " DESC")
+                + ", p.id_pedido DESC";
+        var pagina = "SELECT p.id_pedido, p.id_cliente, p.fecha_pedido, p.fecha_entrega,"
+                + " p.estado,"
+                + " COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)"
+                + "          FROM detalle_pedido dp WHERE dp.id_pedido = p.id_pedido), 0)"
+                + "   AS total_pedido"
+                + " FROM pedidos p" + where
+                + orden + " LIMIT :tamano OFFSET :desplazamiento";
+
+        return jdbc.query(SELECT_CON_DETALLE.formatted(pagina) + orden
+                + ", dp.id_detalle_pedido", params, new PedidoDetalleFilaRowMapper());
     }
 
     /**
