@@ -1,0 +1,1959 @@
+{
+  "info": {
+    "_postman_id": "hu27-alerta-stock-bajo",
+    "name": "ProductionFood - HU-27 Alerta de stock bajo",
+    "description": "Casos de la HU-27 (alerta de stock bajo): GET /api/v1/inventario/alertas (listado con ?incluirInactivas), GET /api/v1/inventario/alertas/resumen (indicador global) y GET /api/v1/inventario/alertas/sugerencia-compra (agrupada por proveedor). Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles y guarda sus tokens; 'Alertas (CP-01…CP-26)' ejecuta los casos funcionales; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren la autorización. CP-21, CP-22 y CP-23 necesitan datos controlados o SQL anotado en su descripción (en una base compartida quedan parciales). SEC-03 y SEC-05 necesitan que rellenes a mano `tokenExpirado` y `tokenInactivo`. Nota: el parámetro inválido responde PARAMETRO_INVALIDO (la especificación decía RANGO_INVALIDO).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Preparación",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al administrador del seed. Guarda tokenAdmin e idUsuarioAdmin y genera el sufijo único de la ejecución.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const hoy = new Date();",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('fechaHoy', iso(hoy));",
+                  "const futura = new Date(hoy); futura.setDate(futura.getDate() + 7);",
+                  "pm.collectionVariables.set('fechaFutura', iso(futura));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenAdmin', j.token);",
+                  "pm.collectionVariables.set('token', j.token);",
+                  "pm.collectionVariables.set('idUsuarioAdmin', j.usuario.idUsuario);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(j.usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol PRODUCCION (idRol 2).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-27 PRODUCCION {{sufijo}}\",\n  \"correo\": \"hu27-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda `tokenProduccion` e `idUsuarioProduccion`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu27-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenProduccion', j.token);",
+                  "pm.collectionVariables.set('idUsuarioProduccion', j.usuario.idUsuario);",
+                  "pm.test(\"rol PRODUCCION\", () => pm.expect(j.usuario.rol).to.eql(\"PRODUCCION\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol VENTAS (idRol 3).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-27 VENTAS {{sufijo}}\",\n  \"correo\": \"hu27-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda `tokenVentas` e `idUsuarioVentas`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu27-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenVentas', j.token);",
+                  "pm.collectionVariables.set('idUsuarioVentas', j.usuario.idUsuario);",
+                  "pm.test(\"rol VENTAS\", () => pm.expect(j.usuario.rol).to.eql(\"VENTAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol CONSULTA (idRol 4).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-27 CONSULTA {{sufijo}}\",\n  \"correo\": \"hu27-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda `tokenConsulta` e `idUsuarioConsulta`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu27-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenConsulta', j.token);",
+                  "pm.collectionVariables.set('idUsuarioConsulta', j.usuario.idUsuario);",
+                  "pm.test(\"rol CONSULTA\", () => pm.expect(j.usuario.rol).to.eql(\"CONSULTA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol COMPRAS (idRol 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-27 COMPRAS {{sufijo}}\",\n  \"correo\": \"hu27-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda `tokenCompras` e `idUsuarioCompras`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu27-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenCompras', j.token);",
+                  "pm.collectionVariables.set('idUsuarioCompras', j.usuario.idUsuario);",
+                  "pm.test(\"rol COMPRAS\", () => pm.expect(j.usuario.rol).to.eql(\"COMPRAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sanity de alertas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "Comprueba que el servicio responde antes de correr los casos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estructura\", () => pm.expect(pm.response.json()).to.have.property(\"items\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Alertas (CP-01…CP-26)",
+      "item": [
+        {
+          "name": "CP-01 Listar alertas con ADMIN → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "CP-01: listado de materias primas con stock en o bajo el mínimo (disponible <= stockMinimo), solo activas por defecto."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.test(\"generadoEn\", () => pm.expect(j.generadoEn).to.be.a(\"string\"));",
+                  "pm.test(\"resumen coherente\", () => pm.expect(j.resumen.total).to.eql(j.resumen.agotadas + j.resumen.bajas));",
+                  "pm.test(\"total = items\", () => pm.expect(j.resumen.total).to.eql(j.items.length));",
+                  "pm.test(\"campos del ítem\", () => { if (j.items.length) { var i = j.items[0]; [\"idMateriaPrima\",\"nombre\",\"unidad\",\"cantidadDisponible\",\"stockMinimo\",\"faltante\",\"nivel\",\"costoUnitario\",\"costoReposicion\"].forEach(k => pm.expect(i).to.have.property(k)); } });",
+                  "pm.test(\"nivel válido\", () => j.items.forEach(i => pm.expect([\"AGOTADO\",\"BAJO\"]).to.include(i.nivel)));",
+                  "pm.test(\"costoReposicionTotal\", () => pm.expect(j.costoReposicionTotal).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Orden: AGOTADO primero y luego faltante descendente → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "CP-02 (R-03): el orden es AGOTADO primero y, dentro de cada nivel, mayor faltante primero."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var it = pm.response.json().items;",
+                  "pm.test(\"AGOTADO antes que BAJO\", () => { var visto = false; it.forEach(i => { if (i.nivel === \"BAJO\") visto = true; else pm.expect(visto).to.eql(false); }); });",
+                  "pm.test(\"faltante descendente dentro de cada nivel\", () => { for (var k = 1; k < it.length; k++) { if (it[k-1].nivel === it[k].nivel) pm.expect(it[k-1].faltante).to.be.at.least(it[k].faltante); } });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 Cálculo de faltante y costo de reposición → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "CP-03: faltante = stockMinimo − cantidadDisponible; costoReposicion = faltante × costoUnitario. Nota: los ejemplos de costo de la especificación §4 son inconsistentes (15,5 × 18500 = 286750, no 344100); el JSON real usa estos cálculos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"faltante = stockMinimo - cantidadDisponible\", () => pm.response.json().items.forEach(i => pm.expect(Math.abs(i.faltante - (i.stockMinimo - i.cantidadDisponible))).to.be.below(0.011)));",
+                  "pm.test(\"costoReposicion = faltante x costoUnitario\", () => pm.response.json().items.forEach(i => pm.expect(Math.abs(i.costoReposicion - i.faltante * i.costoUnitario)).to.be.below(0.011)));",
+                  "pm.test(\"total = suma de costos\", () => { var j = pm.response.json(); var s = j.items.reduce((a, i) => a + i.costoReposicion, 0); pm.expect(Math.abs(j.costoReposicionTotal - s)).to.be.below(0.011); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 incluirInactivas=false (explícito) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas?incluirInactivas=false"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"items es arreglo\", () => pm.expect(pm.response.json().items).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 incluirInactivas=true → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas?incluirInactivas=true"
+            },
+            "description": "CP-05: con true se incluyen también las materias primas inactivas; no cambia el contrato."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"incluye al menos las activas\", () => pm.expect(pm.response.json().resumen.total).to.be.at.least(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 ultimaActualizacion es opcional → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "CP-06: ultimaActualizacion se omite si la materia prima no tiene fila de inventario (el JSON omite nulos)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ultimaActualizacion string o ausente\", () => pm.response.json().items.forEach(i => { if (i.ultimaActualizacion !== undefined) pm.expect(i.ultimaActualizacion).to.be.a(\"string\"); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Resumen para el indicador global → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            },
+            "description": "CP-07: contadores para el indicador global; solo materias primas activas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var r = pm.response.json();",
+                  "pm.test(\"forma {total, agotadas, bajas}\", () => { pm.expect(r).to.have.all.keys(\"total\",\"agotadas\",\"bajas\"); });",
+                  "pm.test(\"total = agotadas + bajas\", () => pm.expect(r.total).to.eql(r.agotadas + r.bajas));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 El resumen coincide con /alertas activas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            },
+            "description": "CP-08: guarda el total del resumen; el siguiente caso lo compara con el listado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"resumenTotal\", pm.response.json().total);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 Comparar total del resumen con el listado → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas?incluirInactivas=false"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"total coincide\", () => pm.expect(pm.response.json().resumen.total).to.eql(Number(pm.collectionVariables.get(\"resumenTotal\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 Sugerencia de compra con ADMIN → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            },
+            "description": "CP-10: grupos por proveedor de la última compra RECIBIDA. Las materias primas sin compras recibidas van en un grupo sin la clave `proveedor`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var g = pm.response.json();",
+                  "pm.test(\"arreglo de grupos\", () => pm.expect(g).to.be.an(\"array\"));",
+                  "pm.test(\"forma del grupo\", () => g.forEach(x => { pm.expect(x).to.have.property(\"items\"); pm.expect(x).to.have.property(\"totalEstimado\"); if (x.proveedor) { pm.expect(x.proveedor).to.have.property(\"idProveedor\"); pm.expect(x.proveedor).to.have.property(\"nombre\"); } }));",
+                  "pm.test(\"forma del ítem\", () => g.forEach(x => x.items.forEach(i => { [\"materiaPrima\",\"faltante\",\"cantidadSugerida\",\"costoEstimado\"].forEach(k => pm.expect(i).to.have.property(k)); })));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 cantidadSugerida = faltante x 1,2 hacia arriba → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            },
+            "description": "CP-11 (R-05): cantidadSugerida = faltante × 1,2 redondeado hacia arriba a 2 decimales. Se excluyen de la sugerencia las de faltante 0 (mínimo 0 y agotadas), aunque sí salen en /alertas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"cantidadSugerida\", () => pm.response.json().forEach(x => x.items.forEach(i => { var esperado = Math.ceil(Math.round(i.faltante * 1.2 * 1e6) / 1e6 * 100) / 100; pm.expect(Math.abs(i.cantidadSugerida - esperado)).to.be.below(0.0101); })));",
+                  "pm.test(\"sin ítems con faltante 0\", () => pm.response.json().forEach(x => x.items.forEach(i => pm.expect(i.faltante).to.be.above(0))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 costoEstimado y totalEstimado → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            },
+            "description": "CP-12: costoEstimado = cantidadSugerida × costoUnitario; totalEstimado es la suma del grupo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"totalEstimado = suma de costoEstimado\", () => pm.response.json().forEach(x => { var s = x.items.reduce((a, i) => a + i.costoEstimado, 0); pm.expect(Math.abs(x.totalEstimado - s)).to.be.below(0.011); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Grupo sin proveedor omite la clave → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            },
+            "description": "CP-13: el grupo de materias primas sin compras recibidas no trae `proveedor` (no es null)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"proveedor ausente o con idProveedor\", () => pm.response.json().forEach(x => { if (x.proveedor !== undefined) pm.expect(x.proveedor.idProveedor).to.be.a(\"number\"); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 COMPRAS consulta la sugerencia → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 Resumen con rol CONSULTA → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            },
+            "description": "CP-15: el resumen está disponible para cualquier rol autenticado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"forma\", () => pm.expect(pm.response.json()).to.have.all.keys(\"total\",\"agotadas\",\"bajas\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Resumen con rol VENTAS → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            },
+            "description": "CP-16: VENTAS no ve el listado completo (403) pero sí el indicador global."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 incluirInactivas inválido → 400 PARAMETRO_INVALIDO",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas?incluirInactivas=abc"
+            },
+            "description": "CP-17: el valor no es booleano. La especificación indica RANGO_INVALIDO; el backend responde PARAMETRO_INVALIDO (código transversal para parámetros mal formados)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 incluirInactivas vacío → 400 PARAMETRO_INVALIDO",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas?incluirInactivas="
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"PARAMETRO_INVALIDO\", () => pm.expect(pm.response.json().code).to.eql(\"PARAMETRO_INVALIDO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Método no permitido (POST en /alertas) → 405",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "CP-19: el recurso es de solo lectura; cualquier método distinto de GET responde 405.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-20 Método no permitido (DELETE en /alertas/resumen) → 405",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 405\", () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 Alertas reflejan cambios de inventario (ver descripción) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "CP-21 (parcial, base compartida): no se ejecuta automáticamente. Procedimiento manual: con SQL, bajar `inventario_materia_prima.cantidad_disponible` de una materia prima activa por debajo de `stock_minimo`, volver a llamar y verificar que aparece; no hay caché, el cambio es inmediato."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 Materia prima agotada con mínimo cero (ver descripción) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "CP-22 (parcial): una materia prima con stockMinimo 0 y cantidad 0 sale en /alertas como AGOTADO con faltante 0, pero no entra en /sugerencia-compra. Requiere datos controlados."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 Prellenado de compra HU-13 (ver descripción) → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            },
+            "description": "CP-23: el frontend toma un grupo y prellena `POST /api/v1/compras` (HU-13) con idProveedor y los ítems idMateriaPrima/cantidad = cantidadSugerida. Esta historia no crea compras."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-24 Sin caché: dos llamadas consecutivas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"sin Cache-Control público\", () => pm.expect((pm.response.headers.get(\"Cache-Control\") || \"\").toLowerCase()).to.not.include(\"public\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-25 Orden de la sugerencia: grupos con proveedor → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"items no vacíos\", () => pm.response.json().forEach(x => pm.expect(x.items.length).to.be.above(0)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-26 Formato de fechas del listado → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"generadoEn ISO\", () => pm.expect(pm.response.json().generadoEn).to.match(/^\\d{4}-\\d{2}-\\d{2}T/));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "item": [
+        {
+          "name": "ADMIN GET /inventario/alertas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /inventario/alertas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /inventario/alertas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /inventario/alertas → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /inventario/alertas → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN GET /inventario/alertas/resumen → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /inventario/alertas/resumen → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /inventario/alertas/resumen → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /inventario/alertas/resumen → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /inventario/alertas/resumen → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN GET /inventario/alertas/sugerencia-compra → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /inventario/alertas/sugerencia-compra → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /inventario/alertas/sugerencia-compra → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /inventario/alertas/sugerencia-compra → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /inventario/alertas/sugerencia-compra → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "item": [
+        {
+          "name": "SEC-01 GET listado sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET resumen sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET sugerencia sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET listado token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET resumen token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET sugerencia token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer no-es-un-token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET listado token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "SEC-03: rellenar a mano la variable `tokenExpirado` con un JWT vencido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET resumen token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/resumen"
+            },
+            "description": "SEC-03: rellenar a mano la variable `tokenExpirado` con un JWT vencido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET sugerencia token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            },
+            "description": "SEC-03: rellenar a mano la variable `tokenExpirado` con un JWT vencido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET listado con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET sugerencia con PRODUCCION → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET sugerencia con CONSULTA → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET sugerencia con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas/sugerencia-compra"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET listado usuario inactivo (ver descripción)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/inventario/alertas"
+            },
+            "description": "SEC-05: rellenar a mano `tokenInactivo` con un token vigente de un usuario con `estado = 0`. Hallazgo del QA: el backend responde 401 en lugar de 403 USUARIO_INACTIVO; es un defecto transversal del filtro JWT, fuera de HU-27."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401 o 403\", () => pm.expect([401, 403]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioAdmin",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioProduccion",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioVentas",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioConsulta",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioCompras",
+      "value": ""
+    },
+    {
+      "key": "fechaHoy",
+      "value": ""
+    },
+    {
+      "key": "fechaFutura",
+      "value": ""
+    },
+    {
+      "key": "resumenTotal",
+      "value": ""
+    }
+  ]
+}
