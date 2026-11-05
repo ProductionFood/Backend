@@ -226,7 +226,7 @@ class EficienciaRepositoryTest {
     }
 
     @Test
-    @DisplayName("R-06: acumulado por materia prima con SUM, COUNT DISTINCT y sin cancelados")
+    @DisplayName("R-06: acumulado por materia prima con SUM, COUNT DISTINCT, solo COMPLETADO")
     void acumuladoPorMateriaPrima() {
         var otroProducto = sembrarProducto("Otro");
         var plan1 = sembrarPlan(D9, "COMPLETADO");
@@ -247,11 +247,10 @@ class EficienciaRepositoryTest {
         assertThat(filas).hasSize(1);
         var fila = filas.get(0);
         assertThat(fila.unidad()).isEqualTo(sufijo.substring(5));
-        assertThat(fila.teorica()).isEqualByComparingTo("19.500");
+        assertThat(fila.teorica()).isEqualByComparingTo("12.500");
         assertThat(fila.real()).isEqualByComparingTo("13.000");
-        assertThat(fila.planes()).isEqualTo(2);
-        assertThat(repository.materiasPrimasAcumuladas(D11, D11)).isEmpty();
-        assertThat(repository.materiasPrimasAcumuladas(D10, D10).get(0).planes()).isEqualTo(1);
+        assertThat(fila.planes()).isEqualTo(1);
+        assertThat(repository.materiasPrimasAcumuladas(D10, D11)).isEmpty();
     }
 
     @Test

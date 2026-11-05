@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,17 +38,21 @@ import co.edu.corposucre.productionfood.reporte.dto.SinRecetaResponse;
  *
  * <p>Los {@code null} (rendimiento con real en cero, desviación con teórico en cero) nunca se
  * promedian como cero (R-03): las medias ignoran los valores ausentes y devuelven {@code null}
- * si no queda ninguno. Los planes cancelados se listan y se cuentan aparte, pero no entran en
- * ningún promedio ni en el acumulado por materia prima (R-05, R-06).
+ * si no queda ninguno. Un consumo cuya teórica es cero o inexistente (materia prima fuera de la
+ * receta) tampoco tiene rendimiento ni rendimiento ajustado: viaja {@code null} y se cuenta en
+ * {@code registrosSinRendimiento}. Los planes cancelados y los que siguen en proceso se listan y se
+ * cuentan aparte, pero no entran en ningún promedio ni en el acumulado por materia prima (R-05,
+ * R-06).
  */
 @Service
 @Transactional(readOnly = true)
 public class EficienciaService {
 
     /**
-     * Umbral de la tendencia de una materia prima, en puntos porcentuales de desviación. Por
-     * encima de {@code +5.00} el consumo es excesivo, por debajo de {@code -5.00} es reducido y
-     * entre ambos (extremos incluidos) se considera normal.
+     * Umbral por defecto de la tendencia de una materia prima, en puntos porcentuales de
+     * desviación. Se configura con {@code productionfood.eficiencia.umbral-tendencia}. Por encima
+     * de {@code +umbral} el consumo es excesivo, por debajo de {@code -umbral} es reducido y entre
+     * ambos (extremos incluidos) se considera normal.
      */
     public static final BigDecimal UMBRAL_TENDENCIA = new BigDecimal("5.00");
 
@@ -71,11 +76,15 @@ public class EficienciaService {
 
     private final EficienciaRepository repository;
     private final CalculadoraEficienciaService calculadora;
+    private final BigDecimal umbralTendencia;
 
     public EficienciaService(EficienciaRepository repository,
-                             CalculadoraEficienciaService calculadora) {
+                             CalculadoraEficienciaService calculadora,
+                             @Value("${productionfood.eficiencia.umbral-tendencia:5.00}")
+                             BigDecimal umbralTendencia) {
         this.repository = repository;
         this.calculadora = calculadora;
+        this.umbralTendencia = umbralTendencia.abs();
     }
 
     /**
@@ -91,13 +100,14 @@ public class EficienciaService {
         var planes = construirPlanes(filas, repository.productosDePlanes(ids),
                 repository.consumosDePlanes(ids));
 
-        var vigentes = planes.stream().filter(p -> !esCancelado(p)).toList();
+        var vigentes = planes.stream().filter(EficienciaService::esAnalizable).toList();
         var consumosVigentes = vigentes.stream().flatMap(p -> p.consumos().stream()).toList();
         var materias = acumuladoPorMateriaPrima(fechaInicio, fechaFin);
 
         var resumen = new ResumenEficienciaResponse(
                 vigentes.size(),
-                planes.size() - vigentes.size(),
+                contar(planes, EstadoPlan.CANCELADO),
+                contar(planes, EstadoPlan.EN_PROCESO),
                 media(vigentes.stream().map(EficienciaPlanResponse::cumplimiento).toList()),
                 media(consumosVigentes.stream()
                         .map(EficienciaPlanResponse.Consumo::eficiencia).toList()),
@@ -163,14 +173,14 @@ public class EficienciaService {
         return lista;
     }
 
-    private static String tendencia(BigDecimal desviacion) {
+    private String tendencia(BigDecimal desviacion) {
         if (desviacion == null) {
             return TENDENCIA_SIN_BASE;
         }
-        if (desviacion.compareTo(UMBRAL_TENDENCIA) > 0) {
+        if (desviacion.compareTo(umbralTendencia) > 0) {
             return TENDENCIA_EXCESIVO;
         }
-        if (desviacion.compareTo(UMBRAL_TENDENCIA.negate()) < 0) {
+        if (desviacion.compareTo(umbralTendencia.negate()) < 0) {
             return TENDENCIA_REDUCIDO;
         }
         return TENDENCIA_NORMAL;
@@ -214,11 +224,14 @@ public class EficienciaService {
         var teoricoAjustado = f.teorica() == null ? null
                 : f.teorica().multiply(f.producida())
                         .divide(f.planificada(), ESCALA_AJUSTE, RoundingMode.HALF_UP);
+        // Fuera de receta (teórica nula o cero) no hay rendimiento que medir: la calculadora
+        // devolvería 0.00 y arrastraría el promedio, así que ni se le pregunta.
+        var fueraDeReceta = f.teorica() == null || f.teorica().signum() == 0;
         return new EficienciaPlanResponse.Consumo(f.materiaPrima(), f.unidad(),
                 cantidad(f.teorica()), cantidad(f.real()),
                 calculadora.desviacion(f.teorica(), f.real()),
-                calculadora.eficiencia(f.teorica(), f.real()),
-                calculadora.eficiencia(teoricoAjustado, f.real()));
+                fueraDeReceta ? null : calculadora.eficiencia(f.teorica(), f.real()),
+                fueraDeReceta ? null : calculadora.eficiencia(teoricoAjustado, f.real()));
     }
 
     /**
@@ -239,8 +252,13 @@ public class EficienciaService {
         return valor == null ? null : valor.setScale(ESCALA_CANTIDAD, RoundingMode.HALF_UP);
     }
 
-    private static boolean esCancelado(EficienciaPlanResponse plan) {
-        return EstadoPlan.CANCELADO.name().equals(plan.estado());
+    /** Solo los planes completados entran en los promedios del resumen. */
+    private static boolean esAnalizable(EficienciaPlanResponse plan) {
+        return EstadoPlan.COMPLETADO.name().equals(plan.estado());
+    }
+
+    private static long contar(List<EficienciaPlanResponse> planes, EstadoPlan estado) {
+        return planes.stream().filter(p -> estado.name().equals(p.estado())).count();
     }
 
     private static <T> Map<Integer, List<T>> agrupar(List<T> filas,

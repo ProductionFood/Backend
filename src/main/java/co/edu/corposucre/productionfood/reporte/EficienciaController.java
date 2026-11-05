@@ -52,14 +52,15 @@ public class EficienciaController {
                         + "fechaInicio y fechaFin (yyyy-MM-dd, inclusivas y opcionales) filtran "
                         + "por la fecha de producción del plan. Cumplimiento, rendimiento y "
                         + "rendimiento ajustado se informan por separado; los valores no "
-                        + "calculables viajan null y no se promedian como cero. Los planes "
-                        + "cancelados se listan pero no entran en los promedios. ADMIN y "
-                        + "PRODUCCION.")
+                        + "calculables viajan null (real en cero o consumo fuera de receta) y no se "
+                        + "promedian como cero. Los planes cancelados y en proceso se listan "
+                        + "pero no entran en los promedios: planesAnalizados son solo los "
+                        + "COMPLETADO. ADMIN y PRODUCCION.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Reporte de eficiencia",
                 content = @Content(examples = @ExampleObject(value = """
                         {"periodo":{"desde":"2026-09-01","hasta":"2026-09-30"},
-                         "resumen":{"planesAnalizados":1,"planesCancelados":0,
+                         "resumen":{"planesAnalizados":1,"planesCancelados":0,"planesEnProceso":0,
                           "cumplimientoPromedio":95.00,"rendimientoPromedio":96.00,
                           "rendimientoAjustadoPromedio":101.05,"registrosSinRendimiento":1,
                           "desviacionMateriaPrima":4.17},
@@ -93,9 +94,11 @@ public class EficienciaController {
     @PreAuthorize("hasAnyRole('ADMIN','PRODUCCION','COMPRAS')")
     @Operation(summary = "Desviación acumulada por materia prima",
                description = "Teórico y real acumulados por materia prima en el período "
-                        + "(fechaInicio y fechaFin opcionales, inclusivas), sin los planes "
-                        + "cancelados. La tendencia es CONSUMO_EXCESIVO por encima de +5 puntos "
-                        + "de desviación, CONSUMO_REDUCIDO por debajo de -5, NORMAL entre ambos "
+                        + "(fechaInicio y fechaFin opcionales, inclusivas), solo con los "
+                        + "planes COMPLETADO (sin cancelados ni en proceso). La tendencia es "
+                        + "CONSUMO_EXCESIVO por encima del umbral configurado (por defecto +5 "
+                        + "puntos de desviación), CONSUMO_REDUCIDO por debajo del negativo, NORMAL "
+                        + "entre ambos "
                         + "y SIN_BASE si el teórico acumulado es cero. Ordenado por desviación "
                         + "absoluta descendente. ADMIN, PRODUCCION y COMPRAS.")
     @ApiResponses({
