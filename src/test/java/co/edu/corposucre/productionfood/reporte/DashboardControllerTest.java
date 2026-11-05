@@ -31,7 +31,11 @@ import co.edu.corposucre.productionfood.config.SecurityConfig;
 import co.edu.corposucre.productionfood.reporte.dto.ComprasPendientesResponse;
 import co.edu.corposucre.productionfood.reporte.dto.ComprasPendientesResponse.MasAntigua;
 import co.edu.corposucre.productionfood.reporte.dto.DashboardResponse;
+import co.edu.corposucre.productionfood.common.pagination.PageResponse;
+import co.edu.corposucre.productionfood.pedido.EstadoPedido;
+import co.edu.corposucre.productionfood.reporte.dto.PedidoHoyResponse;
 import co.edu.corposucre.productionfood.reporte.dto.PedidosHoyResponse;
+import co.edu.corposucre.productionfood.reporte.dto.VencimientoResponse;
 import co.edu.corposucre.productionfood.reporte.dto.PorVencerResponse;
 import co.edu.corposucre.productionfood.reporte.dto.ProduccionHoyResponse;
 import co.edu.corposucre.productionfood.reporte.dto.StockBajoResponse;
@@ -167,5 +171,118 @@ class DashboardControllerTest {
         mockMvc.perform(post(RUTA)).andExpect(status().isMethodNotAllowed());
         mockMvc.perform(put(RUTA)).andExpect(status().isMethodNotAllowed());
         mockMvc.perform(delete(RUTA)).andExpect(status().isMethodNotAllowed());
+    }
+
+    @Test
+    @WithMockUser(roles = "VENTAS")
+    @DisplayName("pedidos-hoy: forma del contrato, fechaEntrega null explícito y valores por defecto")
+    void pedidosHoyForma() throws Exception {
+        var fila = new PedidoHoyResponse(41, "Panadería La Esquina", "PENDIENTE",
+                LocalDate.of(2026, 9, 18), null, new BigDecimal("84500.00"));
+        when(dashboardService.pedidosHoy(null, 0, 20, null))
+                .thenReturn(PageResponse.of(List.of(fila), 0, 20, 1));
+
+        mockMvc.perform(get(RUTA + "/pedidos-hoy"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idPedido").value(41))
+                .andExpect(jsonPath("$.content[0].cliente").value("Panadería La Esquina"))
+                .andExpect(jsonPath("$.content[0].estado").value("PENDIENTE"))
+                .andExpect(jsonPath("$.content[0].fechaPedido").value("2026-09-18"))
+                .andExpect(jsonPath("$.content[0].fechaEntrega")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].total").value(84500.00))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.last").value(true));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("pedidos-hoy: estado, page, size y sort se pasan al servicio")
+    void pedidosHoyPasaParametros() throws Exception {
+        when(dashboardService.pedidosHoy(EstadoPedido.CANCELADO, 2, 5, "total,desc"))
+                .thenReturn(PageResponse.of(List.of(), 2, 5, 0));
+
+        mockMvc.perform(get(RUTA + "/pedidos-hoy").param("estado", "CANCELADO")
+                .param("page", "2").param("size", "5").param("sort", "total,desc"))
+                .andExpect(status().isOk());
+        verify(dashboardService).pedidosHoy(EstadoPedido.CANCELADO, 2, 5, "total,desc");
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("pedidos-hoy: estado desconocido responde 400 PARAMETRO_INVALIDO")
+    void pedidosHoyEstadoInvalido() throws Exception {
+        mockMvc.perform(get(RUTA + "/pedidos-hoy").param("estado", "TERMINADO"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("pedidos-hoy: sort inválido responde 400 CAMPO_ORDEN_INVALIDO y size 0, 400 PARAMETRO_INVALIDO")
+    void pedidosHoyErroresDePaginacion() throws Exception {
+        when(dashboardService.pedidosHoy(null, 0, 20, "zzz")).thenThrow(
+                new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO", "campo inválido"));
+        when(dashboardService.pedidosHoy(null, 0, 0, null)).thenThrow(
+                new ParametroInvalidoException("PARAMETRO_INVALIDO", "size inválido"));
+
+        mockMvc.perform(get(RUTA + "/pedidos-hoy").param("sort", "zzz"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("CAMPO_ORDEN_INVALIDO"));
+        mockMvc.perform(get(RUTA + "/pedidos-hoy").param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
+    }
+
+    @Test
+    @WithMockUser(roles = "PRODUCCION")
+    @DisplayName("vencimientos: forma del contrato con días negativos y 7 días por defecto")
+    void vencimientosForma() throws Exception {
+        var fila = new VencimientoResponse(17, "CR-2026-0914", "Croissant",
+                LocalDate.of(2026, 9, 16), -2, new BigDecimal("8.00"));
+        when(dashboardService.vencimientos(7, 0, 20, null))
+                .thenReturn(PageResponse.of(List.of(fila), 0, 20, 1));
+
+        mockMvc.perform(get(RUTA + "/vencimientos"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idLote").value(17))
+                .andExpect(jsonPath("$.content[0].codigoLote").value("CR-2026-0914"))
+                .andExpect(jsonPath("$.content[0].producto").value("Croissant"))
+                .andExpect(jsonPath("$.content[0].vence").value("2026-09-16"))
+                .andExpect(jsonPath("$.content[0].diasParaVencer").value(-2))
+                .andExpect(jsonPath("$.content[0].disponible").value(8.00))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("vencimientos: parámetros al servicio; diasVencimiento no numérico o fuera de rango responde 400")
+    void vencimientosParametros() throws Exception {
+        when(dashboardService.vencimientos(30, 1, 50, "producto,desc"))
+                .thenReturn(PageResponse.of(List.of(), 1, 50, 0));
+        when(dashboardService.vencimientos(366, 0, 20, null)).thenThrow(
+                new ParametroInvalidoException("PARAMETRO_INVALIDO", "fuera de rango"));
+
+        mockMvc.perform(get(RUTA + "/vencimientos").param("diasVencimiento", "30")
+                .param("page", "1").param("size", "50").param("sort", "producto,desc"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(RUTA + "/vencimientos").param("diasVencimiento", "abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
+        mockMvc.perform(get(RUTA + "/vencimientos").param("diasVencimiento", "366"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAMETRO_INVALIDO"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("vencimientos: sort inválido responde 400 CAMPO_ORDEN_INVALIDO")
+    void vencimientosSortInvalido() throws Exception {
+        when(dashboardService.vencimientos(7, 0, 20, "zzz")).thenThrow(
+                new ParametroInvalidoException("CAMPO_ORDEN_INVALIDO", "campo inválido"));
+
+        mockMvc.perform(get(RUTA + "/vencimientos").param("sort", "zzz"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("CAMPO_ORDEN_INVALIDO"));
     }
 }

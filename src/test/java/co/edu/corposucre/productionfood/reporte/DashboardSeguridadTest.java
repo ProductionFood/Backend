@@ -30,6 +30,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import co.edu.corposucre.productionfood.config.SecurityConfig;
+import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.reporte.dto.DashboardResponse;
 import co.edu.corposucre.productionfood.rol.Rol;
 import co.edu.corposucre.productionfood.security.AccesoDenegadoHandler;
@@ -47,6 +48,9 @@ import io.jsonwebtoken.security.Keys;
 /**
  * Batería de seguridad del dashboard (HU-24): autenticación SEC-01..SEC-03 y SEC-05, acceso de
  * cualquier rol autenticado (R-05: el filtrado por rol es de presentación) y solo lectura.
+ *
+ * <p>Los detalles {@code pedidos-hoy} y {@code vencimientos} restringen por rol y se prueban con
+ * su matriz (ADMIN/VENTAS/CONSULTA y ADMIN/VENTAS/PRODUCCION/CONSULTA; el resto, 403).
  *
  * <p>Se levanta la capa web real con la cadena de seguridad y el filtro JWT; solo se sustituyen
  * el servicio y el repositorio de usuarios, así que no hace falta MySQL.
@@ -146,6 +150,63 @@ class DashboardSeguridadTest {
     @DisplayName("Solo lectura: escritura con token válido responde 405 METODO_NO_PERMITIDO")
     void escrituraConTokenNoEstaPermitida(MockHttpServletRequestBuilder peticion) throws Exception {
         mockMvc.perform(conToken(peticion, tokenDeRol("ADMIN")))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METODO_NO_PERMITIDO"));
+    }
+
+    private static final List<String> ROLES_PEDIDOS = List.of("ADMIN", "VENTAS", "CONSULTA");
+    private static final List<String> ROLES_VENCIMIENTOS =
+            List.of("ADMIN", "VENTAS", "PRODUCCION", "CONSULTA");
+
+    private static Stream<Arguments> matriz(String sufijoRuta, List<String> permitidos) {
+        return ROLES.stream().map(r -> arguments(sufijoRuta, r, permitidos.contains(r)));
+    }
+
+    private static Stream<Arguments> matrizDetalles() {
+        return Stream.concat(matriz("/pedidos-hoy", ROLES_PEDIDOS),
+                matriz("/vencimientos", ROLES_VENCIMIENTOS));
+    }
+
+    private static Stream<Arguments> rutasDetalle() {
+        return Stream.of(arguments("/pedidos-hoy"), arguments("/vencimientos"));
+    }
+
+    @ParameterizedTest(name = "GET {0} con rol {1}: permitido={2}")
+    @MethodSource("matrizDetalles")
+    @DisplayName("Detalles: 200 para los roles de la matriz y 403 SIN_PERMISO para el resto")
+    void matrizDeRolesDeLosDetalles(String ruta, String rol, boolean permitido) throws Exception {
+        when(dashboardService.pedidosHoy(null, 0, 20, null))
+                .thenReturn(PageResponse.of(List.of(), 0, 20, 0));
+        when(dashboardService.vencimientos(7, 0, 20, null))
+                .thenReturn(PageResponse.of(List.of(), 0, 20, 0));
+
+        var resultado = mockMvc.perform(conToken(get(RUTA + ruta), tokenDeRol(rol)));
+
+        if (permitido) {
+            resultado.andExpect(status().isOk());
+        } else {
+            resultado.andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("SIN_PERMISO"));
+        }
+    }
+
+    @ParameterizedTest(name = "GET {0} sin token responde 401")
+    @MethodSource("rutasDetalle")
+    @DisplayName("Detalles: sin token o con token malformado responde 401 NO_AUTENTICADO")
+    void detallesSinTokenOMalformado(String ruta) throws Exception {
+        mockMvc.perform(get(RUTA + ruta))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("NO_AUTENTICADO"));
+        mockMvc.perform(conToken(get(RUTA + ruta), "no-es-un-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("NO_AUTENTICADO"));
+    }
+
+    @ParameterizedTest(name = "POST {0} responde 405")
+    @MethodSource("rutasDetalle")
+    @DisplayName("Detalles de solo lectura: POST con token válido responde 405 METODO_NO_PERMITIDO")
+    void detallesNoAceptanEscritura(String ruta) throws Exception {
+        mockMvc.perform(conToken(post(RUTA + ruta), tokenDeRol("ADMIN")))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.code").value("METODO_NO_PERMITIDO"));
     }
