@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "hu26-eficiencia-produccion",
     "name": "ProductionFood - HU-26 Eficiencia de producción",
-    "description": "Casos de la HU-26 (eficiencia de producción): GET /api/v1/reportes/eficiencia (reporte por período con ?fechaInicio y ?fechaFin), GET /api/v1/reportes/eficiencia/{idPlan} (detalle de un plan) y GET /api/v1/reportes/eficiencia/materias-primas (desviación acumulada con tendencia). Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los roles y guarda sus tokens; 'Reporte por período', 'Desviación por materia prima' y 'Detalle de un plan' ejecutan los casos funcionales; 'Errores', 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren validaciones y autorización. Los casos con cifras exactas (CP-01 a CP-13: cumplimiento 66.67, rendimiento 92.59, promedios 96.0, etc.) dependen de planes y consumos controlados que la colección no siembra: sobre una base compartida solo comprueban la forma del contrato y las reglas (nulls explícitos, tendencia coherente con el umbral ±5, orden). El detalle necesita rellenar a mano `idPlan` (un plan con consumos). SEC-03 y SEC-05 necesitan rellenar a mano `tokenExpirado` (JWT vencido) y `tokenInactivo` (token de un usuario ya desactivado; esperado 403 USUARIO_INACTIVO).",
+    "description": "Casos de la HU-26 (eficiencia de producción): GET /api/v1/reportes/eficiencia (reporte por período con ?fechaInicio y ?fechaFin), GET /api/v1/reportes/eficiencia/{idPlan} (detalle de un plan) y GET /api/v1/reportes/eficiencia/materias-primas (desviación acumulada con tendencia). Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los roles y guarda sus tokens; 'Reporte por período', 'Desviación por materia prima' y 'Detalle de un plan' ejecutan los casos funcionales; 'Errores', 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren validaciones y autorización. Los casos con cifras exactas (CP-01 a CP-13: cumplimiento 66.67, rendimiento 92.59, promedios 96.0, etc.) dependen de planes y consumos controlados que la colección no siembra: sobre una base compartida solo comprueban la forma del contrato y las reglas (nulls explícitos, tendencia coherente con el umbral por defecto ±5 (productionfood.eficiencia.umbral-tendencia), orden). El detalle necesita rellenar a mano `idPlan` (un plan con consumos). SEC-03 y SEC-05 necesitan rellenar a mano `tokenExpirado` (JWT vencido) y `tokenInactivo` (token de un usuario ya desactivado; esperado 403 USUARIO_INACTIVO).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -357,7 +357,7 @@
                   "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
                   "var j = pm.response.json();",
                   "pm.test(\"periodo, resumen, planes y sinReceta\", () => { pm.expect(j).to.have.all.keys(\"periodo\",\"resumen\",\"planes\",\"sinReceta\"); });",
-                  "pm.test(\"resumen con las claves del contrato\", () => pm.expect(j.resumen).to.have.all.keys(\"planesAnalizados\",\"planesCancelados\",\"cumplimientoPromedio\",\"rendimientoPromedio\",\"rendimientoAjustadoPromedio\",\"registrosSinRendimiento\",\"desviacionMateriaPrima\"));",
+                  "pm.test(\"resumen con las claves del contrato\", () => pm.expect(j.resumen).to.have.all.keys(\"planesAnalizados\",\"planesCancelados\",\"planesEnProceso\",\"cumplimientoPromedio\",\"rendimientoPromedio\",\"rendimientoAjustadoPromedio\",\"registrosSinRendimiento\",\"desviacionMateriaPrima\"));",
                   "pm.collectionVariables.set('repJson', pm.response.text());"
                 ]
               }
@@ -447,7 +447,7 @@
                   "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
                   "var j = pm.response.json();",
                   "pm.test(\"periodo refleja lo enviado\", () => { pm.expect(j.periodo.desde).to.eql(\"2000-01-01\"); pm.expect(j.periodo.hasta).to.eql(\"2000-01-31\"); });",
-                  "pm.test(\"sin planes: ceros y null\", () => { pm.expect(j.planes).to.eql([]); pm.expect(j.resumen.planesAnalizados).to.eql(0); pm.expect(j.resumen.cumplimientoPromedio).to.eql(null); pm.expect(j.resumen.rendimientoPromedio).to.eql(null); pm.expect(j.sinReceta).to.eql([]); });"
+                  "pm.test(\"sin planes: ceros y null\", () => { pm.expect(j.planes).to.eql([]); pm.expect(j.resumen.planesAnalizados).to.eql(0); pm.expect(j.resumen.planesEnProceso).to.eql(0); pm.expect(j.resumen.cumplimientoPromedio).to.eql(null); pm.expect(j.resumen.rendimientoPromedio).to.eql(null); pm.expect(j.sinReceta).to.eql([]); });"
                 ]
               }
             }
@@ -549,7 +549,7 @@
             "url": {
               "raw": "{{baseUrl}}/api/v1/reportes/eficiencia"
             },
-            "description": "Solo aparecen planes con al menos un consumo registrado (R-05); los cancelados se marcan por su estado y se cuentan en planesCancelados."
+            "description": "Solo aparecen planes con al menos un consumo registrado (R-05); los cancelados se marcan por su estado y se cuentan en planesCancelados; los EN_PROCESO se listan con su estado y se cuentan en planesEnProceso. Solo los COMPLETADO entran en los promedios y en /materias-primas (A-3, A-6)."
           },
           "event": [
             {
@@ -624,7 +624,7 @@
                   "var j = pm.response.json();",
                   "pm.test(\"es un arreglo\", () => pm.expect(j).to.be.an(\"array\"));",
                   "pm.test(\"campos y tendencia válida\", () => j.forEach(m => { pm.expect(m).to.have.all.keys(\"materiaPrima\",\"unidad\",\"teoricaAcumulada\",\"realAcumulada\",\"desviacion\",\"planes\",\"tendencia\"); pm.expect([\"CONSUMO_EXCESIVO\",\"CONSUMO_REDUCIDO\",\"NORMAL\",\"SIN_BASE\"]).to.include(m.tendencia); }));",
-                  "pm.test(\"tendencia coherente con el umbral ±5\", () => j.forEach(m => { if (m.desviacion === null) pm.expect(m.tendencia).to.eql(\"SIN_BASE\"); else if (m.desviacion > 5) pm.expect(m.tendencia).to.eql(\"CONSUMO_EXCESIVO\"); else if (m.desviacion < -5) pm.expect(m.tendencia).to.eql(\"CONSUMO_REDUCIDO\"); else pm.expect(m.tendencia).to.eql(\"NORMAL\"); }));",
+                  "pm.test(\"tendencia coherente con el umbral por defecto ±5 (productionfood.eficiencia.umbral-tendencia)\", () => j.forEach(m => { if (m.desviacion === null) pm.expect(m.tendencia).to.eql(\"SIN_BASE\"); else if (m.desviacion > 5) pm.expect(m.tendencia).to.eql(\"CONSUMO_EXCESIVO\"); else if (m.desviacion < -5) pm.expect(m.tendencia).to.eql(\"CONSUMO_REDUCIDO\"); else pm.expect(m.tendencia).to.eql(\"NORMAL\"); }));",
                   "pm.test(\"orden por |desviacion| descendente\", () => { var d = j.filter(m => m.desviacion !== null).map(m => Math.abs(m.desviacion)); for (var i = 1; i < d.length; i++) pm.expect(d[i-1]).to.be.at.least(d[i]); });"
                 ]
               }

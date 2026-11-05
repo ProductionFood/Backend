@@ -41,7 +41,7 @@ Content-Type: application/json
 ```
 
 El frontend guarda el token y lo envía en cada llamada. Un `401 NO_AUTENTICADO` significa token
-ausente, malformado o expirado: forzar el login de nuevo.
+ausente, malformado o expirado: forzar el login de nuevo. El `message` distingue la causa (ver §3).
 
 | Endpoint | ADMIN | PRODUCCION | COMPRAS | VENTAS | CONSULTA |
 |---|---|---|---|---|---|
@@ -91,6 +91,7 @@ GET /api/v1/reportes/eficiencia?fechaInicio=2026-09-01&fechaFin=2026-09-30
   "resumen": {
     "planesAnalizados": 2,
     "planesCancelados": 1,
+    "planesEnProceso": 1,
     "cumplimientoPromedio": 83.34,
     "rendimientoPromedio": 96.30,
     "rendimientoAjustadoPromedio": 80.87,
@@ -132,7 +133,18 @@ GET /api/v1/reportes/eficiencia?fechaInicio=2026-09-01&fechaFin=2026-09-30
           "cumplimiento": 0.00 } ],
       "consumos": [
         { "materiaPrima": "Harina de trigo", "unidad": "kg", "teorica": 8.000, "real": 8.000,
-          "desviacion": 0.00, "eficiencia": 100.00, "rendimientoAjustado": 0.00 } ] }
+          "desviacion": 0.00, "eficiencia": 100.00, "rendimientoAjustado": 0.00 } ] },
+    { "idPlan": 4, "fechaProduccion": "2026-09-27", "estado": "EN_PROCESO",
+      "responsable": "Ismael Batalla",
+      "cumplimiento": 40.00,
+      "rendimiento": 250.00,
+      "rendimientoAjustado": 100.00,
+      "productos": [
+        { "producto": "Croissant", "planificada": 50.00, "producida": 20.00,
+          "cumplimiento": 40.00 } ],
+      "consumos": [
+        { "materiaPrima": "Mantequilla", "unidad": "kg", "teorica": 5.000, "real": 2.000,
+          "desviacion": -60.00, "eficiencia": 250.00, "rendimientoAjustado": 100.00 } ] }
   ],
   "sinReceta": [
     { "producto": "Pan integral", "planes": 2,
@@ -140,32 +152,43 @@ GET /api/v1/reportes/eficiencia?fechaInicio=2026-09-01&fechaFin=2026-09-30
 ```
 
 > Los valores del ejemplo son ilustrativos y se armaron para que el resumen cuadre con los planes:
-> el plan `CANCELADO` (id 3) aparece en `planes[]` pero **no** entra en ningún promedio del
-> `resumen`.
+> solo los planes `COMPLETADO` (ids 1 y 2) entran en los promedios. El `CANCELADO` (id 3) y el
+> `EN_PROCESO` (id 4) aparecen en `planes[]` con su estado, se cuentan en `planesCancelados` y
+> `planesEnProceso`, y **no** entran en ningún promedio ni en `/materias-primas`. El plan en proceso
+> muestra por qué: su `rendimiento` de 250 es solo producción parcial, y su cumplimiento de 40
+> bajaría el promedio. `desviacionMateriaPrima` (-30.67) es la media de las desviaciones por
+> insumo de los planes 1 y 2: harina +8, sal -100 y mantequilla 0.
 
 Cómo leer el reporte:
 
 - **`resumen`.**
-  - `planesAnalizados` son los planes **no cancelados** con al menos un consumo registrado;
-    `planesCancelados` cuenta los cancelados (con consumo) del período.
-  - `cumplimientoPromedio` es la media del cumplimiento de los planes analizados.
+  - `planesAnalizados` son solo los planes **`COMPLETADO`** con al menos un consumo registrado;
+    `planesCancelados` y `planesEnProceso` cuentan los cancelados y los en proceso (con consumo)
+    del período. Estos dos se listan en `planes[]` con su estado, pero no entran en promedios.
+    `planesEnProceso` es un campo aditivo: los clientes que no lo conozcan pueden ignorarlo.
+  - `cumplimientoPromedio` es la media del cumplimiento de los planes analizados; el
+    `cumplimiento` de cada plan es la media simple del de sus productos.
     `rendimientoPromedio` y `rendimientoAjustadoPromedio` son la media de los **consumos** con
-    valor: los `null` **no se promedian como cero** (92, 100 y `null` dan 96, no 64).
+    valor (por consumo, no por plan): los `null` **no se promedian como cero** (92, 100 y `null`
+    dan 96, no 64).
   - `registrosSinRendimiento` cuenta los consumos que quedaron fuera de esos promedios porque su
-    cantidad real fue 0. Muéstralo como nota («1 registro sin rendimiento»), sin tratarlo como error.
-  - `desviacionMateriaPrima` es un indicador general de desviación: la **media sin ponderar** de las
-    desviaciones acumuladas por materia prima. Un insumo de consumo muy pequeño pesa igual que la
-    harina, así que muéstralo como referencia y no como conclusión (ver §8).
+    cantidad real fue 0 o porque son consumos fuera de receta (teórica 0). Muéstralo como nota («1 registro sin rendimiento»), sin tratarlo como error.
+  - `desviacionMateriaPrima` es la **media sin ponderar de las desviaciones por insumo**: no suma
+    cantidades de unidades distintas, así que un insumo de consumo muy pequeño pesa igual que la
+    harina. En la tarjeta usa la frase «media de las desviaciones por insumo»; **no** escribas «se
+    gastó X % más». Para el detalle usa `/eficiencia/materias-primas` (ver §8).
   - Sin planes en el período: contadores en `0` y promedios en `null`, sin error.
-- **`planes[]`.** Un elemento por plan con consumo registrado, con su estado. Los `CANCELADO` se
-  listan marcados (chip «Cancelado»): su cumplimiento bajo es esperable.
+- **`planes[]`.** Un elemento por plan con consumo registrado, con su estado. Los `CANCELADO` y
+  `EN_PROCESO` se listan marcados (chips «Cancelado» y «En proceso»): su cumplimiento bajo es
+  esperable y no cuentan en los promedios.
 - **`planes[].productos[]`.** `planificada` frente a `producida` y su `cumplimiento`
   (`producida / planificada × 100`): puede pasar de 100 si se produjo de más y es `0.00` si no se
   produjo nada. Cantidades con 2 decimales.
 - **`planes[].consumos[]`.** `teorica` frente a `real` (3 decimales, con su `unidad`), la
   `desviacion` y las dos lecturas de rendimiento (`eficiencia` y `rendimientoAjustado`).
-- **`sinReceta`.** Productos de los planes del período que no tienen receta activa; para ellos no
-  hay consumo teórico. Muéstralos en un aviso aparte para que el hueco sea visible; vacío si no hay.
+- **`sinReceta`.** Productos de los planes no cancelados del período (con o sin consumo registrado)
+  que no tienen receta activa; para ellos no hay consumo teórico. Muéstralos en un aviso aparte
+  para que el hueco sea visible; vacío si no hay.
 - Los porcentajes salen como número JSON sin ceros finales (`66.67`, `96.0`, `0.0`): formatear con
   1 o 2 decimales en el cliente.
 
@@ -222,20 +245,22 @@ GET /api/v1/reportes/eficiencia/materias-primas?fechaInicio=2026-09-01&fechaFin=
     "tendencia": "SIN_BASE" } ]
 ```
 
-- Suma, por materia prima, la teórica y la real de los consumos de planes **no cancelados** del
-  período. `desviacion = (real − teórica) / teórica × 100` (positiva = se gastó de más) y llega
+- Suma, por materia prima, la teórica y la real de los consumos de planes **`COMPLETADO`** del
+  período (excluye cancelados y en proceso). `desviacion = (real − teórica) / teórica × 100` (positiva = se gastó de más) y llega
   `null` si la teórica acumulada es 0.
 - `planes` cuenta los planes distintos que consumieron esa materia prima.
 - Orden: mayor desviación en valor absoluto primero y `desviacion: null` al final.
 - Sin consumos en el período: `[]` con `200`.
 
-**`tendencia`** (umbral fijo de ±5 puntos porcentuales; los extremos cuentan como normales):
+**`tendencia`** (umbral configurable en el backend, `productionfood.eficiencia.umbral-tendencia`,
+`5` por defecto, en puntos porcentuales; los extremos cuentan como normales; el valor definitivo
+está pendiente de confirmar con negocio, así que no lo fijes en el cliente):
 
 | Valor | Condición | Sugerencia de presentación |
 |---|---|---|
-| `CONSUMO_EXCESIVO` | `desviacion > 5` | Rojo: se gasta de más de forma sostenida |
-| `CONSUMO_REDUCIDO` | `desviacion < -5` | Ámbar: se gasta de menos; revisar receta o registro |
-| `NORMAL` | `-5 ≤ desviacion ≤ 5` | Verde |
+| `CONSUMO_EXCESIVO` | `desviacion > umbral` | Rojo: se gasta de más de forma sostenida |
+| `CONSUMO_REDUCIDO` | `desviacion < -umbral` | Ámbar: se gasta de menos; revisar receta o registro |
+| `NORMAL` | `-umbral ≤ desviacion ≤ umbral` | Verde |
 | `SIN_BASE` | `desviacion = null` | Gris «—»: no hay teórico contra el cual comparar |
 
 ---
@@ -257,14 +282,22 @@ Formato uniforme (`ErrorResponse`):
 | `PARAMETRO_INVALIDO` | 400 | Fecha mal formada; `idPlan` no numérico o fuera de rango | Corregir la petición; enviar fechas `YYYY-MM-DD` de un selector |
 | `PLAN_INEXISTENTE` | 404 | El plan no existe | «El plan no existe»; volver al listado |
 | `PLAN_SIN_CONSUMOS` | 404 | El plan existe pero no tiene consumos registrados | Mostrar el estado vacío del plan, no un error de sistema |
-| `NO_AUTENTICADO` | 401 | Sin token, malformado o expirado | Redirigir al login |
+| `NO_AUTENTICADO` | 401 | Sin token, token inválido o token expirado (mismo `code`, `message` distinto) | Redirigir al login |
 | `SIN_PERMISO` | 403 | `COMPRAS` en reporte y detalle; `VENTAS` y `CONSULTA` en los tres | Ocultar la opción de menú o mostrar «No tienes permiso para esta operación» |
 | `USUARIO_INACTIVO` | 403 | Usuario desactivado con token vigente | Cerrar sesión y avisar |
 | `METODO_NO_PERMITIDO` | 405 | Método distinto de `GET` | No debería ocurrir desde la UI |
 
-`fieldErrors` es un **array** de `{ field, message }`, no un objeto. El `message` de los `401`
-dice «Su sesión ha expirado» incluso cuando no hay token: decidir por el `code`
-(`NO_AUTENTICADO`), no por el texto. El `Content-Type` de las respuestas es `application/json`
+`fieldErrors` es un **array** de `{ field, message }`, no un objeto. Los `401` comparten el `code`
+`NO_AUTENTICADO` pero el `message` depende de la causa:
+
+| Causa | `message` |
+|---|---|
+| Sin token | «Debe iniciar sesión: falta el token de autenticación.» |
+| Token malformado, con firma inválida o sin identidad reconocible | «El token de autenticación es inválido. Inicie sesión nuevamente.» |
+| Token expirado | «Su sesión ha expirado. Inicie sesión nuevamente.» |
+
+Decidir por el `code` (`NO_AUTENTICADO`), no por el texto; el `message` sirve para mostrarlo al
+usuario. El `Content-Type` de las respuestas es `application/json`
 sin `charset=UTF-8`: si el cliente necesita el charset explícito, decodifica como UTF-8.
 
 ---
@@ -275,8 +308,8 @@ Estos campos viajan **explícitos como `null`** (no se omiten) cuando no hay dat
 
 | Campo | Cuándo es `null` | Mostrar |
 |---|---|---|
-| `consumos[].eficiencia` | La cantidad real es 0 (no se puede dividir) | «—» |
-| `consumos[].rendimientoAjustado` | La cantidad real es 0 | «—» |
+| `consumos[].eficiencia` | La cantidad real es 0 (no se puede dividir) o el consumo está fuera de receta (teórica 0) | «—» |
+| `consumos[].rendimientoAjustado` | La cantidad real es 0 o el consumo está fuera de receta | «—» |
 | `consumos[].desviacion` | La teórica es 0 (consumo fuera de receta) | «—» |
 | `planes[].rendimiento` / `.rendimientoAjustado` | Ningún consumo del plan tiene valor | «—» |
 | `resumen.cumplimientoPromedio`, `.rendimientoPromedio`, `.rendimientoAjustadoPromedio`, `.desviacionMateriaPrima` | No hay planes o valores en el período | «—» |
@@ -284,7 +317,7 @@ Estos campos viajan **explícitos como `null`** (no se omiten) cuando no hay dat
 | `periodo.desde` / `periodo.hasta` | No se envió esa fecha | «Sin límite» |
 
 **Nunca conviertas un `null` en `0`**: «sin dato» y «0 %» significan cosas distintas. Un consumo
-en cero no es una eficiencia del 0 %: es un registro sin rendimiento calculable. Los promedios
+en cero no es una eficiencia del 0 %: es un registro sin rendimiento calculable, y lo mismo vale para un consumo fuera de receta. Los promedios
 del `resumen` ya los excluyen; el cliente no debe recalcularlos. En TypeScript, usar siempre
 `number | null` y un pipe o función de formato que devuelva «—» para `null`.
 
@@ -333,6 +366,7 @@ export interface PeriodoEficiencia { desde: string | null; hasta: string | null;
 export interface ResumenEficiencia {
   planesAnalizados: number;
   planesCancelados: number;
+  planesEnProceso: number;
   cumplimientoPromedio: number | null;
   rendimientoPromedio: number | null;
   rendimientoAjustadoPromedio: number | null;
@@ -346,6 +380,7 @@ export interface ProductoPlan {
 
 export interface ConsumoPlan {
   materiaPrima: string; unidad: string; teorica: number; real: number;
+  // desviacion, eficiencia y rendimientoAjustado son null con real 0 o consumo fuera de receta
   desviacion: number | null; eficiencia: number | null; rendimientoAjustado: number | null;
 }
 
@@ -443,8 +478,10 @@ parte de fecha como local o mostrar la cadena tal cual.
 | Sin planes en el período (`planesAnalizados = 0`, `planes = []`) | «No hay planes con consumo registrado en este período» y promedios en «—» |
 | Con datos | Tarjetas de resumen (cumplimiento, rendimiento, rendimiento ajustado), tabla de planes y tabla de materias primas |
 | Plan cancelado | Fila con chip «Cancelado» y nota «No entra en los promedios» |
+| Plan en proceso | Fila con chip «En proceso» y nota «No entra en los promedios hasta completarse» |
 | Consumo sin rendimiento | «—» en eficiencia y rendimiento ajustado, con tooltip «Se registró consumo cero» |
-| Consumo fuera de receta | «—» en desviación, con tooltip «Sin teórico: el insumo no está en la receta» |
+| Consumo fuera de receta | «—» en desviación, eficiencia y rendimiento ajustado, con tooltip «Sin teórico: el insumo no está en la receta» |
+| Tarjeta `desviacionMateriaPrima` | Texto «media de las desviaciones por insumo»; enlace al detalle de materias primas |
 | `sinReceta` no vacío | Aviso destacado: «Productos sin receta: no se puede calcular su consumo teórico» y la lista |
 | Detalle `PLAN_SIN_CONSUMOS` | «Este plan aún no tiene consumos registrados» (estado vacío, no error) |
 | Detalle `PLAN_INEXISTENTE` | «El plan no existe» y volver al listado |
@@ -458,7 +495,7 @@ Estructura sugerida:
 | Zona | Contenido | Endpoint |
 |---|---|---|
 | Filtro | Selector de rango de fechas (`fechaInicio`, `fechaFin`) | los tres |
-| Resumen | `planesAnalizados`, `planesCancelados`, los tres promedios y `registrosSinRendimiento` | `/reportes/eficiencia` |
+| Resumen | `planesAnalizados`, `planesCancelados`, `planesEnProceso`, los tres promedios y `registrosSinRendimiento` | `/reportes/eficiencia` |
 | Planes | Tabla con cumplimiento, rendimiento y rendimiento ajustado por plan; al abrir una fila, productos y consumos | `/reportes/eficiencia` y `/{idPlan}` |
 | Materias primas | Tabla con desviación y chip de `tendencia` | `/materias-primas` (visible también para `COMPRAS`) |
 | Avisos | `sinReceta` | `/reportes/eficiencia` |
@@ -474,18 +511,22 @@ solo si el rol tiene acceso a su endpoint.
 - **No hay paginación ni orden configurable.** El reporte lista todos los planes del período; las
   materias primas llegan ya ordenadas por desviación.
 - **No hay un único «porcentaje de eficiencia general».** Se entregan tres métricas separadas.
-- **Planes en curso.** Los planes `EN_PROCESO` con consumo entran en los promedios y su
-  cumplimiento parcial puede bajar `cumplimientoPromedio`; aclararlo en la pantalla si se desea.
-- **`desviacionMateriaPrima` es una media sin ponderar.** Un insumo de consumo mínimo con un
-  registro en cero puede dominarla e incluso invertir su signo. Para el hallazgo real usar la tabla
-  de `/materias-primas`. La fórmula está pendiente de confirmar con negocio.
-- **Consumo fuera de receta.** Su `desviacion` es `null` pero su `eficiencia` sale `0.0` (regla de
-  HU-22) y entra en el promedio de rendimiento del plan; está pendiente de decisión si debe quedar
-  fuera.
-- **Cancelados.** Aparecen en `planes[]` pero no en los promedios ni en `/materias-primas`.
-- **Umbral de `tendencia` fijo en ±5.** Lo definió la implementación; no es configurable.
-- **Hora de registro de los consumos (HU-22).** `fechaRegistro` de los consumos puede salir en UTC;
-  no afecta a este reporte, que filtra por la fecha de producción.
-- **Mensaje de los `401`.** Dice «Su sesión ha expirado» incluso sin token; decidir por `code`.
+- **Solo `COMPLETADO` promedia.** Los planes `EN_PROCESO` y `CANCELADO` se listan en `planes[]`
+  con su estado y se cuentan en `planesEnProceso` y `planesCancelados`, pero no entran en los
+  promedios, en `planesAnalizados` ni en `/materias-primas`.
+- **`desviacionMateriaPrima` es una media sin ponderar** de las desviaciones por insumo. Un insumo
+  de consumo mínimo con un registro en cero puede dominarla e incluso invertir su signo. Se mantiene
+  para no romper el contrato; para el hallazgo real usar la tabla de `/materias-primas`.
+- **Consumo fuera de receta.** Su `desviacion`, `eficiencia` y `rendimientoAjustado` son `null`; queda
+  fuera de los promedios y cuenta en `registrosSinRendimiento`.
+- **`sinReceta` incluye planes sin consumo.** Cubre todos los planes no cancelados del período,
+  aunque aún no tengan consumos, para que el hueco se vea a tiempo.
+- **Agregaciones.** El `cumplimiento` de un plan es la media simple de sus productos;
+  `cumplimientoPromedio` es la media por plan y `rendimientoPromedio` es la media por consumo.
+- **Umbral de `tendencia` configurable** (`productionfood.eficiencia.umbral-tendencia`, `5` por
+  defecto); el valor definitivo está pendiente de confirmar con negocio.
+- **Hora de registro de los consumos (HU-22).** Tras la corrección de zona horaria (PR #184) las
+  conexiones quedan en -05:00, pero la fila SEED de V3 y las filas guardadas antes en UTC no se
+  corrigen. No afecta a este reporte, que filtra por la fecha de producción.
 - **Backend verificado con QA ciego.** Cualquier cambio de contrato actualiza este manual en el
   mismo commit.

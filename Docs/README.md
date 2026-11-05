@@ -65,5 +65,5 @@ Docs/
 | HU-23 Actualización automática de inventario | Entregada 2026-11-05 (sin endpoints propios; QA ciego CP-01…CP-23 y SEC-01…05 en los 3 endpoints, con 4 casos parciales y corrección de pool/auditoría D-01; frontend pendiente) |
 | HU-24 Dashboard resumen | Entregada 2026-11-05 (QA ciego CP-01…CP-21 y SEC-01…05 en los 3 endpoints, con corrección de zona horaria D-01; frontend pendiente) |
 | HU-25 Consulta de pedidos | Entregada 2026-11-05 (QA ciego 25/25 CP y SEC-01…05 con 2 reservas; frontend pendiente) |
-| HU-26 Eficiencia de producción | Entregada 2026-11-05 (QA ciego CP-01…CP-25 y SEC-01…05 en los 3 endpoints, SEC-03 cubierto por prueba automática; defecto D-1 de precisión corregido; puntos ambiguos A-1…A-9 pendientes de decisión; frontend pendiente) |
+| HU-26 Eficiencia de producción | Entregada 2026-11-05 (QA ciego CP-01…CP-25 y SEC-01…05 en los 3 endpoints, SEC-03 cubierto por prueba automática; defecto D-1 corregido; ajustes A-1…A-9 resueltos o decididos, umbral de tendencia pendiente de confirmar con negocio; frontend pendiente) |
 | HU-27 Alerta de stock bajo | Entregada 2026-11-05 (QA ciego CP-01…CP-26 y SEC-01…05; frontend pendiente) |

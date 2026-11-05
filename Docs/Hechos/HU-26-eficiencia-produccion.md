@@ -7,8 +7,8 @@
 | Endpoints | `GET /api/v1/reportes/eficiencia`, `GET /api/v1/reportes/eficiencia/{idPlan}`, `GET /api/v1/reportes/eficiencia/materias-primas` |
 | Fecha de implementación | 2026-11-05 |
 | Colección Postman | `Docs/Postman/ProductionFood-HU26.postman_collection.json` (`Preparación`, `Reporte por período`, `Desviación por materia prima`, `Detalle de un plan`, `Errores`, `Roles (matriz)`, `Seguridad (SEC-01…SEC-05)`) |
-| Pull requests | #178 repositorio · #179 servicio · #180 controlador y batería de seguridad · #181 corrección de precisión del `rendimientoAjustado` (D-1) · #182 documentación · PR final #183 (sin mergear) |
-| Estado QA | **QA ciego verificado · CP-01…CP-25 y SEC-01…SEC-05 pasan (SEC-03 cubierto por prueba automática, ver más abajo) · D-1 corregido · puntos ambiguos A-1…A-9 pendientes de decisión · frontend pendiente** |
+| Pull requests | #178 repositorio · #179 servicio · #180 controlador y batería de seguridad · #181 corrección de precisión del `rendimientoAjustado` (D-1) · #182 documentación · PR final #183 · ajustes tras el QA: #184 (zona horaria, A-9), #185 (mensajes 401, A-8), #186 (consumo fuera de receta, A-2); también implementados el umbral configurable (A-5) y solo planes completados en promedios (A-6) · este PR de documentación (sin número) |
+| Estado QA | **QA ciego verificado · CP-01…CP-25 y SEC-01…SEC-05 pasan (SEC-03 cubierto por prueba automática, ver más abajo) · D-1 corregido · ajustes A-1…A-9 resueltos o decididos (umbral de `tendencia` pendiente de confirmar con negocio) · frontend pendiente** |
 
 > Esta ficha documenta el reporte de eficiencia de producción: por período, por plan y por materia
 > prima. La historia solo lee: no escribe, no audita y no mueve stock. Mide **tres cosas
@@ -64,13 +64,14 @@ Piezas internas:
 | Rendimiento ajustado | Reutiliza `eficiencia(teórica × producida / planificada, real)` de la calculadora. El teórico ajustado se calcula con **escala 10** (D-1): con escala 4, cantidades pequeñas como 0.003 kg distorsionaban el cociente |
 | Desviación | `(real − teórica) / teórica × 100` de la calculadora, `null` si la teórica es 0 |
 | División por cero | `rendimiento` y `rendimientoAjustado` llegan `null` si `real = 0`; `desviacion` llega `null` si `teórica = 0`. Sin error; el cliente muestra «—» |
-| Promedios sin nulos | `rendimientoPromedio` y `rendimientoAjustadoPromedio` son la media de los valores **no nulos a nivel de consumo** (92, 100, `null` → 96, nunca 64). Sin `orElse(0)`; `null` si no hay valores. `registrosSinRendimiento` cuenta los consumos excluidos |
+| Promedios sin nulos | `rendimientoPromedio` y `rendimientoAjustadoPromedio` son la media de los valores **no nulos a nivel de consumo** (92, 100, `null` → 96, nunca 64). Sin `orElse(0)`; `null` si no hay valores. `registrosSinRendimiento` cuenta los consumos excluidos (real 0 o consumo fuera de receta, A-2) |
+| Consumo fuera de receta (A-2) | Con teórica 0 o inexistente, `eficiencia`, `rendimientoAjustado` y `desviacion` viajan `null`; el consumo queda fuera de los promedios y cuenta en `registrosSinRendimiento` |
 | Rendimiento por plan | Media de los valores no nulos de sus consumos; `null` si ninguno |
-| Cancelados fuera | Los planes `CANCELADO` con consumo aparecen en `planes[]` con su estado y se cuentan en `planesCancelados`, pero no entran en ningún promedio ni en el acumulado por materia prima. `planesAnalizados` son los no cancelados con consumo |
+| Solo `COMPLETADO` en promedios (A-6) | Los planes `CANCELADO` y `EN_PROCESO` con consumo aparecen en `planes[]` con su estado y se cuentan en `planesCancelados` y `planesEnProceso` (campo aditivo de `resumen`), pero no entran en ningún promedio ni en el acumulado por materia prima. `planesAnalizados` son solo los `COMPLETADO` con consumo |
 | Planes sin consumo | Un plan sin ningún consumo con `cantidad_real` no aparece en `planes[]` (R-05) |
-| `desviacionMateriaPrima` | Media **sin ponderar** de las desviaciones acumuladas por materia prima no nulas (ver A-1) |
-| `sinReceta` | Productos de planes del período (excluye `CANCELADO`) sin fila activa en `recetas`; `{producto, planes, nota}`. Lista vacía si no hay (R-07) |
-| `tendencia` | Constante nombrada `UMBRAL_TENDENCIA = 5.00`: desviación `> 5.00` → `CONSUMO_EXCESIVO`; `< -5.00` → `CONSUMO_REDUCIDO`; entre `-5.00` y `5.00` inclusive → `NORMAL`; desviación `null` → `SIN_BASE`. Los umbrales los fijó la implementación (la especificación no los daba) |
+| `desviacionMateriaPrima` | Media **sin ponderar** de las desviaciones acumuladas por materia prima no nulas: no suma cantidades de unidades distintas (ver A-1) |
+| `sinReceta` | Productos de planes del período (excluye `CANCELADO`, con o sin consumo, A-4) sin fila activa en `recetas`; `{producto, planes, nota}`. Lista vacía si no hay (R-07) |
+| `tendencia` | Umbral configurable `productionfood.eficiencia.umbral-tendencia` (`5.00` por defecto, A-5): desviación `> umbral` → `CONSUMO_EXCESIVO`; `< -umbral` → `CONSUMO_REDUCIDO`; entre `-umbral` y `umbral` inclusive → `NORMAL`; desviación `null` → `SIN_BASE`. La especificación no daba los umbrales; el valor definitivo está pendiente de confirmar con negocio |
 | Orden de materias primas | Por `|desviacion|` descendente (`null` al final) y luego por nombre |
 | Rango de fechas | Ambas fechas opcionales e inclusivas. `periodo.desde` y `periodo.hasta` viajan `null` si no se enviaron. `fechaInicio > fechaFin` → `400 RANGO_FECHAS_INVALIDO`; fecha mal formada → `400 PARAMETRO_INVALIDO` |
 | Escalas | Porcentajes con 2 decimales (`HALF_UP`); `teorica` y `real` con 3; `planificada` y `producida` con 2. Los números salen como JSON sin ceros finales (`66.67`, `0.0`, `96.0`) |
@@ -95,7 +96,7 @@ un plan):
 
 ```json
 { "periodo": { "desde": "2026-09-01", "hasta": "2026-09-30" },
-  "resumen": { "planesAnalizados": 1, "planesCancelados": 0,
+  "resumen": { "planesAnalizados": 1, "planesCancelados": 0, "planesEnProceso": 0,
     "cumplimientoPromedio": 66.67, "rendimientoPromedio": 92.59,
     "rendimientoAjustadoPromedio": 61.73, "registrosSinRendimiento": 1,
     "desviacionMateriaPrima": -46.0 },
@@ -133,7 +134,7 @@ un plan):
 **Errores:** `RANGO_FECHAS_INVALIDO` (400: `fechaInicio` posterior a `fechaFin`);
 `PARAMETRO_INVALIDO` (400: fecha mal formada o `idPlan` no numérico o fuera de rango);
 `PLAN_INEXISTENTE` (404); `PLAN_SIN_CONSUMOS` (404: el plan existe sin consumos registrados);
-`NO_AUTENTICADO` (401); `SIN_PERMISO` (403); `USUARIO_INACTIVO` (403); `METODO_NO_PERMITIDO` (405).
+`NO_AUTENTICADO` (401, con mensaje distinto según la causa, A-8); `SIN_PERMISO` (403); `USUARIO_INACTIVO` (403); `METODO_NO_PERMITIDO` (405).
 
 ## Archivos creados
 
@@ -169,8 +170,8 @@ Las pruebas cubren el repositorio JDBC contra MySQL, las reglas del servicio (cu
 rendimiento, ajustado, promedios sin nulos, división por cero, cancelados, tendencia y rango de
 fechas), el contrato HTTP y la matriz de roles y seguridad.
 
-- **92 tests** en las clases `Eficiencia*Test`.
-- `mvn test` sobre la suite completa: **2204 tests, 0 fallos, 1 omitido**. El omitido es el caso
+- **92 tests** en las clases `Eficiencia*Test` en la entrega original; los ajustes añadieron pruebas (ver «Ajustes posteriores al QA»).
+- `mvn test` sobre la suite completa en la entrega original: **2204 tests, 0 fallos, 1 omitido**. El omitido es el caso
   que necesita una fila con `cantidad_real` `NULL`, que no se puede sembrar por la restricción
   `NOT NULL` de la tabla (V2, C-08); el código la excluye de todos modos.
 - **SEC-03 (token expirado)** queda cubierto por `EficienciaSeguridadTest`, que prueba que un
@@ -216,22 +217,25 @@ además se verificaron 20 planes aleatorios (60 consumos) con aritmética decima
 |---|---|---|---|
 | D-1 | BAJA | `rendimientoAjustado` perdía precisión con cantidades pequeñas: el teórico ajustado se redondeaba a 4 decimales antes de dividir por el real (plan con sal 0.003 kg daba `110.0` en vez de `111.00`; Sal 0,3 y 0,3 daba `111.1` en vez de `111.11`) | Corregido en el PR #181: el teórico ajustado usa **escala 10**. Con cantidades grandes ya coincidía al centésimo. No afectaba a `eficiencia`, `desviacion` ni `cumplimiento` |
 
-### Puntos ambiguos del QA (pendientes de decisión)
+### Ajustes posteriores al QA (A-1…A-9)
 
-La especificación no fija estos comportamientos. Se documentan como decisiones vigentes o
-pendientes de confirmar con negocio; no son defectos.
+El QA señaló nueve puntos que la especificación no fija. Cada uno quedó **Resuelto** (cambio de
+código) o como **Decisión** (se documenta y se mantiene). No eran defectos.
 
-| ID | Tema | Comportamiento actual | Pendiente |
+| ID | Tema | Estado | Qué quedó |
 |---|---|---|---|
-| A-1 | `resumen.desviacionMateriaPrima` | Media **sin ponderar** de las desviaciones acumuladas por materia prima. Plan 1 solo: harina +8 y sal -100 dan `-46.0`, mientras que la desviación agregada por cantidades sería +5.88. Un insumo de consumo mínimo con un registro en cero domina el indicador y puede invertir su signo | Decidir si pasa a media ponderada por cantidad teórica o a una media sobre registros con `real > 0` |
-| A-2 | Consumo fuera de receta | `teorica 0` y `desviacion null`, pero `eficiencia 0.00` (consecuencia de HU-22), y ese 0 **entra** en el promedio de rendimiento: el plan con un consumo fuera de receta mostró `66.67` con los otros dos consumos al 100 % | Decidir si debe ser `null` o quedar fuera del promedio |
-| A-3 | Cancelados en `/materias-primas` | Se excluyen del acumulado (Oct: Harina `planes 1`, teórica 15). Un SQL sin filtro de estado sumaría 3 planes y daría 45 | Confirmar: la especificación solo dice que los cancelados se marcan aparte en el reporte general |
-| A-4 | `sinReceta` y R-05 | Lista productos de planes que no entran en `planes[]` (un plan `PLANIFICADO` o `COMPLETADO` sin consumos sí cuenta; uno `CANCELADO` sin consumos no). Es coherente con hacer visible el hueco, pero se aparta de «solo planes con consumo» | Confirmar el criterio |
-| A-5 | `tendencia` | Umbrales ±5 puntos porcentuales y los valores `CONSUMO_REDUCIDO` y `SIN_BASE` los definió la implementación | Confirmar con negocio |
-| A-6 | Planes `EN_PROCESO` con consumo | Entran en `planesAnalizados` y en los promedios (R-05 los incluye); su cumplimiento parcial sesga el promedio | Decidir si se separan |
-| A-7 | Agregaciones | `cumplimiento` del plan es la media simple de sus productos (incluidos los sin receta); `cumplimientoPromedio` es la media por plan; `rendimientoPromedio` es la media por registro de consumo, no por plan | Documentado; la especificación no lo dice |
-| A-8 | Mensaje de los `401` | Todo `401` dice «Su sesión ha expirado», también sin token | Transversal; fuera de HU-26 |
-| A-9 | Hora de registro (HU-22) | `fechaRegistro` de consumos y `fechaActualizacion` de inventario salen en **UTC** mientras el pool y el `timestamp` de error usan -05:00. No afecta a este reporte (usa solo `fecha_produccion`, un `DATE`), pero cualquier regla basada en esa fecha-hora cambiaría de día después de las 19:00 | **Reportado aparte, no es de HU-26**: lo atiende la historia de HU-22 |
+| A-1 | `resumen.desviacionMateriaPrima` | Decisión | Se mantiene como **media sin ponderar** de las desviaciones por insumo; no suma cantidades de unidades distintas. No se quita para no romper el contrato. El frontend usa `/eficiencia/materias-primas` para el detalle y la tarjeta dice «media de las desviaciones por insumo», no «se gastó X % más» |
+| A-2 | Consumo fuera de receta | Resuelto (PR #186) | Con teórica 0, `eficiencia`, `rendimientoAjustado` y `desviacion` son `null`; queda fuera de los promedios y cuenta en `registrosSinRendimiento` |
+| A-3 | Cancelados en `/materias-primas` | Decisión | El acumulado excluye los cancelados (y los `EN_PROCESO` por A-6); consistente con R-05 |
+| A-4 | `sinReceta` y R-05 | Decisión | Se mantiene sobre todos los planes no cancelados del período, con o sin consumo: el hueco es más útil justo cuando aún no hay consumos |
+| A-5 | `tendencia` | Resuelto (PR #186) | Umbral configurable `productionfood.eficiencia.umbral-tendencia` (`5.00` por defecto). El valor definitivo sigue pendiente de confirmar con negocio |
+| A-6 | Planes `EN_PROCESO` | Resuelto (PR #186) | Solo `COMPLETADO` entra en promedios, `planesAnalizados` y `/materias-primas`. `EN_PROCESO` y `CANCELADO` se listan en `planes[]` con su estado; campo aditivo `resumen.planesEnProceso` |
+| A-7 | Agregaciones | Decisión | Se documenta: el cumplimiento del plan es la media simple de sus productos; `rendimientoPromedio` es la media por consumo, no por plan |
+| A-8 | Mensaje de los `401` | Resuelto (PR #185) | Mensaje distinto por causa (sin token, token inválido, token expirado) con el mismo `code` `NO_AUTENTICADO`; los textos están en `security/MensajesSeguridad.java` |
+| A-9 | Hora de registro (HU-22) | Resuelto (PR #184) | `FlywayZonaHorariaConfig` renueva el pool tras migrar, de modo que las conexiones quedan en -05:00. Limitaciones: la fila SEED de V3 y las filas ya guardadas en UTC no se corrigen |
+
+Cada PR reporta la suite completa sobre su propia base: #184 **2205 tests**, #185 **2210**,
+#186 **2211**. No se suman entre sí.
 
 ## Desviaciones vs especificación
 
@@ -239,16 +243,18 @@ pendientes de confirmar con negocio; no son defectos.
   ejemplo de la especificación solo traía el del plan).
 - **`desviacionMateriaPrima`.** El ejemplo de la especificación (5.80 con harina +7.00 y
   levadura -0.28) no permite deducir la fórmula; ver A-1.
-- **`tendencia`.** Se añaden `CONSUMO_REDUCIDO` y `SIN_BASE` a los dos valores del ejemplo; ver A-5.
-- **`planes[]` incluye cancelados con consumo**, marcados por su estado y fuera de los promedios.
+- **`tendencia`.** Se añaden `CONSUMO_REDUCIDO` y `SIN_BASE` a los dos valores del ejemplo y el
+  umbral es configurable; ver A-5.
+- **`planes[]` incluye cancelados y en proceso con consumo**, marcados por su estado y fuera de los
+  promedios (A-6); `resumen` añade `planesEnProceso`.
 
 ## Pendientes / deuda
 
 - **Frontend pendiente.** No existe la pantalla del reporte; el manual de consumo es el contrato
   para Angular.
-- **Decisiones de negocio abiertas:** A-1 (indicador `desviacionMateriaPrima`), A-2 (consumo fuera
-  de receta en el promedio), A-3, A-4, A-5 y A-6.
-- **A-9** (hora en UTC de los registros de HU-22) queda como deuda de HU-22, no de esta historia.
-- **PR docs y PR final** sin numerar todavía.
+- **Umbral de `tendencia`** (A-5): confirmar con negocio el valor definitivo de
+  `productionfood.eficiencia.umbral-tendencia`.
+- **Datos históricos en UTC** (A-9): la fila SEED de V3 y las filas de HU-22 guardadas antes del
+  PR #184 no se corrigen.
 - **Datos de QA en la base.** Quedaron usuarios y registros de prueba locales en el esquema
   aislado; no forman parte del negocio ni viajan con el repositorio.
