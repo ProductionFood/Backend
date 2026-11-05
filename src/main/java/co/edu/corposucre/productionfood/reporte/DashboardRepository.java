@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -17,9 +18,11 @@ import co.edu.corposucre.productionfood.pedido.EstadoPedido;
 import co.edu.corposucre.productionfood.produccion.EstadoPlan;
 import co.edu.corposucre.productionfood.reporte.dto.ComprasPendientesResponse;
 import co.edu.corposucre.productionfood.reporte.dto.ComprasPendientesResponse.MasAntigua;
+import co.edu.corposucre.productionfood.reporte.dto.PedidoHoyResponse;
 import co.edu.corposucre.productionfood.reporte.dto.PedidosHoyResponse;
 import co.edu.corposucre.productionfood.reporte.dto.PorVencerResponse;
 import co.edu.corposucre.productionfood.reporte.dto.ProduccionHoyResponse;
+import co.edu.corposucre.productionfood.reporte.dto.VencimientoResponse;
 
 /**
  * Consultas agregadas de solo lectura del dashboard (HU-24).
@@ -35,6 +38,19 @@ public class DashboardRepository {
 
     private static final int ESCALA = 2;
     private static final BigDecimal CIEN = BigDecimal.valueOf(100);
+
+    /**
+     * Lotes de producto terminado con stock que vencen en {@code hoy + :dias} o antes (ya
+     * vencidos incluidos, R-03). Lo comparten la tarjeta y el detalle paginado para que no
+     * puedan divergir.
+     */
+    private static final String LOTES_POR_VENCER = """
+            FROM lotes l
+            JOIN productos pr ON pr.id_producto = l.id_producto
+            JOIN inventario_producto_terminado i ON i.id_lote = l.id_lote
+            WHERE l.id_producto IS NOT NULL AND i.cantidad_disponible > 0
+              AND l.fecha_vencimiento <= DATE_ADD(curdate(), INTERVAL :dias DAY)
+            """;
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -146,11 +162,7 @@ public class DashboardRepository {
                        SUM(i.cantidad_disponible) AS disponible,
                        COUNT(*) OVER () AS total,
                        SUM(l.fecha_vencimiento < curdate()) OVER () AS vencidos
-                FROM lotes l
-                JOIN productos pr ON pr.id_producto = l.id_producto
-                JOIN inventario_producto_terminado i ON i.id_lote = l.id_lote
-                WHERE l.id_producto IS NOT NULL AND i.cantidad_disponible > 0
-                  AND l.fecha_vencimiento <= DATE_ADD(curdate(), INTERVAL :dias DAY)
+                """ + LOTES_POR_VENCER + """
                 GROUP BY l.id_lote, l.codigo_lote, pr.nombre, l.fecha_vencimiento
                 ORDER BY l.fecha_vencimiento, l.id_lote
                 LIMIT :limite
@@ -164,6 +176,74 @@ public class DashboardRepository {
                             rs.getBigDecimal("disponible").setScale(ESCALA, RoundingMode.HALF_UP));
                 });
         return new PorVencerResponse(conteo[0], conteo[1], items);
+    }
+
+    /**
+     * Pedidos con {@code fecha_pedido = curdate()} (R-01), una página, con su cliente y su total
+     * propio ({@code 0.00} sin líneas). {@code columnaOrden} es una columna ya resuelta por la
+     * lista blanca del servicio, nunca texto del cliente; el desempate es el id.
+     *
+     * @param estado estado a filtrar, o {@code null} sin filtrar
+     */
+    public List<PedidoHoyResponse> pedidosDeHoy(String estado, String columnaOrden,
+                                                boolean ascendente, int tamano, long desplazamiento) {
+        return jdbc.query("""
+                SELECT p.id_pedido, c.nombre AS cliente, p.estado, p.fecha_pedido,
+                       p.fecha_entrega,
+                       COALESCE(SUM(dp.cantidad * dp.precio_unitario), 0) AS total
+                FROM pedidos p
+                JOIN clientes c ON c.id_cliente = p.id_cliente
+                LEFT JOIN detalle_pedido dp ON dp.id_pedido = p.id_pedido
+                WHERE p.fecha_pedido = curdate() AND (:estado IS NULL OR p.estado = :estado)
+                GROUP BY p.id_pedido, c.nombre, p.estado, p.fecha_pedido, p.fecha_entrega
+                ORDER BY\s""" + columnaOrden + (ascendente ? " ASC" : " DESC") + """
+                , p.id_pedido
+                LIMIT :tamano OFFSET :desplazamiento
+                """, new MapSqlParameterSource().addValue("estado", estado)
+                        .addValue("tamano", tamano).addValue("desplazamiento", desplazamiento),
+                (rs, fila) -> new PedidoHoyResponse(rs.getInt("id_pedido"),
+                        rs.getString("cliente"), rs.getString("estado"),
+                        rs.getObject("fecha_pedido", LocalDate.class),
+                        rs.getObject("fecha_entrega", LocalDate.class),
+                        rs.getBigDecimal("total").setScale(ESCALA, RoundingMode.HALF_UP)));
+    }
+
+    /** Total de pedidos de hoy que cumplen el filtro de {@link #pedidosDeHoy}. */
+    public long contarPedidosDeHoy(String estado) {
+        return jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pedidos
+                WHERE fecha_pedido = curdate() AND (:estado IS NULL OR estado = :estado)
+                """, new MapSqlParameterSource().addValue("estado", estado), Long.class);
+    }
+
+    /**
+     * Lotes por vencer (misma condición que {@link #proximosAVencer}), una página. La columna
+     * de orden la resuelve la lista blanca del servicio; el desempate es el id del lote.
+     */
+    public List<VencimientoResponse> vencimientos(int dias, String columnaOrden,
+                                                  boolean ascendente, int tamano,
+                                                  long desplazamiento) {
+        return jdbc.query("""
+                SELECT l.id_lote, l.codigo_lote, pr.nombre, l.fecha_vencimiento,
+                       DATEDIFF(l.fecha_vencimiento, curdate()) AS dias,
+                       SUM(i.cantidad_disponible) AS disponible
+                """ + LOTES_POR_VENCER + """
+                GROUP BY l.id_lote, l.codigo_lote, pr.nombre, l.fecha_vencimiento
+                ORDER BY\s""" + columnaOrden + (ascendente ? " ASC" : " DESC") + """
+                , l.id_lote
+                LIMIT :tamano OFFSET :desplazamiento
+                """, new MapSqlParameterSource().addValue("dias", dias)
+                        .addValue("tamano", tamano).addValue("desplazamiento", desplazamiento),
+                (rs, fila) -> new VencimientoResponse(rs.getInt("id_lote"),
+                        rs.getString("codigo_lote"), rs.getString("nombre"),
+                        rs.getObject("fecha_vencimiento", LocalDate.class), rs.getLong("dias"),
+                        rs.getBigDecimal("disponible").setScale(ESCALA, RoundingMode.HALF_UP)));
+    }
+
+    /** Total de lotes que devuelve {@link #vencimientos} para el mismo horizonte. */
+    public long contarVencimientos(int dias) {
+        return jdbc.queryForObject("SELECT COUNT(DISTINCT l.id_lote) " + LOTES_POR_VENCER,
+                new MapSqlParameterSource().addValue("dias", dias), Long.class);
     }
 
     private static <E extends Enum<E>> Map<String, Long> ceros(E[] valores) {

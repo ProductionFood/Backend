@@ -21,7 +21,9 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 
+import co.edu.corposucre.productionfood.reporte.dto.PedidoHoyResponse;
 import co.edu.corposucre.productionfood.reporte.dto.PorVencerResponse;
+import co.edu.corposucre.productionfood.reporte.dto.VencimientoResponse;
 
 /**
  * Pruebas de integración de {@link DashboardRepository} contra MySQL (HU-24).
@@ -259,6 +261,107 @@ class DashboardRepositoryTest {
         assertThat(despues.items()).hasSize(10);
         assertThat(despues.cantidad() - antes.cantidad()).isEqualTo(12);
         assertThat(despues.vencidos() - antes.vencidos()).isEqualTo(12);
+    }
+
+
+    // ---- detalle paginado (PR2) -----------------------------------------------------------
+
+    private List<PedidoHoyResponse> mios(List<PedidoHoyResponse> filas) {
+        return filas.stream().filter(f -> f.cliente().equals("Cliente " + sufijo)).toList();
+    }
+
+    @Test
+    @DisplayName("Pedidos de hoy: solo los de hoy, con total propio (cancelado incluido) y 0.00 sin líneas")
+    void pedidosDeHoyDetalle() {
+        var antes = repository.contarPedidosDeHoy(null);
+        sembrarPedido("PENDIENTE", 0, "2.000", "10.50");
+        sembrarPedido("CANCELADO", 0, "1.000", "5.00");
+        sembrarPedido("ENTREGADO", -1, "1.000", "99.00");
+        var sinLineas = insertar("INSERT INTO pedidos (id_cliente, fecha_pedido, estado) VALUES "
+                + "(:c, curdate(), 'PENDIENTE')", "c", idCliente);
+        idsPedido.add(sinLineas);
+
+        assertThat(repository.contarPedidosDeHoy(null) - antes).isEqualTo(3);
+        var filas = mios(repository.pedidosDeHoy(null, "p.id_pedido", true, 100_000, 0));
+
+        assertThat(filas).hasSize(3);
+        assertThat(filas).extracting(PedidoHoyResponse::total)
+                .usingComparatorForType(BigDecimal::compareTo, BigDecimal.class)
+                .containsExactly(new BigDecimal("21.00"), new BigDecimal("5.00"),
+                        new BigDecimal("0.00"));
+        assertThat(filas).extracting(PedidoHoyResponse::estado)
+                .containsExactly("PENDIENTE", "CANCELADO", "PENDIENTE");
+        assertThat(filas.get(0).fechaEntrega()).isNull();
+        assertThat(filas.get(0).total().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("Pedidos de hoy: el filtro de estado, el orden y la paginación cuadran con el conteo")
+    void pedidosDeHoyFiltroOrdenYPagina() {
+        var antesPend = repository.contarPedidosDeHoy("PENDIENTE");
+        sembrarPedido("PENDIENTE", 0, "1.000", "30.00");
+        sembrarPedido("PENDIENTE", 0, "1.000", "10.00");
+        sembrarPedido("PENDIENTE", 0, "1.000", "20.00");
+        sembrarPedido("EN_PREPARACION", 0, "1.000", "1.00");
+
+        assertThat(repository.contarPedidosDeHoy("PENDIENTE") - antesPend).isEqualTo(3);
+        var pend = mios(repository.pedidosDeHoy("PENDIENTE", "total", true, 100_000, 0));
+        assertThat(pend).extracting(PedidoHoyResponse::total)
+                .usingComparatorForType(BigDecimal::compareTo, BigDecimal.class)
+                .containsExactly(new BigDecimal("10.00"), new BigDecimal("20.00"),
+                        new BigDecimal("30.00"));
+        assertThat(pend).extracting(PedidoHoyResponse::estado).containsOnly("PENDIENTE");
+
+        var todos = repository.contarPedidosDeHoy(null);
+        var primera = repository.pedidosDeHoy(null, "p.id_pedido", false, 2, 0);
+        var ultima = repository.pedidosDeHoy(null, "p.id_pedido", false, 2, todos - 1);
+        assertThat(primera).hasSize(2);
+        assertThat(primera.get(0).idPedido()).isGreaterThan(primera.get(1).idPedido());
+        assertThat(ultima).hasSize(1);
+    }
+
+    private List<String> codigos(List<VencimientoResponse> filas) {
+        return filas.stream().map(VencimientoResponse::codigoLote).toList();
+    }
+
+    @Test
+    @DisplayName("Vencimientos: hoy+7 sí, hoy+8 no, sin stock no, vencido sí con días negativos")
+    void vencimientosDetalle() {
+        var antes = repository.contarVencimientos(7);
+        var mas7 = sembrarLote("a", 7, "5.00");
+        var mas8 = sembrarLote("b", 8, "5.00");
+        var sinStock = sembrarLote("c", 3, "0.00");
+        var vencido = sembrarLote("d", -2, "8.00");
+
+        assertThat(repository.contarVencimientos(7) - antes).isEqualTo(2);
+        var filas = repository.vencimientos(7, "l.fecha_vencimiento", true, 100_000, 0);
+
+        assertThat(codigos(filas)).contains(mas7, vencido).doesNotContain(mas8, sinStock);
+        var v = filas.stream().filter(f -> f.codigoLote().equals(vencido)).findFirst()
+                .orElseThrow();
+        assertThat(v.diasParaVencer()).isEqualTo(-2);
+        assertThat(v.disponible()).isEqualByComparingTo("8.00");
+        assertThat(v.producto()).isEqualTo("Producto " + sufijo);
+        assertThat(codigos(filas).indexOf(vencido)).isLessThan(codigos(filas).indexOf(mas7));
+        assertThat(repository.contarVencimientos(8) - antes).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("Vencimientos: la página recorta, totalElements cuenta todo y el orden por disponible respeta la dirección")
+    void vencimientosPaginaYOrden() {
+        var antes = repository.contarVencimientos(7);
+        sembrarLote("a", 1, "3.00");
+        sembrarLote("b", 1, "1.00");
+        sembrarLote("c", 1, "2.00");
+
+        assertThat(repository.contarVencimientos(7) - antes).isEqualTo(3);
+        assertThat(repository.vencimientos(7, "l.fecha_vencimiento", true, 2, 0)).hasSize(2);
+        var porDisponible = repository.vencimientos(7, "disponible", false, 100_000, 0).stream()
+                .filter(f -> f.producto().equals("Producto " + sufijo)).toList();
+        assertThat(porDisponible).extracting(VencimientoResponse::disponible)
+                .usingComparatorForType(BigDecimal::compareTo, BigDecimal.class)
+                .containsExactly(new BigDecimal("3.00"), new BigDecimal("2.00"),
+                        new BigDecimal("1.00"));
     }
 
     // ---- fixtures -------------------------------------------------------------------------
