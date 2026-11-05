@@ -7,7 +7,7 @@
 | Endpoints | `GET /api/v1/inventario/alertas`, `GET /api/v1/inventario/alertas/resumen`, `GET /api/v1/inventario/alertas/sugerencia-compra` |
 | Colección Postman | `Docs/Postman/ProductionFood-HU27.postman_collection.json` (`Preparación`, `Alertas (CP-01…CP-26)`, `Roles (matriz)`, `Seguridad (SEC-01…SEC-05)`) |
 | Pull requests | #156 repositorio y servicio · #157 sugerencia de compra · #158 controlador · #159 corrección D-02 |
-| Estado QA | **QA ciego verificado · CP-01…CP-26 y SEC-01…SEC-05 pasan, salvo CP-20/21/22 (no ejecutables o parciales en base compartida) y SEC-05 (defecto transversal del filtro JWT, fuera de HU-27) · frontend pendiente** |
+| Estado QA | **QA ciego verificado · CP-01…CP-26 y SEC-01…SEC-05 pasan, salvo CP-20/21/22 (no ejecutables o parciales en base compartida) · frontend pendiente** |
 
 > Esta ficha documenta las alertas de stock bajo: qué materias primas están en o bajo su mínimo,
 > cuánto falta, cuánto costaría reponerlo y una sugerencia de compra agrupada por proveedor. El
@@ -176,8 +176,10 @@ de roles y seguridad.
 - **CP-20, CP-21 y CP-22:** no ejecutables o parciales en una base compartida, porque exigen
   alterar el inventario o fijar datos controlados. La lógica está cubierta por pruebas
   automatizadas.
-- **SEC-05:** un usuario inactivo con token vigente recibe `401` en lugar de `403
-  USUARIO_INACTIVO`. Es un defecto transversal del filtro JWT, fuera del alcance de HU-27.
+- **SEC-03 y SEC-05:** el QA los reportó parcial y fallido, pero se reprodujeron a mano contra
+  la API y **pasan**: un token vencido responde `401 NO_AUTENTICADO` y un usuario desactivado con
+  token vigente responde `403 USUARIO_INACTIVO` en los tres endpoints. El hallazgo D-01 del QA
+  (401 en lugar de 403) fue un falso positivo y no hay defecto en el filtro JWT.
 - **D-02:** defecto detectado en el QA y corregido en el PR #159.
 - **Especificación §4:** el ejemplo de costo de la Mantequilla es inconsistente (ver
   Decisiones clave); la implementación usa los cálculos correctos.
@@ -194,8 +196,6 @@ de roles y seguridad.
 
 - **Frontend pendiente.** No existe pantalla de alertas ni indicador global; el manual de
   consumo es el contrato para Angular.
-- **SEC-05 · usuario inactivo.** El filtro JWT responde `401` en lugar de `403 USUARIO_INACTIVO`;
-  se corrige de forma transversal, no en esta historia.
 - **Prellenado de compra.** La sugerencia no crea la compra: el frontend prellena el alta de HU-13.
 - **Sin notificaciones.** No hay correo ni aviso automático; la alerta se consulta bajo demanda.
 - **Datos de QA en la base.** Quedaron usuarios y registros de prueba locales; no forman parte

@@ -14,7 +14,7 @@ y mostrar la sugerencia de compra agrupada por proveedor. Complementa
   que se prellena con la sugerencia es de HU-13. Esta historia es de **solo lectura**.
 
 > **Estado:** backend verificado con QA ciego (CP-01…CP-26 y SEC-01…SEC-05, con las excepciones de
-> la ficha). El consumo desde Angular sigue pendiente. Los ids, nombres, costos y proveedores
+> la ficha: solo CP-20, CP-21 y CP-22). El consumo desde Angular sigue pendiente. Los ids, nombres, costos y proveedores
 > dependen de la base.
 
 ---
@@ -251,9 +251,8 @@ registrar una compra o un ajuste de inventario (no hay caché que invalidar).
 
 ## 7. Limitaciones conocidas
 
-- **Usuario inactivo con token vigente.** Recibe `401` en lugar de `403 USUARIO_INACTIVO`: es un
-  defecto transversal del filtro JWT, fuera de HU-27. El frontend ya trata el `401` con un
-  cierre de sesión.
+- **Usuario inactivo con token vigente.** Recibe `403 USUARIO_INACTIVO` (el filtro JWT comprueba
+  el estado en cada petición); un token vencido o inválido recibe `401 NO_AUTENTICADO`.
 - **La sugerencia devuelve el nombre, no el id, de la materia prima.** Resolver el id para el
   prellenado según la sección 4.
 - **Proveedor basado en la última compra recibida.** Si esa compra no es la que se quiere repetir,
