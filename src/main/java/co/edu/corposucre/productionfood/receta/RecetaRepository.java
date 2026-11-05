@@ -72,6 +72,27 @@ public class RecetaRepository {
     }
 
     /**
+     * Devuelve en lote las recetas de varios productos.
+     *
+     * <p>Existe para que el detalle de un plan de HU-21 no ejecute una consulta por línea: el
+     * servicio reúne los productos de la página y resuelve sus recetas con un solo {@code IN}. Los
+     * productos sin receta simplemente no aparecen. El orden por {@code id_producto} hace
+     * determinista el resultado.
+     *
+     * @param idsProductos identificadores de los productos
+     * @return recetas de esos productos; vacía si la lista viene vacía o {@code null}
+     */
+    public List<Receta> buscarPorProductos(List<Integer> idsProductos) {
+        if (idsProductos == null || idsProductos.isEmpty()) {
+            return List.of();
+        }
+        var params = new MapSqlParameterSource().addValue("idsProductos", idsProductos);
+        return jdbc.query(
+                SELECT + " WHERE r.id_producto IN (:idsProductos) ORDER BY r.id_producto",
+                params, new RecetaRowMapper());
+    }
+
+    /**
      * Indica si el producto ya tiene una receta, sin traerla.
      *
      * <p>Cuenta sobre {@code recetas} a secas y no sobre el {@code SELECT} con {@code JOIN}: los
