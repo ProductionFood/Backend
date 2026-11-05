@@ -22,6 +22,7 @@ import org.springframework.http.HttpStatus;
 
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
+import co.edu.corposucre.productionfood.inventario.AlertaService;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaRepository;
 import co.edu.corposucre.productionfood.receta.DetalleRecetaRepository;
@@ -52,6 +53,7 @@ class ConsumoListarServiceTest {
     private ConsumoRepository consumoRepository;
     private PlanProduccionRepository planProduccionRepository;
     private InventarioService inventarioService;
+    private AlertaService alertaService;
     private ConsumoService service;
 
     @BeforeEach
@@ -63,10 +65,11 @@ class ConsumoListarServiceTest {
         consumoRepository = mock(ConsumoRepository.class);
         planProduccionRepository = mock(PlanProduccionRepository.class);
         inventarioService = mock(InventarioService.class);
+        alertaService = mock(AlertaService.class);
         service = new ConsumoService(detallePlanRepository, recetaRepository,
                 detalleRecetaRepository, new CalculadoraConsumoService(), materiaPrimaRepository,
                 consumoRepository, planProduccionRepository, inventarioService,
-                new CalculadoraEficienciaService());
+                new CalculadoraEficienciaService(), alertaService);
     }
 
     @Test
@@ -109,6 +112,9 @@ class ConsumoListarServiceTest {
         assertThat(segundo.eficiencia()).isEqualByComparingTo("50.00");
         assertThat(segundo.desviacionPorcentaje()).isEqualByComparingTo("100.00");
         assertThat(segundo.inventario()).isNull();
+        assertThat(primero.alertas()).isNull();
+        assertThat(segundo.alertas()).isNull();
+        verifyNoInteractions(alertaService);
     }
 
     @Test

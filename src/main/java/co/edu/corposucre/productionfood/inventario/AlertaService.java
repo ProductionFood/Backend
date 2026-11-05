@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,6 +58,16 @@ public class AlertaService {
                 new ResumenAlertasResponse(items.size(), agotadas, items.size() - agotadas),
                 items,
                 total);
+    }
+
+    /**
+     * Alerta de stock de una sola materia prima, con el mismo cálculo de costo de reposición del
+     * listado. Vacío si la materia prima tiene stock suficiente o no existe. Participa en la
+     * transacción de quien la llama, de modo que ve el saldo ya movido (HU-23 CA-03).
+     */
+    public Optional<AlertaStockResponse> alertaDeMateriaPrima(Integer idMateriaPrima) {
+        return repository.buscarAlertaPorMateriaPrima(idMateriaPrima)
+                .map(AlertaService::aRespuesta);
     }
 
     /** Conteo ligero de alertas de materias primas activas, para el indicador global. */
