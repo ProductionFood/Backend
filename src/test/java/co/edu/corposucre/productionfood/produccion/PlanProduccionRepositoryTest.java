@@ -279,13 +279,32 @@ class PlanProduccionRepositoryTest {
         var id = insertarConRepositorio(nueva(LocalDate.of(1990, 11, 10),
                 LocalDate.of(1990, 11, 12), EstadoPlan.PLANIFICADO, "Antes del cambio"));
 
-        repository.cambiarEstado(id, EstadoPlan.EN_PROCESO);
+        var afectadas = repository.cambiarEstado(id, EstadoPlan.PLANIFICADO,
+                EstadoPlan.EN_PROCESO);
 
+        assertThat(afectadas).isEqualTo(1);
         var leido = repository.buscarPorId(id).orElseThrow();
         assertThat(leido.getEstado()).isEqualTo(EstadoPlan.EN_PROCESO);
         assertThat(leido.getFechaPlanificacion()).isEqualTo(LocalDate.of(1990, 11, 10));
         assertThat(leido.getFechaProduccion()).isEqualTo(LocalDate.of(1990, 11, 12));
         assertThat(leido.getObservaciones()).isEqualTo("Antes del cambio");
+    }
+
+    @Test
+    @DisplayName("cambiarEstado devuelve 0 si el estado esperado ya no coincide (carrera)")
+    void cambiarEstadoDevuelveCeroSiElEstadoEsperadoYaNoCoincide() {
+        var id = insertarConRepositorio(nueva(LocalDate.of(1990, 11, 10),
+                LocalDate.of(1990, 11, 12), EstadoPlan.PLANIFICADO, null));
+        // Otra transacción ya lo movió a EN_PROCESO: el UPDATE condicionado a PLANIFICADO no
+        // encuentra la fila y no lo pisa.
+        repository.cambiarEstado(id, EstadoPlan.PLANIFICADO, EstadoPlan.EN_PROCESO);
+
+        var afectadas = repository.cambiarEstado(id, EstadoPlan.PLANIFICADO,
+                EstadoPlan.CANCELADO);
+
+        assertThat(afectadas).isZero();
+        assertThat(repository.buscarPorId(id).orElseThrow().getEstado())
+                .isEqualTo(EstadoPlan.EN_PROCESO);
     }
 
     @Test
@@ -310,8 +329,8 @@ class PlanProduccionRepositoryTest {
     }
 
     @Test
-    @DisplayName("actualizar cambia fechas, observaciones y responsable, pero ni id ni estado")
-    void actualizarCambiaLaCabeceraSinTocarIdNiEstado() {
+    @DisplayName("actualizarSiEstado cambia fechas, observaciones y responsable, pero ni id ni estado")
+    void actualizarSiEstadoCambiaLaCabeceraSinTocarIdNiEstado() {
         var id = insertarConRepositorio(nueva(LocalDate.of(1990, 11, 10),
                 LocalDate.of(1990, 11, 12), EstadoPlan.PLANIFICADO, "Original"));
         var antes = repository.buscarPorId(id).orElseThrow();
@@ -322,8 +341,9 @@ class PlanProduccionRepositoryTest {
         editado.setFechaProduccion(LocalDate.of(1990, 12, 24));
         editado.setObservaciones("Editado");
         editado.setIdUsuario(idUsuarioExtra);
-        repository.actualizar(editado);
+        var afectadas = repository.actualizarSiEstado(editado, EstadoPlan.PLANIFICADO);
 
+        assertThat(afectadas).isEqualTo(1);
         var leido = repository.buscarPorId(id).orElseThrow();
         assertThat(leido.getIdPlan()).isEqualTo(id);
         assertThat(leido.getFechaPlanificacion()).isEqualTo(LocalDate.of(1990, 11, 11));
@@ -334,6 +354,31 @@ class PlanProduccionRepositoryTest {
                 .isEqualTo("Responsable extra HU-20 test" + sufijo);
         assertThat(leido.getEstado()).isEqualTo(EstadoPlan.PLANIFICADO);
         assertThat(antes.getEstado()).isEqualTo(EstadoPlan.PLANIFICADO);
+    }
+
+    @Test
+    @DisplayName("actualizarSiEstado devuelve 0 y no pisa un plan que dejó de estar PLANIFICADO")
+    void actualizarSiEstadoDevuelveCeroSiElPlanYaNoEstaPlanificado() {
+        var id = insertarConRepositorio(nueva(LocalDate.of(1990, 11, 10),
+                LocalDate.of(1990, 11, 12), EstadoPlan.PLANIFICADO, "Original"));
+        // Otra transacción lo inició entre la lectura del servicio y el UPDATE condicionado.
+        repository.cambiarEstado(id, EstadoPlan.PLANIFICADO, EstadoPlan.EN_PROCESO);
+
+        var editado = new PlanProduccion();
+        editado.setIdPlan(id);
+        editado.setFechaPlanificacion(LocalDate.of(1990, 11, 11));
+        editado.setFechaProduccion(LocalDate.of(1990, 12, 24));
+        editado.setObservaciones("Editado");
+        editado.setIdUsuario(idUsuarioExtra);
+        var afectadas = repository.actualizarSiEstado(editado, EstadoPlan.PLANIFICADO);
+
+        assertThat(afectadas).isZero();
+        var leido = repository.buscarPorId(id).orElseThrow();
+        assertThat(leido.getEstado()).isEqualTo(EstadoPlan.EN_PROCESO);
+        assertThat(leido.getFechaPlanificacion()).isEqualTo(LocalDate.of(1990, 11, 10));
+        assertThat(leido.getFechaProduccion()).isEqualTo(LocalDate.of(1990, 11, 12));
+        assertThat(leido.getObservaciones()).isEqualTo("Original");
+        assertThat(leido.getIdUsuario()).isEqualTo(idUsuario);
     }
 
     /**

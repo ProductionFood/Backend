@@ -194,54 +194,75 @@ public class PlanProduccionRepository {
     }
 
     /**
-     * Actualiza los campos editables de la cabecera: las dos fechas, las observaciones y el
-     * responsable.
+     * Actualiza los campos editables de la cabecera —las dos fechas, las observaciones y el
+     * responsable— solo si el plan conserva el estado esperado.
      *
      * <p>No toca el estado: la máquina de transiciones de {@link EstadoPlan} vive en el
-     * servicio, con su propio endpoint (HU-20 R-01), y {@code id_plan} es inmutable. Validar
-     * que el plan siga {@code PLANIFICADO} antes de editar (R-05) es responsabilidad del
-     * servicio, no de la persistencia.
+     * servicio, con su propio endpoint (HU-20 R-01), y {@code id_plan} es inmutable. El
+     * {@code WHERE} incluye el estado leído por el servicio para cerrar la carrera de R-05: si
+     * otra transacción cambió el plan entre la lectura y la escritura, el {@code UPDATE} no
+     * encuentra la fila y devuelve {@code 0} en lugar de pisar un plan que ya dejó de ser
+     * editable.
      *
-     * @param plan con los valores nuevos; debe traer id, fechas, observaciones y responsable
+     * <p>No lleva {@code @Transactional}: la transacción la abre el servicio.
+     *
+     * @param plan           con los valores nuevos; debe traer id, fechas, observaciones y
+     *                       responsable
+     * @param estadoEsperado estado que el servicio leyó antes de editar
+     * @return número de filas afectadas: {@code 1} si se editó, {@code 0} si el plan ya no
+     *         estaba en el estado esperado
      */
-    public void actualizar(PlanProduccion plan) {
+    public int actualizarSiEstado(PlanProduccion plan, EstadoPlan estadoEsperado) {
         var params = new MapSqlParameterSource()
                 .addValue("id", plan.getIdPlan())
                 .addValue("fechaPlanificacion", plan.getFechaPlanificacion())
                 .addValue("fechaProduccion", plan.getFechaProduccion())
                 .addValue("observaciones", plan.getObservaciones())
-                .addValue("idUsuario", plan.getIdUsuario());
+                .addValue("idUsuario", plan.getIdUsuario())
+                .addValue("estadoEsperado", estadoEsperado.name());
 
-        jdbc.update("""
+        return jdbc.update("""
                 UPDATE planes_produccion
                 SET fecha_planificacion = :fechaPlanificacion,
                     fecha_produccion = :fechaProduccion,
                     observaciones = :observaciones,
                     id_usuario = :idUsuario
                 WHERE id_plan = :id
+                  AND estado = :estadoEsperado
                 """, params);
     }
 
     /**
-     * Cambia el estado de un plan.
+     * Cambia el estado de un plan solo si todavía conserva el estado esperado.
      *
      * <p>La máquina de transiciones de {@link EstadoPlan} la valida el servicio (R-01); aquí
-     * solo se escribe el estado nuevo. <strong>No toca inventario ni ningún otro campo
-     * (R-06)</strong>: cancelar un plan no devuelve el material ya consumido, y completarlo no
-     * genera lotes (R-07) —el movimiento lo registran HU-22 y HU-23—.
+     * solo se escribe el estado nuevo. El {@code WHERE} incluye el estado leído por el servicio
+     * para que dos transiciones concurrentes no se pisen: la que llega segunda afecta cero
+     * filas y el servicio la rechaza como {@code TRANSICION_INVALIDA}.
+     *
+     * <p><strong>No toca inventario ni ningún otro campo (R-06)</strong>: cancelar un plan no
+     * devuelve el material ya consumido, y completarlo no genera lotes (R-07) —el movimiento lo
+     * registran HU-22 y HU-23—.
      *
      * <p>No lleva {@code @Transactional}: la transacción la abre el servicio.
      *
-     * @param id     identificador del plan
-     * @param estado estado nuevo
+     * @param id             identificador del plan
+     * @param estadoEsperado estado que el servicio leyó antes de cambiar
+     * @param estadoNuevo    estado destino
+     * @return número de filas afectadas: {@code 1} si cambió, {@code 0} si otro ya lo cambió
      */
-    public void cambiarEstado(Integer id, EstadoPlan estado) {
+    public int cambiarEstado(Integer id, EstadoPlan estadoEsperado, EstadoPlan estadoNuevo) {
         var params = new MapSqlParameterSource()
                 .addValue("id", id)
-                .addValue("estado", estado.name());
+                .addValue("esperado", estadoEsperado.name())
+                .addValue("nuevo", estadoNuevo.name());
 
-        jdbc.update("UPDATE planes_produccion SET estado = :estado WHERE id_plan = :id",
-                params);
+        return jdbc.update("""
+                UPDATE planes_produccion
+                SET estado = :nuevo
+                WHERE id_plan = :id
+                  AND estado = :esperado
+                """, params);
     }
 
     /**
