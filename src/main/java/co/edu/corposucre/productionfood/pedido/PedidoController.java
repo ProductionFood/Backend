@@ -78,7 +78,10 @@ public class PedidoController {
                         + "fechaEntrega, estado o id (por defecto fechaPedido descendente) y un "
                         + "campo fuera de esa lista blanca responde 400 CAMPO_ORDEN_INVALIDO. "
                         + "La validación de page, size y sort la hace el servicio "
-                        + "(1 ≤ size ≤ 100).")
+                        + "(1 ≤ size ≤ 100). Con incluirDetalle=true cada pedido añade el campo "
+                        + "detalle con sus líneas (producto, cantidad, precioUnitario histórico "
+                        + "y subtotal; un pedido sin líneas responde []), se cargan en una sola "
+                        + "consulta y size se recorta a 20 sin responder 400.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Listado paginado"),
         @ApiResponse(responseCode = "400", description = "Parámetros de paginación, orden o "
@@ -94,8 +97,10 @@ public class PedidoController {
             @RequestParam(required = false) LocalDate fechaFin,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String sort) {
-        return pedidoService.listar(idCliente, estado, fechaInicio, fechaFin, page, size, sort);
+            @RequestParam(required = false) String sort,
+            @RequestParam(defaultValue = "false") boolean incluirDetalle) {
+        return pedidoService.listar(idCliente, estado, fechaInicio, fechaFin, page, size, sort,
+                incluirDetalle);
     }
 
     @GetMapping("/{id}")

@@ -2,6 +2,7 @@ package co.edu.corposucre.productionfood.pedido.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * Respuesta con un pedido y su cliente (HU-16).
@@ -24,6 +25,13 @@ import java.time.LocalDate;
  * <p>{@code editable} lo calcula el servicio a partir de la máquina de estados de
  * {@code EstadoPedido}: solo un pedido en un estado no terminal admite edición de cabecera o
  * cambio de estado, y el booleano le ahorra al consumidor reimplementar esa regla.
+ *
+ * <p>{@code detalle} es opcional (HU-25 CA-04): solo el listado con {@code incluirDetalle=true}
+ * lo llena, con las líneas en la misma forma de {@code GET /pedidos/{id}/detalles} salvo que
+ * {@code lotesConsumidos} y {@code totalPedido} van en {@code null} —los lotes salen del kardex
+ * y el total ya viaja en la cabecera— y no se serializan. Un pedido sin líneas responde
+ * {@code []}. En cualquier otra respuesta es {@code null} y, por la inclusión global
+ * {@code non_null}, el campo no aparece en el JSON.
  */
 public record PedidoResponse(
         Integer idPedido,
@@ -36,5 +44,6 @@ public record PedidoResponse(
         BigDecimal devoluciones,
         BigDecimal totalNeto,
         int cantidadItems,
-        boolean editable) {
+        boolean editable,
+        List<DetallePedidoResponse> detalle) {
 }

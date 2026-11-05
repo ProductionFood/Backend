@@ -288,6 +288,130 @@ class PedidoRepositoryTest {
     }
 
     @Test
+    @DisplayName("HU-25 CA-04: buscarConDetalle trae una fila por línea y una fila sin línea por "
+            + "pedido sin detalle, en el orden de la página")
+    void buscarConDetalleTraeLineasYPedidosSinLineas() {
+        var conDos = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);
+        var sinLineas = insertarPedidoDirecto(idCliente, INICIO.plusDays(1),
+                EstadoPedido.PENDIENTE);
+        var conUna = insertarPedidoDirecto(idCliente, INICIO.plusDays(2),
+                EstadoPedido.PENDIENTE);
+        var lineaA = insertarLinea(conDos, idsProducto.get(0), "3.00", "10.50");
+        var lineaB = insertarLinea(conDos, idsProducto.get(1), "2.00", "4.00");
+        var lineaC = insertarLinea(conUna, idsProducto.get(0), "1.50", "2.00");
+
+        var filas = repository.buscarConDetalle(idCliente, null, INICIO, FIN, "p.fecha_pedido",
+                true, 10, 0);
+
+        assertThat(filas).extracting(f -> f.pedido().getIdPedido())
+                .containsExactly(conDos, conDos, sinLineas, conUna);
+        assertThat(filas.get(0).linea().idDetallePedido()).isEqualTo(lineaA);
+        assertThat(filas.get(1).linea().idDetallePedido()).isEqualTo(lineaB);
+        assertThat(filas.get(2).conDetalle()).isFalse();
+        assertThat(filas.get(2).linea()).isNull();
+        assertThat(filas.get(3).linea().idDetallePedido()).isEqualTo(lineaC);
+        // La cabecera trae los mismos importes derivados que buscar.
+        assertThat(filas.get(0).pedido().getTotalPedido()).isEqualByComparingTo("39.50");
+        assertThat(filas.get(0).pedido().getCantidadItems()).isEqualTo(2);
+        assertThat(filas.get(0).pedido().getNombreCliente())
+                .isEqualTo("Cliente HU-16 test" + sufijo);
+        assertThat(filas.get(2).pedido().getTotalPedido()).isEqualByComparingTo("0.00");
+        // La línea trae producto y unidad de los JOIN, y cantidad y precio de la línea.
+        var linea = filas.get(0).linea();
+        assertThat(linea.nombreProducto()).isEqualTo("Producto A HU-16 test" + sufijo);
+        assertThat(linea.unidad()).isEqualTo("u16" + sufijo);
+        assertThat(linea.cantidad()).isEqualByComparingTo("3.00");
+        assertThat(linea.precioUnitario()).isEqualByComparingTo("10.50");
+    }
+
+    @Test
+    @DisplayName("HU-25 R-02: la línea usa detalle_pedido.precio_unitario aunque cambie "
+            + "productos.precio")
+    void buscarConDetalleUsaElPrecioHistorico() {
+        var id = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);
+        insertarLinea(id, idsProducto.get(0), "2.00", "7.00");
+        jdbc.update("UPDATE productos SET precio = 9999.00 WHERE id_producto = :id",
+                new MapSqlParameterSource("id", idsProducto.get(0)));
+
+        var filas = repository.buscarConDetalle(idCliente, null, INICIO, FIN, "p.fecha_pedido",
+                true, 10, 0);
+
+        assertThat(filas).hasSize(1);
+        assertThat(filas.get(0).linea().precioUnitario()).isEqualByComparingTo("7.00");
+    }
+
+    @Test
+    @DisplayName("HU-25 R-06: la página se corta por pedidos, antes de unir el detalle")
+    void buscarConDetallePaginaPorPedidosYNoPorFilas() {
+        var primero = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);
+        var segundo = insertarPedidoDirecto(idCliente, INICIO.plusDays(1),
+                EstadoPedido.PENDIENTE);
+        var tercero = insertarPedidoDirecto(idCliente, INICIO.plusDays(2),
+                EstadoPedido.PENDIENTE);
+        insertarLinea(primero, idsProducto.get(0), "1.00", "1.00");
+        insertarLinea(primero, idsProducto.get(1), "1.00", "1.00");
+        insertarLinea(segundo, idsProducto.get(0), "1.00", "1.00");
+
+        var paginaUno = repository.buscarConDetalle(idCliente, null, INICIO, FIN,
+                "p.fecha_pedido", true, 2, 0);
+        var paginaDos = repository.buscarConDetalle(idCliente, null, INICIO, FIN,
+                "p.fecha_pedido", true, 2, 2);
+
+        // Dos pedidos en la página aunque sean tres filas; un LIMIT sobre el JOIN habría
+        // devuelto solo dos filas, ambas del primer pedido.
+        assertThat(paginaUno).extracting(f -> f.pedido().getIdPedido())
+                .containsExactly(primero, primero, segundo);
+        assertThat(paginaDos).extracting(f -> f.pedido().getIdPedido())
+                .containsExactly(tercero);
+    }
+
+    @Test
+    @DisplayName("HU-25: buscarConDetalle ordena por el alias calculado total_pedido y aplica "
+            + "los filtros de buscar")
+    void buscarConDetalleOrdenaPorTotalYFiltra() {
+        var otroCliente = insertarClienteExtra("Cliente extra HU-16 test" + sufijo);
+        var barato = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.PENDIENTE);
+        var caro = insertarPedidoDirecto(idCliente, INICIO.plusDays(1), EstadoPedido.PENDIENTE);
+        var ajeno = insertarPedidoDirecto(otroCliente, INICIO, EstadoPedido.PENDIENTE);
+        var otroEstado = insertarPedidoDirecto(idCliente, INICIO, EstadoPedido.EN_PREPARACION);
+        insertarLinea(barato, idsProducto.get(0), "1.00", "10.00");
+        insertarLinea(caro, idsProducto.get(0), "1.00", "900.00");
+        insertarLinea(ajeno, idsProducto.get(0), "1.00", "5000.00");
+        insertarLinea(otroEstado, idsProducto.get(0), "1.00", "5000.00");
+
+        var desc = repository.buscarConDetalle(idCliente, EstadoPedido.PENDIENTE, INICIO, FIN,
+                "total_pedido", false, 10, 0);
+        var asc = repository.buscarConDetalle(idCliente, EstadoPedido.PENDIENTE, INICIO, FIN,
+                "total_pedido", true, 10, 0);
+
+        assertThat(desc).extracting(f -> f.pedido().getIdPedido()).containsExactly(caro, barato);
+        assertThat(asc).extracting(f -> f.pedido().getIdPedido()).containsExactly(barato, caro);
+    }
+
+    @Test
+    @DisplayName("HU-25 R-06: buscarConDetalle ejecuta una sola consulta, sin una por pedido")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void buscarConDetalleEjecutaUnaSolaConsulta() {
+        for (int i = 0; i < 4; i++) {
+            var id = insertarPedidoDirecto(idCliente, INICIO.plusDays(i), EstadoPedido.PENDIENTE);
+            insertarLinea(id, idsProducto.get(0), "1.00", "1.00");
+        }
+        var espia = org.mockito.Mockito.spy(jdbc);
+        var repositorioEspiado = new PedidoRepository(espia);
+
+        var filas = repositorioEspiado.buscarConDetalle(idCliente, null, INICIO, FIN,
+                "p.fecha_pedido", true, 10, 0);
+
+        assertThat(filas).hasSize(4);
+        org.mockito.Mockito.verify(espia, org.mockito.Mockito.times(1)).query(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(
+                        org.springframework.jdbc.core.namedparam.SqlParameterSource.class),
+                org.mockito.ArgumentMatchers.any(
+                        org.springframework.jdbc.core.RowMapper.class));
+    }
+
+    @Test
     @DisplayName("contar y buscar aplican los mismos filtros de cliente, estado y rango de fechas")
     void contarYBuscarFiltranPorClienteEstadoYRango() {
         var otroCliente = insertarClienteExtra("Cliente extra HU-16 test" + sufijo);
