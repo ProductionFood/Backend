@@ -53,6 +53,12 @@ app:
     secret: ${JWT_SECRET:2PtgOzmpdKIUAUgwwgZ1jfog2J0ABc1FMHZaVwVC2YdQGf6BcRRCTeZX36BGzZs3}
     expiration-ms: 3600000
 
+productionfood:
+  eficiencia:
+    # HU-26: umbral (puntos porcentuales de desviación) de la tendencia por materia prima.
+    # Por encima de +umbral es CONSUMO_EXCESIVO, por debajo de -umbral CONSUMO_REDUCIDO.
+    umbral-tendencia: 5.00
+
 springdoc:
   api-docs:
     path: /v3/api-docs

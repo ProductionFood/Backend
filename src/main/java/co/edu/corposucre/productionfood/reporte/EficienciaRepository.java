@@ -99,7 +99,8 @@ public class EficienciaRepository {
     }
 
     /**
-     * Acumulado por materia prima de los planes del período, sin los cancelados (R-06): suma del
+     * Acumulado por materia prima de los planes completados del período, sin los cancelados ni los
+     * que siguen en proceso (R-06): suma del
      * teórico y del real de los consumos registrados y cantidad de planes distintos.
      */
     public List<MateriaPrimaAcumuladaFila> materiasPrimasAcumuladas(LocalDate fechaInicio,
@@ -113,7 +114,7 @@ public class EficienciaRepository {
                 JOIN consumo_materia_prima c ON c.id_detalle_plan = d.id_detalle_plan
                 JOIN materias_primas mp ON mp.id_materia_prima = c.id_materia_prima
                 JOIN unidades_medida u ON u.id_unidad = mp.id_unidad
-                WHERE p.estado <> 'CANCELADO' AND c.cantidad_real IS NOT NULL
+                WHERE p.estado = 'COMPLETADO' AND c.cantidad_real IS NOT NULL
                 """ + filtroFechas(fechaInicio, fechaFin, params) + """
                 GROUP BY mp.id_materia_prima, mp.nombre, u.abreviatura
                 ORDER BY mp.nombre
