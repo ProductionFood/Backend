@@ -16,21 +16,25 @@ import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoExceptio
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.producto.ProductoRepository;
+import co.edu.corposucre.productionfood.produccion.dto.ActualizarPlanificadaRequest;
 import co.edu.corposucre.productionfood.produccion.dto.AgregarDetallePlanRequest;
 import co.edu.corposucre.productionfood.produccion.dto.ConsumoTeoricoResponse;
 import co.edu.corposucre.productionfood.produccion.dto.DetallePlanResponse;
 import co.edu.corposucre.productionfood.produccion.dto.ProductoRefResponse;
+import co.edu.corposucre.productionfood.produccion.dto.RegistrarProducidaRequest;
 import co.edu.corposucre.productionfood.receta.DetalleReceta;
 import co.edu.corposucre.productionfood.receta.DetalleRecetaRepository;
 import co.edu.corposucre.productionfood.receta.Receta;
 import co.edu.corposucre.productionfood.receta.RecetaRepository;
 
 /**
- * Productos (líneas de detalle) de un plan de producción (HU-21): consulta paginada y alta.
+ * Productos (líneas de detalle) de un plan de producción (HU-21): consulta paginada, alta,
+ * edición de lo planificado, registro de lo producido y eliminación.
  *
- * <p>Este PR implementa solo {@link #listar(Integer, int, int, String)} y
- * {@link #agregar(Integer, AgregarDetallePlanRequest)}. La edición de lo planificado, el registro
- * de lo producido y la eliminación de líneas llegan en PR4 y no se declaran aquí.
+ * <p>{@link #actualizarPlanificada(Integer, Integer, ActualizarPlanificadaRequest)} y
+ * {@link #eliminar(Integer, Integer)} solo operan sobre planes {@code PLANIFICADO}, mientras que
+ * {@link #registrarProducida(Integer, Integer, RegistrarProducidaRequest)} exige un plan
+ * {@code EN_PROCESO}.
  *
  * <p>Los códigos de error son los del contrato: un plan inexistente responde 404
  * {@code PLAN_INEXISTENTE} a través de {@link PlanInexistenteException} —no el transversal
@@ -182,12 +186,160 @@ public class DetallePlanService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
                         idDetalle));
 
-        var receta = recetaRepository.buscarPorProducto(guardada.getIdProducto()).orElse(null);
-        List<DetalleReceta> detalles = receta == null
-                ? List.of()
-                : detalleRecetaRepository.listarPorReceta(receta.getIdReceta());
+        return aResponseDeLinea(guardada);
+    }
 
-        return aResponse(guardada, receta, detalles);
+    /**
+     * Edita la cantidad planificada de una línea mientras el plan siga {@code PLANIFICADO}
+     * (HU-21 R-02, CP-13).
+     *
+     * <p>Orden exacto de las validaciones:
+     *
+     * <ol>
+     *   <li>El plan existe; si no, 404 {@code PLAN_INEXISTENTE}.</li>
+     *   <li>El plan está {@code PLANIFICADO}; si no, 409 {@code PLAN_NO_EDITABLE}: un plan en
+     *       proceso ya comprometió sus líneas y uno terminal cerró su ciclo.</li>
+     *   <li>La línea existe y pertenece al plan; si no, 404 {@code RECURSO_NO_ENCONTRADO}.</li>
+     *   <li>La cantidad, redondeada a escala 2, es mayor que cero; si no, 400
+     *       {@code CANTIDAD_INVALIDA}.</li>
+     * </ol>
+     *
+     * <p>La respuesta se relee de la base para devolver la línea con el nombre del producto y su
+     * consumo teórico recalculado sobre la nueva cantidad.
+     *
+     * @param idPlan    identificador del plan
+     * @param idDetalle identificador de la línea a editar
+     * @param req       nueva cantidad planificada, mayor que cero
+     * @return la línea actualizada
+     * @throws PlanInexistenteException    si el plan no existe (404)
+     * @throws ConflictoNegocioException   si el plan no está {@code PLANIFICADO}
+     * @throws RecursoNoEncontradoException si la línea no existe o no pertenece al plan
+     * @throws ParametroInvalidoException  si la cantidad no es mayor que cero
+     */
+    @Transactional
+    @Auditable(accion = "EDITAR", tabla = "detalle_plan_produccion",
+            detalle = "'Cantidad planificada de la linea ' + #idDetalle + ' del plan ' + #idPlan")
+    public DetallePlanResponse actualizarPlanificada(Integer idPlan, Integer idDetalle,
+                                                     ActualizarPlanificadaRequest req) {
+        var plan = buscarPlan(idPlan);
+        if (plan.getEstado() != EstadoPlan.PLANIFICADO) {
+            throw new ConflictoNegocioException("PLAN_NO_EDITABLE",
+                    String.format("El plan de producción con id %s no es editable: solo los "
+                            + "planes PLANIFICADO admiten cambios en su detalle.", idPlan));
+        }
+
+        buscarLineaDelPlan(idPlan, idDetalle);
+        var cantidad = validarCantidad(req.cantidadPlanificada());
+
+        if (detallePlanRepository.actualizarPlanificada(idDetalle, cantidad) == 0) {
+            throw new RecursoNoEncontradoException("la línea de detalle", idDetalle);
+        }
+
+        return aResponseDeLinea(detallePlanRepository.buscarPorId(idDetalle)
+                .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
+                        idDetalle)));
+    }
+
+    /**
+     * Registra la cantidad producida de una línea de un plan {@code EN_PROCESO} (HU-21 R-03,
+     * R-04; CP-08..CP-12).
+     *
+     * <p>Orden exacto de las validaciones:
+     *
+     * <ol>
+     *   <li>El plan existe; si no, 404 {@code PLAN_INEXISTENTE}.</li>
+     *   <li>El plan está {@code EN_PROCESO}; si no, 409 {@code PLAN_NO_EN_PROCESO}: solo un plan
+     *       que ya arrancó produce, y uno terminal ya no admite avance.</li>
+     *   <li>La línea existe y pertenece al plan; si no, 404 {@code RECURSO_NO_ENCONTRADO}.</li>
+     *   <li>La cantidad producida no es negativa; si lo es, 400 {@code CANTIDAD_INVALIDA}.</li>
+     * </ol>
+     *
+     * <p>El cero es válido —significa que todavía no se produjo nada (CP-11)— y no hay tope
+     * superior, porque producir de más es un dato real (R-04). El avance lo calcula
+     * {@link #aResponse}: 60 sobre 90 responde {@code 66.67} y 100 sobre 90, {@code 111.11}.
+     * <strong>No toca inventario, lotes ni stock</strong> (R-07).
+     *
+     * @param idPlan    identificador del plan
+     * @param idDetalle identificador de la línea
+     * @param req       nueva cantidad producida, mayor o igual que cero
+     * @return la línea actualizada, con su avance recalculado
+     * @throws PlanInexistenteException    si el plan no existe (404)
+     * @throws ConflictoNegocioException   si el plan no está {@code EN_PROCESO}
+     * @throws RecursoNoEncontradoException si la línea no existe o no pertenece al plan
+     * @throws ParametroInvalidoException  si la cantidad producida es negativa
+     */
+    @Transactional
+    @Auditable(accion = "EDITAR", tabla = "detalle_plan_produccion",
+            detalle = "'Produccion registrada en la linea ' + #idDetalle + ' del plan ' + #idPlan")
+    public DetallePlanResponse registrarProducida(Integer idPlan, Integer idDetalle,
+                                                  RegistrarProducidaRequest req) {
+        var plan = buscarPlan(idPlan);
+        if (plan.getEstado() != EstadoPlan.EN_PROCESO) {
+            throw new ConflictoNegocioException("PLAN_NO_EN_PROCESO",
+                    String.format("El plan de producción con id %s no admite el registro de "
+                            + "producción: solo los planes EN_PROCESO lo permiten.", idPlan));
+        }
+
+        buscarLineaDelPlan(idPlan, idDetalle);
+        var cantidad = validarProducida(req.cantidadProducida());
+
+        if (detallePlanRepository.actualizarProducida(idDetalle, cantidad) == 0) {
+            throw new RecursoNoEncontradoException("la línea de detalle", idDetalle);
+        }
+
+        return aResponseDeLinea(detallePlanRepository.buscarPorId(idDetalle)
+                .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
+                        idDetalle)));
+    }
+
+    /**
+     * Quita una línea de un plan {@code PLANIFICADO} (HU-21 R-08, CP-22).
+     *
+     * <p>Orden exacto de la operación:
+     *
+     * <ol>
+     *   <li>El plan existe; si no, 404 {@code PLAN_INEXISTENTE}.</li>
+     *   <li>El plan está {@code PLANIFICADO}; si no, 409 {@code PLAN_NO_EDITABLE}: quitar una
+     *       línea de un plan ya iniciado alteraría el compromiso y la eficiencia histórica.</li>
+     *   <li>La línea se bloquea con {@code SELECT ... FOR UPDATE}; si no existe o no pertenece
+     *       al plan, 404 {@code RECURSO_NO_ENCONTRADO}.</li>
+     *   <li>La línea no tiene consumos de materia prima; si los tiene, 409
+     *       {@code DETALLE_CON_CONSUMOS} y no se borra, porque la llave foránea de
+     *       {@code consumo_materia_prima} impediría dejarlos huérfanos.</li>
+     * </ol>
+     *
+     * @param idPlan    identificador del plan
+     * @param idDetalle identificador de la línea a quitar
+     * @throws PlanInexistenteException    si el plan no existe (404)
+     * @throws ConflictoNegocioException   si el plan no está {@code PLANIFICADO} o la línea ya
+     *                                     tiene consumos
+     * @throws RecursoNoEncontradoException si la línea no existe o no pertenece al plan
+     */
+    @Transactional
+    @Auditable(accion = "ELIMINAR", tabla = "detalle_plan_produccion",
+            detalle = "'Linea ' + #idDetalle + ' quitada del plan ' + #idPlan")
+    public void eliminar(Integer idPlan, Integer idDetalle) {
+        var plan = buscarPlan(idPlan);
+        if (plan.getEstado() != EstadoPlan.PLANIFICADO) {
+            throw new ConflictoNegocioException("PLAN_NO_EDITABLE",
+                    String.format("El plan de producción con id %s no es editable: solo los "
+                            + "planes PLANIFICADO admiten cambios en su detalle.", idPlan));
+        }
+
+        var linea = detallePlanRepository.buscarPorIdParaActualizar(idDetalle);
+        if (linea.isEmpty() || !idPlan.equals(linea.get().getIdPlan())) {
+            throw new RecursoNoEncontradoException("la línea de detalle", idDetalle);
+        }
+
+        if (detallePlanRepository.tieneConsumos(idDetalle)) {
+            throw new ConflictoNegocioException("DETALLE_CON_CONSUMOS",
+                    String.format("La línea de detalle con id %s tiene consumos de materia prima "
+                            + "registrados y no puede eliminarse.", idDetalle));
+        }
+
+        if (detallePlanRepository.eliminar(idDetalle) == 0) {
+            throw new RecursoNoEncontradoException("la línea de detalle", idDetalle);
+        }
     }
 
     /**
@@ -204,6 +356,26 @@ public class DetallePlanService {
     private PlanProduccion buscarPlan(Integer idPlan) {
         return planProduccionRepository.buscarPorId(idPlan)
                 .orElseThrow(() -> new PlanInexistenteException(idPlan));
+    }
+
+    /**
+     * Carga una línea comprobando que pertenece al plan indicado.
+     *
+     * <p>La pertenencia no se delega a la base: {@link DetallePlanRepository#buscarPorId} busca
+     * por identificador de línea y una línea de otro plan sería un recurso ajeno, así que se
+     * responde 404 {@code RECURSO_NO_ENCONTRADO} en lugar de editar o borrar algo que el cliente
+     * no pidió.
+     *
+     * @param idPlan    identificador del plan al que debe pertenecer la línea
+     * @param idDetalle identificador de la línea
+     * @return la línea existente y del plan
+     * @throws RecursoNoEncontradoException si la línea no existe o es de otro plan
+     */
+    private DetallePlanProduccion buscarLineaDelPlan(Integer idPlan, Integer idDetalle) {
+        return detallePlanRepository.buscarPorId(idDetalle)
+                .filter(linea -> idPlan.equals(linea.getIdPlan()))
+                .orElseThrow(() -> new RecursoNoEncontradoException("la línea de detalle",
+                        idDetalle));
     }
 
     /**
@@ -224,6 +396,27 @@ public class DetallePlanService {
         if (normalizada == null || normalizada.signum() <= 0) {
             throw new ParametroInvalidoException("CANTIDAD_INVALIDA",
                     "La cantidad planificada debe ser mayor que cero.");
+        }
+        return normalizada;
+    }
+
+    /**
+     * Normaliza la cantidad producida y rechaza los negativos (HU-21 R-04, CP-11, CP-12).
+     *
+     * <p>A diferencia de {@link #validarCantidad(BigDecimal)}, el cero es válido: significa que
+     * todavía no se produjo nada (CP-11). Tampoco hay tope superior, porque producir de más es
+     * un dato real y el avance puede superar el 100 % (CP-12). Se redondea a escala 2 con
+     * {@code HALF_UP} para que coincida con la columna.
+     *
+     * @param cantidad cantidad recibida, posiblemente nula o con más decimales
+     * @return la cantidad normalizada a escala 2
+     * @throws ParametroInvalidoException si la cantidad es nula o negativa
+     */
+    private static BigDecimal validarProducida(BigDecimal cantidad) {
+        var normalizada = cantidad == null ? null : cantidad.setScale(2, RoundingMode.HALF_UP);
+        if (normalizada == null || normalizada.signum() < 0) {
+            throw new ParametroInvalidoException("CANTIDAD_INVALIDA",
+                    "La cantidad producida no puede ser negativa.");
         }
         return normalizada;
     }
@@ -285,6 +478,25 @@ public class DetallePlanService {
         return receta == null
                 ? List.of()
                 : detallesPorReceta.getOrDefault(receta.getIdReceta(), List.of());
+    }
+
+    /**
+     * Convierte una línea en la respuesta del contrato cargando su receta e ingredientes.
+     *
+     * <p>Es la variante de una sola línea de {@link #aResponse}; la usan las escrituras que
+     * releen su fila. Un producto sin receta responde {@code tieneReceta=false} y consumo vacío
+     * (R-06, CP-19); si la tiene, se consultan sus ingredientes porque el cálculo teórico los
+     * necesita.
+     *
+     * @param linea línea leída de la base
+     * @return la línea en la forma del contrato, con su avance y consumo teórico
+     */
+    private DetallePlanResponse aResponseDeLinea(DetallePlanProduccion linea) {
+        var receta = recetaRepository.buscarPorProducto(linea.getIdProducto()).orElse(null);
+        List<DetalleReceta> detalles = receta == null
+                ? List.of()
+                : detalleRecetaRepository.listarPorReceta(receta.getIdReceta());
+        return aResponse(linea, receta, detalles);
     }
 
     /**

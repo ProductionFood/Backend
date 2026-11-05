@@ -23,21 +23,25 @@ import org.mockito.ArgumentCaptor;
 
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
+import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
 import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.producto.ProductoRepository;
+import co.edu.corposucre.productionfood.produccion.dto.ActualizarPlanificadaRequest;
 import co.edu.corposucre.productionfood.produccion.dto.AgregarDetallePlanRequest;
+import co.edu.corposucre.productionfood.produccion.dto.RegistrarProducidaRequest;
 import co.edu.corposucre.productionfood.receta.DetalleReceta;
 import co.edu.corposucre.productionfood.receta.DetalleRecetaRepository;
 import co.edu.corposucre.productionfood.receta.Receta;
 import co.edu.corposucre.productionfood.receta.RecetaRepository;
 
 /**
- * Pruebas unitarias de {@link DetallePlanService} con Mockito (HU-21 PR3).
+ * Pruebas unitarias de {@link DetallePlanService} con Mockito (HU-21 PR3 y PR4).
  *
- * <p>Cubren el listado paginado —con su avance y su consumo teórico— y el alta de una línea con
- * todas sus validaciones. La persistencia JDBC se prueba en {@link DetallePlanRepositoryTest};
- * aquí los repositorios se sustituyen por mocks y la calculadora es la instancia real, porque es
- * cálculo puro y así se verifica el resultado de CP-18 de extremo a extremo.
+ * <p>Cubren el listado paginado —con su avance y su consumo teórico—, el alta de una línea, la
+ * edición de lo planificado, el registro de lo producido y la eliminación, con todas sus
+ * validaciones. La persistencia JDBC se prueba en {@link DetallePlanRepositoryTest}; aquí los
+ * repositorios se sustituyen por mocks y la calculadora es la instancia real, porque es cálculo
+ * puro y así se verifica el resultado de CP-18 de extremo a extremo.
  *
  * <p>El test del listado comprueba que las recetas y sus ingredientes se cargan en lote: si el
  * servicio ejecutara una consulta por línea, {@code buscarPorProductos} y
@@ -333,5 +337,325 @@ class DetallePlanServiceTest {
                 .hasFieldOrPropertyWithValue("codigo", "CANTIDAD_INVALIDA");
 
         verifyNoInteractions(productoRepository, detallePlanRepository);
+    }
+
+    // ------------------------------------------------ actualizarPlanificada
+
+    @Test
+    @DisplayName("actualizarPlanificada cambia la cantidad de una línea de un plan PLANIFICADO")
+    void actualizarPlanificadaEnPlanEditableActualizaLaLinea() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+        when(detallePlanRepository.buscarPorId(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "30.00", false)))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "120.00", "30.00", false)));
+        when(detallePlanRepository.actualizarPlanificada(21, new BigDecimal("120.00")))
+                .thenReturn(1);
+
+        var r = service.actualizarPlanificada(ID_PLAN, 21,
+                new ActualizarPlanificadaRequest(new BigDecimal("120")));
+
+        assertThat(r.idDetallePlan()).isEqualTo(21);
+        assertThat(r.cantidadPlanificada()).isEqualByComparingTo("120.00");
+        assertThat(r.cantidadProducida()).isEqualByComparingTo("30.00");
+        assertThat(r.avance()).isEqualByComparingTo("25.00");
+
+        verify(detallePlanRepository).actualizarPlanificada(21, new BigDecimal("120.00"));
+    }
+
+    @Test
+    @DisplayName("actualizarPlanificada en un plan EN_PROCESO responde 409 PLAN_NO_EDITABLE")
+    void actualizarPlanificadaEnPlanNoEditableRespondeConflicto() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.EN_PROCESO)));
+
+        assertThatThrownBy(() -> service.actualizarPlanificada(ID_PLAN, 21,
+                new ActualizarPlanificadaRequest(new BigDecimal("120"))))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PLAN_NO_EDITABLE");
+
+        verifyNoInteractions(detallePlanRepository);
+    }
+
+    @Test
+    @DisplayName("actualizarPlanificada en un plan inexistente responde 404 PLAN_INEXISTENTE")
+    void actualizarPlanificadaEnPlanInexistenteResponde404() {
+        when(planProduccionRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.actualizarPlanificada(9999, 21,
+                new ActualizarPlanificadaRequest(new BigDecimal("120"))))
+                .isInstanceOf(PlanInexistenteException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PLAN_INEXISTENTE");
+
+        verifyNoInteractions(detallePlanRepository);
+    }
+
+    @Test
+    @DisplayName("actualizarPlanificada sobre una línea de otro plan responde 404")
+    void actualizarPlanificadaSobreLineaDeOtroPlanResponde404() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+        var ajena = linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false);
+        ajena.setIdPlan(77);
+        when(detallePlanRepository.buscarPorId(21)).thenReturn(Optional.of(ajena));
+
+        assertThatThrownBy(() -> service.actualizarPlanificada(ID_PLAN, 21,
+                new ActualizarPlanificadaRequest(new BigDecimal("120"))))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO");
+
+        verify(detallePlanRepository, never()).actualizarPlanificada(any(), any());
+    }
+
+    @Test
+    @DisplayName("actualizarPlanificada con cantidad cero responde 400 CANTIDAD_INVALIDA")
+    void actualizarPlanificadaConCantidadCeroRespondeCantidadInvalida() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+        when(detallePlanRepository.buscarPorId(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)));
+
+        assertThatThrownBy(() -> service.actualizarPlanificada(ID_PLAN, 21,
+                new ActualizarPlanificadaRequest(BigDecimal.ZERO)))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CANTIDAD_INVALIDA");
+
+        verify(detallePlanRepository, never()).actualizarPlanificada(any(), any());
+    }
+
+    @Test
+    @DisplayName("actualizarPlanificada con cantidad negativa responde 400 CANTIDAD_INVALIDA")
+    void actualizarPlanificadaConCantidadNegativaRespondeCantidadInvalida() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+        when(detallePlanRepository.buscarPorId(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)));
+
+        assertThatThrownBy(() -> service.actualizarPlanificada(ID_PLAN, 21,
+                new ActualizarPlanificadaRequest(new BigDecimal("-10"))))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CANTIDAD_INVALIDA");
+
+        verify(detallePlanRepository, never()).actualizarPlanificada(any(), any());
+    }
+
+    // --------------------------------------------------- registrarProducida
+
+    @Test
+    @DisplayName("CP-08: registrar 60 sobre 90 deja un avance de 66.67")
+    void registrarProducidaCalculaAvanceDeCp08() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.EN_PROCESO)));
+        when(detallePlanRepository.buscarPorId(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "60.00", false)));
+        when(detallePlanRepository.actualizarProducida(21, new BigDecimal("60.00")))
+                .thenReturn(1);
+
+        var r = service.registrarProducida(ID_PLAN, 21,
+                new RegistrarProducidaRequest(new BigDecimal("60")));
+
+        assertThat(r.cantidadProducida()).isEqualByComparingTo("60.00");
+        assertThat(r.avance()).isEqualByComparingTo("66.67");
+        verify(detallePlanRepository).actualizarProducida(21, new BigDecimal("60.00"));
+    }
+
+    @Test
+    @DisplayName("CP-09: registrar producción en un plan PLANIFICADO responde 409 PLAN_NO_EN_PROCESO")
+    void registrarProducidaEnPlanPlanificadoRespondeConflicto() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+
+        assertThatThrownBy(() -> service.registrarProducida(ID_PLAN, 21,
+                new RegistrarProducidaRequest(new BigDecimal("60"))))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PLAN_NO_EN_PROCESO");
+
+        verifyNoInteractions(detallePlanRepository);
+    }
+
+    @Test
+    @DisplayName("CP-10: registrar producción en un plan COMPLETADO responde 409 PLAN_NO_EN_PROCESO")
+    void registrarProducidaEnPlanCompletadoRespondeConflicto() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.COMPLETADO)));
+
+        assertThatThrownBy(() -> service.registrarProducida(ID_PLAN, 21,
+                new RegistrarProducidaRequest(new BigDecimal("60"))))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PLAN_NO_EN_PROCESO");
+
+        verifyNoInteractions(detallePlanRepository);
+    }
+
+    @Test
+    @DisplayName("CP-11: registrar cero es válido y deja el avance en 0.00")
+    void registrarProducidaCeroEsValido() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.EN_PROCESO)));
+        when(detallePlanRepository.buscarPorId(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)));
+        when(detallePlanRepository.actualizarProducida(21, new BigDecimal("0.00"))).thenReturn(1);
+
+        var r = service.registrarProducida(ID_PLAN, 21,
+                new RegistrarProducidaRequest(BigDecimal.ZERO));
+
+        assertThat(r.cantidadProducida()).isEqualByComparingTo("0.00");
+        assertThat(r.avance()).isEqualByComparingTo("0.00");
+        verify(detallePlanRepository).actualizarProducida(21, new BigDecimal("0.00"));
+    }
+
+    @Test
+    @DisplayName("CP-12: producir 100 sobre 90 deja un avance de 111.11")
+    void registrarProducidaPorEncimaDeLoPlanificadoCalculaAvanceDeCp12() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.EN_PROCESO)));
+        when(detallePlanRepository.buscarPorId(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "100.00", false)));
+        when(detallePlanRepository.actualizarProducida(21, new BigDecimal("100.00")))
+                .thenReturn(1);
+
+        var r = service.registrarProducida(ID_PLAN, 21,
+                new RegistrarProducidaRequest(new BigDecimal("100")));
+
+        assertThat(r.cantidadProducida()).isEqualByComparingTo("100.00");
+        assertThat(r.avance()).isEqualByComparingTo("111.11");
+        verify(detallePlanRepository).actualizarProducida(21, new BigDecimal("100.00"));
+    }
+
+    @Test
+    @DisplayName("registrar una cantidad producida negativa responde 400 CANTIDAD_INVALIDA")
+    void registrarProducidaNegativaRespondeCantidadInvalida() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.EN_PROCESO)));
+        when(detallePlanRepository.buscarPorId(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)));
+
+        assertThatThrownBy(() -> service.registrarProducida(ID_PLAN, 21,
+                new RegistrarProducidaRequest(new BigDecimal("-10"))))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CANTIDAD_INVALIDA");
+
+        verify(detallePlanRepository, never()).actualizarProducida(any(), any());
+    }
+
+    @Test
+    @DisplayName("registrar producción sobre una línea de otro plan responde 404")
+    void registrarProducidaSobreLineaDeOtroPlanResponde404() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.EN_PROCESO)));
+        var ajena = linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false);
+        ajena.setIdPlan(77);
+        when(detallePlanRepository.buscarPorId(21)).thenReturn(Optional.of(ajena));
+
+        assertThatThrownBy(() -> service.registrarProducida(ID_PLAN, 21,
+                new RegistrarProducidaRequest(new BigDecimal("60"))))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO");
+
+        verify(detallePlanRepository, never()).actualizarProducida(any(), any());
+    }
+
+    @Test
+    @DisplayName("registrar producción en un plan inexistente responde 404 PLAN_INEXISTENTE")
+    void registrarProducidaEnPlanInexistenteResponde404() {
+        when(planProduccionRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.registrarProducida(9999, 21,
+                new RegistrarProducidaRequest(new BigDecimal("60"))))
+                .isInstanceOf(PlanInexistenteException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PLAN_INEXISTENTE");
+
+        verifyNoInteractions(detallePlanRepository);
+    }
+
+    // -------------------------------------------------------------- eliminar
+
+    @Test
+    @DisplayName("eliminar quita una línea de un plan PLANIFICADO sin consumos")
+    void eliminarLineaDePlanEditableLaBorra() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+        when(detallePlanRepository.buscarPorIdParaActualizar(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)));
+        when(detallePlanRepository.tieneConsumos(21)).thenReturn(false);
+        when(detallePlanRepository.eliminar(21)).thenReturn(1);
+
+        service.eliminar(ID_PLAN, 21);
+
+        verify(detallePlanRepository).buscarPorIdParaActualizar(21);
+        verify(detallePlanRepository).tieneConsumos(21);
+        verify(detallePlanRepository).eliminar(21);
+    }
+
+    @Test
+    @DisplayName("CP-22: eliminar una línea con consumos responde 409 y no borra")
+    void eliminarLineaConConsumosRespondeConflicto() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+        when(detallePlanRepository.buscarPorIdParaActualizar(21))
+                .thenReturn(Optional.of(
+                        linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false)));
+        when(detallePlanRepository.tieneConsumos(21)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.eliminar(ID_PLAN, 21))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "DETALLE_CON_CONSUMOS");
+
+        verify(detallePlanRepository, never()).eliminar(any());
+    }
+
+    @Test
+    @DisplayName("eliminar una línea de un plan EN_PROCESO responde 409 PLAN_NO_EDITABLE")
+    void eliminarLineaDePlanNoEditableRespondeConflicto() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.EN_PROCESO)));
+
+        assertThatThrownBy(() -> service.eliminar(ID_PLAN, 21))
+                .isInstanceOf(ConflictoNegocioException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PLAN_NO_EDITABLE");
+
+        verifyNoInteractions(detallePlanRepository);
+    }
+
+    @Test
+    @DisplayName("eliminar una línea de otro plan responde 404")
+    void eliminarLineaDeOtroPlanResponde404() {
+        when(planProduccionRepository.buscarPorId(ID_PLAN))
+                .thenReturn(Optional.of(plan(ID_PLAN, EstadoPlan.PLANIFICADO)));
+        var ajena = linea(21, ID_PRODUCTO, "Pan francés", "und", "90.00", "0.00", false);
+        ajena.setIdPlan(77);
+        when(detallePlanRepository.buscarPorIdParaActualizar(21))
+                .thenReturn(Optional.of(ajena));
+
+        assertThatThrownBy(() -> service.eliminar(ID_PLAN, 21))
+                .isInstanceOf(RecursoNoEncontradoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RECURSO_NO_ENCONTRADO");
+
+        verify(detallePlanRepository, never()).eliminar(any());
+    }
+
+    @Test
+    @DisplayName("eliminar una línea de un plan inexistente responde 404 PLAN_INEXISTENTE")
+    void eliminarLineaDePlanInexistenteResponde404() {
+        when(planProduccionRepository.buscarPorId(9999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.eliminar(9999, 21))
+                .isInstanceOf(PlanInexistenteException.class)
+                .hasFieldOrPropertyWithValue("codigo", "PLAN_INEXISTENTE");
+
+        verifyNoInteractions(detallePlanRepository);
     }
 }
