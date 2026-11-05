@@ -1,0 +1,2925 @@
+{
+  "info": {
+    "_postman_id": "hu20-planes-produccion",
+    "name": "ProductionFood - HU-20 Planes de producción",
+    "description": "Casos de la HU-20 (planes de producción): GET /api/v1/planes-produccion (paginado y filtros estado, idUsuario, fechaInicio y fechaFin), GET /api/v1/planes-produccion/{id}, POST /api/v1/planes-produccion, PUT /api/v1/planes-produccion/{id} y PATCH /api/v1/planes-produccion/{id}/estado. No hay DELETE: se cancela o se completa. Corre sobre {{baseUrl}} (por defecto http://localhost:8085). Ejecutar de arriba abajo: 'Preparación' crea los usuarios de los cinco roles y guarda los tokens; 'Planes (CP-01…CP-23)' ejecuta los casos funcionales; 'Roles (matriz)' y 'Seguridad (SEC-01…SEC-05)' cubren la autorización. CP-14, CP-15 y CP-19 necesitan el SQL anotado en su descripción: las líneas de detalle son de HU-21 y todavía no tienen endpoint. SEC-03 y SEC-05 necesitan que rellenes a mano tokenExpirado y tokenInactivo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "tokenProduccion",
+      "value": ""
+    },
+    {
+      "key": "tokenVentas",
+      "value": ""
+    },
+    {
+      "key": "tokenConsulta",
+      "value": ""
+    },
+    {
+      "key": "tokenCompras",
+      "value": ""
+    },
+    {
+      "key": "tokenExpirado",
+      "value": ""
+    },
+    {
+      "key": "tokenInactivo",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioAdmin",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioProduccion",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioVentas",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioConsulta",
+      "value": ""
+    },
+    {
+      "key": "idUsuarioCompras",
+      "value": ""
+    },
+    {
+      "key": "fechaHoy",
+      "value": ""
+    },
+    {
+      "key": "fechaAyer",
+      "value": ""
+    },
+    {
+      "key": "fechaFutura",
+      "value": ""
+    },
+    {
+      "key": "idPlan",
+      "value": ""
+    },
+    {
+      "key": "idPlanConLineas",
+      "value": ""
+    },
+    {
+      "key": "idPlanCancelado",
+      "value": ""
+    },
+    {
+      "key": "idPlanAdminMatriz",
+      "value": ""
+    },
+    {
+      "key": "idPlanProduccionMatriz",
+      "value": ""
+    },
+    {
+      "key": "cp19Iniciado",
+      "value": "false"
+    }
+  ],
+  "item": [
+    {
+      "name": "Preparación",
+      "description": "Autenticación y usuarios de prueba. Ejecutar primero y de arriba abajo. Genera un sufijo único, guarda los cinco tokens (ADMIN, PRODUCCION, VENTAS, CONSULTA y COMPRAS) con sus idUsuario y fija las fechas fechaHoy, fechaAyer y fechaFutura. Los usuarios usan la contraseña Clave2026* y se reutilizan si ya existen (201/409).",
+      "item": [
+        {
+          "name": "Login ADMIN → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Autentica al administrador del seed. Guarda tokenAdmin, idUsuarioAdmin y genera un sufijo único para los correos y las observaciones de esta ejecución. Fija las fechas de trabajo: fechaHoy, fechaAyer y fechaFutura (hoy + 7 días).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"admin@productionfood.local\",\n  \"password\": \"Admin123*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sufijo', String(Date.now()));",
+                  "const hoy = new Date();",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('fechaHoy', iso(hoy));",
+                  "const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);",
+                  "pm.collectionVariables.set('fechaAyer', iso(ayer));",
+                  "const futura = new Date(hoy); futura.setDate(futura.getDate() + 7);",
+                  "pm.collectionVariables.set('fechaFutura', iso(futura));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenAdmin', j.token);",
+                  "pm.collectionVariables.set('token', j.token);",
+                  "pm.collectionVariables.set('idUsuarioAdmin', j.usuario.idUsuario);",
+                  "pm.test(\"rol ADMIN\", () => pm.expect(j.usuario.rol).to.eql(\"ADMIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario PRODUCCION → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza, si ya existe) el usuario de rol PRODUCCION (idRol 2).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-20 PRODUCCION {{sufijo}}\",\n  \"correo\": \"hu20-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 2\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login PRODUCCION → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenProduccion e idUsuarioProduccion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu20-produccion-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenProduccion', j.token);",
+                  "pm.collectionVariables.set('idUsuarioProduccion', j.usuario.idUsuario);",
+                  "pm.test(\"rol PRODUCCION\", () => pm.expect(j.usuario.rol).to.eql(\"PRODUCCION\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario VENTAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza) el usuario de rol VENTAS (idRol 4), que no participa en el módulo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-20 VENTAS {{sufijo}}\",\n  \"correo\": \"hu20-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 4\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login VENTAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenVentas e idUsuarioVentas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu20-ventas-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenVentas', j.token);",
+                  "pm.collectionVariables.set('idUsuarioVentas', j.usuario.idUsuario);",
+                  "pm.test(\"rol VENTAS\", () => pm.expect(j.usuario.rol).to.eql(\"VENTAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario CONSULTA → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza) el usuario de rol CONSULTA (idRol 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-20 CONSULTA {{sufijo}}\",\n  \"correo\": \"hu20-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login CONSULTA → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenConsulta e idUsuarioConsulta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu20-consulta-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenConsulta', j.token);",
+                  "pm.collectionVariables.set('idUsuarioConsulta', j.usuario.idUsuario);",
+                  "pm.test(\"rol CONSULTA\", () => pm.expect(j.usuario.rol).to.eql(\"CONSULTA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear usuario COMPRAS → 201/409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/usuarios"
+            },
+            "description": "Crea (o reutiliza) el usuario de rol COMPRAS (idRol 3), que no participa en el módulo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"QA HU-20 COMPRAS {{sufijo}}\",\n  \"correo\": \"hu20-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\",\n  \"idRol\": 3\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201/409\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login COMPRAS → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login"
+            },
+            "description": "Guarda tokenCompras e idUsuarioCompras.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"hu20-compras-{{sufijo}}@productionfood.local\",\n  \"password\": \"Clave2026*\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('tokenCompras', j.token);",
+                  "pm.collectionVariables.set('idUsuarioCompras', j.usuario.idUsuario);",
+                  "pm.test(\"rol COMPRAS\", () => pm.expect(j.usuario.rol).to.eql(\"COMPRAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sanity del listado → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion?size=1"
+            },
+            "description": "Comprueba que el listado responde antes de ejecutar los casos."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"page\", () => pm.expect(pm.response.json().content).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Planes (CP-01…CP-23)",
+      "description": "Casos funcionales CP-01…CP-23. Ejecutar después de 'Preparación'. Los casos HTTP son directos. CP-14, CP-15 y CP-19 dependen de las líneas de detalle de HU-21, que todavía no tiene endpoint: su descripción trae el SQL que hay que ejecutar. CP-19 inicia el plan cancelable en su prerequest y comprueba que el plan estaba EN_PROCESO; la verificación de que el inventario no cambia se hace con el SQL de su descripción.",
+      "item": [
+        {
+          "name": "CP-01 Crear plan válido → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-01 (CA-01..CA-05): alta válida con las dos fechas y observaciones. Debe nacer PLANIFICADO, sin productos y editable. Guarda idPlan para los casos que lo reutilizan.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan QA HU-20 {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlan', j.idPlan);",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/planes-produccion/\"));",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));",
+                  "pm.test(\"cantidadProductos 0\", () => pm.expect(j.cantidadProductos).to.eql(0));",
+                  "pm.test(\"editable\", () => pm.expect(j.editable).to.eql(true));",
+                  "pm.test(\"responsable = token\", () => pm.expect(j.responsable.idUsuario).to.eql(Number(pm.collectionVariables.get('idUsuarioAdmin'))));",
+                  "pm.test(\"observaciones\", () => pm.expect(j.observaciones).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-02 Fecha de planificación omitida → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-02 (CA-01): falta fechaPlanificacion; el bean validation responde VALIDACION_FALLIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));",
+                  "pm.test(\"fieldErrors señala fechaPlanificacion\", () => pm.expect(pm.response.json().fieldErrors.some(e => e.field === \"fechaPlanificacion\")).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-03 Producción anterior a planificación → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-03 (R-03): la producción no puede preceder a la planificación.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaAyer}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"FECHAS_INVALIDAS\", () => pm.expect(pm.response.json().code).to.eql(\"FECHAS_INVALIDAS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-04 Ambas fechas iguales → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-04 (R-03): planificar y producir el mismo día es válido.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaHoy}}\",\n  \"observaciones\": \"Fechas iguales {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"fechas iguales\", () => pm.expect(pm.response.json().fechaProduccion).to.eql(pm.response.json().fechaPlanificacion));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-05 Producción futura → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-05 (R-03): una producción futura es lo normal. Guarda idPlanConLineas: este es el plan que CP-15 inicia, CP-16 completa y CP-21 intenta editar ya cerrado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan con líneas {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanConLineas', j.idPlan);",
+                  "pm.test(\"estado PLANIFICADO\", () => pm.expect(j.estado).to.eql(\"PLANIFICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-06 Estado inicial aunque se envíe otro → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-06 (CA-02): el cuerpo no admite estado; el plan nace PLANIFICADO y el valor enviado se ignora.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Estado inicial {{sufijo}}\",\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"nace PLANIFICADO\", () => pm.expect(pm.response.json().estado).to.eql(\"PLANIFICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-07 Estado inválido → 201 (ignorado) o 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-07 (CA-02): un estado no canónico en el alta se ignora (el DTO no declara estado) y el plan nace PLANIFICADO. Se acepta 201 o 400; si es 201, el estado debe ser PLANIFICADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Estado inválido {{sufijo}}\",\n  \"estado\": \"EN_HORNO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201 o 400\", () => pm.expect([201, 400]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.test(\"nace PLANIFICADO\", () => pm.expect(pm.response.json().estado).to.eql(\"PLANIFICADO\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-08 Sin observaciones → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-08 (CA-03): sin observaciones la clave llega como null, no desaparece del JSON.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"observaciones null\", () => pm.expect(pm.response.json()).to.have.property(\"observaciones\", null));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-09 Observaciones de 256 caracteres → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-09 (CA-03): el máximo es 255; 256 responde VALIDACION_FALLIDA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDACION_FALLIDA\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDACION_FALLIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-10 El responsable es el usuario del token → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-10 (R-04): sin idUsuario, el plan queda a nombre del usuario autenticado (PRODUCCION).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Responsable token {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"responsable = token PRODUCCION\", () => pm.expect(pm.response.json().responsable.idUsuario).to.eql(Number(pm.collectionVariables.get('idUsuarioProduccion'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-11 PRODUCCION no puede asignar a otro → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-11 (R-04, seguridad): un PRODUCCION que envía idUsuario ajeno es ignorado y el plan queda a su nombre; no puede crear planes a nombre de otra persona.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Intento de asignación {{sufijo}}\",\n  \"idUsuario\": {{idUsuarioAdmin}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"responsable = PRODUCCION, no el idUsuario enviado\", () => pm.expect(pm.response.json().responsable.idUsuario).to.eql(Number(pm.collectionVariables.get('idUsuarioProduccion'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-12 ADMIN asigna a otro usuario → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-12 (R-04): un ADMIN sí puede asignar el plan a otro usuario. Guarda idPlanCancelado: es el plan que CP-19 inicia (con las líneas SQL) y cancela.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan cancelable {{sufijo}}\",\n  \"idUsuario\": {{idUsuarioConsulta}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanCancelado', j.idPlan);",
+                  "pm.test(\"responsable = CONSULTA\", () => pm.expect(j.responsable.idUsuario).to.eql(Number(pm.collectionVariables.get('idUsuarioConsulta'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-13 Usuario inexistente → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-13 (CA-04): el ADMIN designa un usuario que no existe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"idUsuario\": 9999\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"USUARIO_INEXISTENTE\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INEXISTENTE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-14 Iniciar un plan sin productos → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "description": "CP-14 (R-02): el plan de CP-01 no tiene líneas. SQL de comprobación:\nSELECT COUNT(*) FROM detalle_plan_produccion WHERE id_plan = {{idPlan}};  -- debe ser 0\nEl backend debe responder PLAN_SIN_PRODUCTOS.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PLAN_SIN_PRODUCTOS\", () => pm.expect(pm.response.json().code).to.eql(\"PLAN_SIN_PRODUCTOS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-15 Iniciar un plan con productos → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanConLineas}}/estado"
+            },
+            "description": "CP-15 (R-02): antes de esta petición hay que agregar 2 líneas al plan de CP-05 (HU-21 todavía no tiene endpoint). Ejecutar en MySQL:\nINSERT INTO detalle_plan_produccion (id_plan, id_producto, cantidad_planificada)\nVALUES ({{idPlanConLineas}}, 1, 10.00),\n       ({{idPlanConLineas}}, 2, 5.00);\nSustituir 1 y 2 por ids de productos existentes si no lo están. El plan debe pasar a EN_PROCESO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado EN_PROCESO\", () => pm.expect(pm.response.json().estado).to.eql(\"EN_PROCESO\"));",
+                  "pm.test(\"cantidadProductos 2\", () => pm.expect(pm.response.json().cantidadProductos).to.eql(2));",
+                  "pm.test(\"deja de ser editable\", () => pm.expect(pm.response.json().editable).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-16 Completar el plan → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanConLineas}}/estado"
+            },
+            "description": "CP-16 (R-01): EN_PROCESO -> COMPLETADO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"COMPLETADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado COMPLETADO\", () => pm.expect(pm.response.json().estado).to.eql(\"COMPLETADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-17 COMPLETADO es terminal → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanConLineas}}/estado"
+            },
+            "description": "CP-17 (R-01): desde un estado terminal no se puede volver a EN_PROCESO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_PROCESO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"TRANSICION_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"TRANSICION_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-18 Salto PLANIFICADO a COMPLETADO → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "description": "CP-18 (R-01): el plan de CP-01 sigue PLANIFICADO; no se puede saltar EN_PROCESO.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"COMPLETADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"TRANSICION_INVALIDA\", () => pm.expect(pm.response.json().code).to.eql(\"TRANSICION_INVALIDA\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-19 Cancelar no revierte consumos → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanCancelado}}/estado"
+            },
+            "description": "CP-19 (R-06): el plan de CP-12 debe estar EN_PROCESO con consumos registrados. La petición previa lo inicia automáticamente; antes hay que insertar sus 2 líneas (HU-21):\nINSERT INTO detalle_plan_produccion (id_plan, id_producto, cantidad_planificada)\nVALUES ({{idPlanCancelado}}, 1, 10.00),\n       ({{idPlanCancelado}}, 2, 5.00);\nSQL de inventario antes y después de cancelar:\nSELECT id_materia_prima, cantidad_disponible FROM inventario ORDER BY id_materia_prima;\n-- ejecutar esta petición --\nSELECT id_materia_prima, cantidad_disponible FROM inventario ORDER BY id_materia_prima;\nSELECT COUNT(*) FROM movimientos_inventario_mp\nWHERE tabla_origen = 'planes_produccion' AND id_origen = {{idPlanCancelado}};\nLos saldos deben ser idénticos y el plan no debe haber generado movimientos por sí mismo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const url = pm.variables.replaceIn('{{baseUrl}}/api/v1/planes-produccion/{{idPlanCancelado}}/estado');",
+                  "pm.sendRequest({",
+                  "  url: url,",
+                  "  method: \"PATCH\",",
+                  "  header: { \"Content-Type\": \"application/json\", \"Authorization\": \"Bearer \" + pm.collectionVariables.get(\"tokenAdmin\") },",
+                  "  body: { mode: \"raw\", raw: JSON.stringify({ estado: \"EN_PROCESO\" }) }",
+                  "}, function (err, res) {",
+                  "  pm.collectionVariables.set('cp19Iniciado', !err && res.code === 200 ? 'true' : 'false');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"el plan estaba EN_PROCESO (paso previo)\", () => pm.expect(pm.collectionVariables.get('cp19Iniciado')).to.eql('true'));",
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"estado CANCELADO\", () => pm.expect(pm.response.json().estado).to.eql(\"CANCELADO\"));",
+                  "pm.test(\"no editable\", () => pm.expect(pm.response.json().editable).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-20 Editar un plan PLANIFICADO → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "description": "CP-20 (R-05): la cabecera de un plan PLANIFICADO se puede editar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Plan editado {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"observaciones nuevas\", () => pm.expect(pm.response.json().observaciones).to.include(\"Plan editado\"));",
+                  "pm.test(\"sigue PLANIFICADO\", () => pm.expect(pm.response.json().estado).to.eql(\"PLANIFICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-21 Editar un plan cerrado → 409",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanConLineas}}"
+            },
+            "description": "CP-21 (R-05): el plan de CP-05 quedó COMPLETADO en CP-16. La regla aplica a cualquier estado distinto de PLANIFICADO; un plan COMPLETADO responde PLAN_NO_EDITABLE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Intento sobre plan cerrado {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PLAN_NO_EDITABLE\", () => pm.expect(pm.response.json().code).to.eql(\"PLAN_NO_EDITABLE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-22 VENTAS no puede crear planes → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "CP-22 (seguridad): VENTAS no participa en la planificación de la producción.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CP-23 CONSULTA puede listar → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion?size=5"
+            },
+            "description": "CP-23: CONSULTA tiene lectura, no escritura."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"content es array\", () => pm.expect(pm.response.json().content).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roles (matriz)",
+      "description": "Matriz de acceso de los cinco endpoints: lectura para ADMIN, PRODUCCION y CONSULTA; escritura solo para ADMIN y PRODUCCION. VENTAS y COMPRAS reciben 403 en todo. Los POST de la matriz crean planes propios y los confirman con PUT y con un PATCH a CANCELADO, sin tocar los planes de CP-01.",
+      "item": [
+        {
+          "name": "ADMIN GET /planes-produccion → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /planes-produccion → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /planes-produccion → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /planes-produccion → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /planes-produccion → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion?size=1"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ADMIN GET /planes-produccion/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PRODUCCION GET /planes-produccion/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CONSULTA GET /planes-produccion/{id} → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "VENTAS GET /planes-produccion/{id} → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "COMPRAS GET /planes-produccion/{id} → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /planes-produccion con ADMIN → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz ADMIN {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanAdminMatriz', j.idPlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /planes-produccion con PRODUCCION → 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz PRODUCCION {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 201\", () => pm.response.to.have.status(201));",
+                  "var j = pm.response.json();",
+                  "pm.collectionVariables.set('idPlanProduccionMatriz', j.idPlan);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /planes-produccion con CONSULTA → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz CONSULTA {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /planes-produccion con VENTAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz VENTAS {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /planes-produccion con COMPRAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz COMPRAS {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /planes-produccion/{id} con ADMIN → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz editada ADMIN {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /planes-produccion/{id} con PRODUCCION → 200",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanProduccionMatriz}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz editada PRODUCCION {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /planes-produccion/{id} con CONSULTA → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz editada CONSULTA {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /planes-produccion/{id} con VENTAS → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz editada VENTAS {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /planes-produccion/{id} con COMPRAS → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Matriz editada COMPRAS {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /planes-produccion/{id}/estado con ADMIN → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"CANCELADO\", () => pm.expect(pm.response.json().estado).to.eql(\"CANCELADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /planes-produccion/{id}/estado con PRODUCCION → 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenProduccion}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanProduccionMatriz}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"CANCELADO\", () => pm.expect(pm.response.json().estado).to.eql(\"CANCELADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /planes-produccion/{id}/estado con CONSULTA → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /planes-produccion/{id}/estado con VENTAS → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /planes-produccion/{id}/estado con COMPRAS → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlanAdminMatriz}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seguridad (SEC-01…SEC-05)",
+      "description": "Batería de seguridad en los cinco endpoints: SEC-01 sin token, SEC-02 token malformado, SEC-03 token expirado, SEC-04 rol sin permiso y SEC-05 usuario inactivo. SEC-03 y SEC-05 usan las variables tokenExpirado y tokenInactivo, que se rellenan a mano con JWTs del mismo secreto: el runner no puede fabricarlos sin la clave. Ejecutar después de 'Preparación' y de 'Planes', porque las rutas con {id} necesitan idPlan.",
+      "item": [
+        {
+          "name": "SEC-01 GET listado sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 GET detalle sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 POST crear sin token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 PUT editar sin token → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Seguridad {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-01 PATCH estado sin token → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET listado token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer token-invalido"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 GET detalle token malformado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer token-invalido"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 POST crear token malformado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer token-invalido"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 PUT editar token malformado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer token-invalido"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Seguridad {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-02 PATCH estado token malformado → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer token-invalido"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET listado token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "SEC-03: rellenar a mano la variable tokenExpirado con un JWT del mismo secreto ya caducado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 GET detalle token expirado → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "description": "SEC-03: rellenar a mano la variable tokenExpirado con un JWT del mismo secreto ya caducado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 POST crear token expirado → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "SEC-03: rellenar a mano la variable tokenExpirado con un JWT del mismo secreto ya caducado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 PUT editar token expirado → 401",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "description": "SEC-03: rellenar a mano la variable tokenExpirado con un JWT del mismo secreto ya caducado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Seguridad {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-03 PATCH estado token expirado → 401",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenExpirado}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "description": "SEC-03: rellenar a mano la variable tokenExpirado con un JWT del mismo secreto ya caducado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"NO_AUTENTICADO\", () => pm.expect(pm.response.json().code).to.eql(\"NO_AUTENTICADO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET listado con COMPRAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "SEC-04 es el caso crítico: si devuelve 200, la autorización por método no está activa."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 GET detalle con VENTAS → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "description": "SEC-04 es el caso crítico: si devuelve 200, la autorización por método no está activa."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 POST crear con VENTAS → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenVentas}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "SEC-04 es el caso crítico: si devuelve 200, la autorización por método no está activa.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 PUT editar con CONSULTA → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenConsulta}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "description": "SEC-04 es el caso crítico: si devuelve 200, la autorización por método no está activa.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Seguridad {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-04 PATCH estado con COMPRAS → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenCompras}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "description": "SEC-04 es el caso crítico: si devuelve 200, la autorización por método no está activa.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"SIN_PERMISO\", () => pm.expect(pm.response.json().code).to.eql(\"SIN_PERMISO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET listado usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "SEC-05: rellenar a mano tokenInactivo con el JWT de un usuario desactivado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 GET detalle usuario inactivo → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "description": "SEC-05: rellenar a mano tokenInactivo con el JWT de un usuario desactivado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 POST crear usuario inactivo → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion"
+            },
+            "description": "SEC-05: rellenar a mano tokenInactivo con el JWT de un usuario desactivado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 PUT editar usuario inactivo → 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}"
+            },
+            "description": "SEC-05: rellenar a mano tokenInactivo con el JWT de un usuario desactivado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPlanificacion\": \"{{fechaHoy}}\",\n  \"fechaProduccion\": \"{{fechaFutura}}\",\n  \"observaciones\": \"Seguridad {{sufijo}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SEC-05 PATCH estado usuario inactivo → 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenInactivo}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/planes-produccion/{{idPlan}}/estado"
+            },
+            "description": "SEC-05: rellenar a mano tokenInactivo con el JWT de un usuario desactivado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADO\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"→ 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"USUARIO_INACTIVO\", () => pm.expect(pm.response.json().code).to.eql(\"USUARIO_INACTIVO\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
