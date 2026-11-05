@@ -1,6 +1,11 @@
 package co.edu.corposucre.productionfood.pedido;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -16,11 +21,16 @@ import co.edu.corposucre.productionfood.common.pagination.PageRequest;
 import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioPtService;
 import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
+import co.edu.corposucre.productionfood.lote.dto.ProductoRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
+import co.edu.corposucre.productionfood.pedido.dto.DetallePedidoResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoClienteRefResponse;
 import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
+import co.edu.corposucre.productionfood.pedido.dto.ProductoVendidoResponse;
+import co.edu.corposucre.productionfood.pedido.dto.ResumenPedidosResponse;
+import co.edu.corposucre.productionfood.pedido.dto.VentasClienteResponse;
 
 /**
  * Ciclo de vida de la cabecera de un pedido (HU-16): alta, edición, consulta, paginación y
@@ -42,7 +52,8 @@ public class PedidoService {
 
     /**
      * Lista blanca de ordenamiento del listado: traduce el campo que pide el cliente al prefijo
-     * de columna SQL de {@code pedidos} (alias {@code p}). {@code PageRequest.of} rechaza
+     * de columna SQL de {@code pedidos} (alias {@code p}) o, para {@code total}, al alias calculado
+     * {@code total_pedido}. {@code PageRequest.of} rechaza
      * cualquier campo que no esté aquí, y la columna resuelta es la única que llega al
      * repositorio, de modo que el orden nunca es SQL arbitrario.
      */
@@ -50,9 +61,19 @@ public class PedidoService {
             "fechaPedido", "p.fecha_pedido",
             "fechaEntrega", "p.fecha_entrega",
             "estado", "p.estado",
+            // Columna calculada (HU-25): se ordena por el alias de la subconsulta del SELECT.
+            "total", "total_pedido",
             "id", "p.id_pedido");
 
+    private static final BigDecimal CERO = new BigDecimal("0.00");
+
     private static final String ORDEN_POR_DEFECTO = "fechaPedido,desc";
+
+    /**
+     * Tope de pedidos por página cuando el listado incluye el detalle (HU-25 R-06): cargar las
+     * líneas de una página grande es costoso, así que {@code size} se recorta a este valor.
+     */
+    static final int TAMANO_MAXIMO_CON_DETALLE = 20;
 
     private final PedidoRepository pedidoRepository;
 
@@ -110,7 +131,7 @@ public class PedidoService {
         var idPedido = pedidoRepository.insertar(pedido);
 
         return pedidoRepository.buscarPorId(idPedido)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", idPedido));
     }
 
@@ -168,7 +189,7 @@ public class PedidoService {
         pedidoRepository.actualizar(cambios);
 
         return pedidoRepository.buscarPorId(id)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
     }
 
@@ -189,31 +210,45 @@ public class PedidoService {
      * @param page       página solicitada, desde 0
      * @param size       tamaño de página, entre 1 y 100
      * @param sort       orden "campo,direccion", con campos de la lista blanca
-     *                   {@code fechaPedido}, {@code fechaEntrega}, {@code estado} e {@code id};
+     *                   {@code fechaPedido}, {@code fechaEntrega}, {@code estado}, {@code total}
+     *                   e {@code id};
      *                   por defecto "fechaPedido,desc"
      * @return página de pedidos con su cliente y sus totales
      * @throws ParametroInvalidoException si el rango de fechas está invertido, o la paginación o
      *                                    el campo de orden son inválidos
+     * @throws ClienteInexistenteFiltroException si {@code idCliente} no existe (404)
      */
     @Transactional(readOnly = true)
     public PageResponse<PedidoResponse> listar(Integer idCliente, EstadoPedido estado,
                                                LocalDate fechaInicio, LocalDate fechaFin,
-                                               int page, int size, String sort) {
-        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
-            // Código del contrato transversal (04-CONTRATO-API.md §4), no el genérico
-            // PARAMETRO_INVALIDO: el frontend distingue el rango invertido de un query mal formado.
-            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
-                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+                                               int page, int size, String sort,
+                                               boolean incluirDetalle) {
+        validarRango(fechaInicio, fechaFin);
+
+        // HU-25: solo existencia, no actividad; un cliente desactivado conserva su historial.
+        // Los caminos de crear y actualizar siguen respondiendo 409 y no pasan por aquí.
+        if (idCliente != null && !clienteRepository.existsById(idCliente)) {
+            throw new ClienteInexistenteFiltroException(idCliente);
         }
 
-        var orden = PageRequest.of(page, size, sort, ORDEN, ORDEN_POR_DEFECTO);
+        // CP-10: el recorte va antes de PageRequest.of para que un size sobre la cota de detalle
+        // se recorte y no responda 400; un size igual a 0 o negativo sigue rechazándose allí.
+        var sizeEfectivo = incluirDetalle ? Math.min(size, TAMANO_MAXIMO_CON_DETALLE) : size;
+        var orden = PageRequest.of(page, sizeEfectivo, sort, ORDEN, ORDEN_POR_DEFECTO);
         // El offset se calcula en long: page no tiene cota superior, así que page * size
         // desbordaría int a un valor negativo y el OFFSET del SQL fallaría.
         long offset = (long) orden.page() * orden.size();
 
-        var filas = pedidoRepository.buscar(idCliente, estado, fechaInicio, fechaFin,
-                orden.propiedad(), orden.ascendente(), orden.size(), offset);
-        var contenido = filas.stream().map(PedidoService::aResponse).toList();
+        List<PedidoResponse> contenido;
+        if (incluirDetalle) {
+            var filas = pedidoRepository.buscarConDetalle(idCliente, estado, fechaInicio,
+                    fechaFin, orden.propiedad(), orden.ascendente(), orden.size(), offset);
+            contenido = agruparConDetalle(filas);
+        } else {
+            var filas = pedidoRepository.buscar(idCliente, estado, fechaInicio, fechaFin,
+                    orden.propiedad(), orden.ascendente(), orden.size(), offset);
+            contenido = filas.stream().map(f -> aResponse(f, null)).toList();
+        }
         var total = pedidoRepository.contar(idCliente, estado, fechaInicio, fechaFin);
 
         return PageResponse.of(contenido, orden.page(), orden.size(), total);
@@ -229,7 +264,7 @@ public class PedidoService {
     @Transactional(readOnly = true)
     public PedidoResponse obtener(Integer id) {
         return pedidoRepository.buscarPorId(id)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
     }
 
@@ -291,7 +326,7 @@ public class PedidoService {
         }
 
         return pedidoRepository.buscarPorId(id)
-                .map(PedidoService::aResponse)
+                .map(p -> aResponse(p, null))
                 .orElseThrow(() -> new RecursoNoEncontradoException("el pedido", id));
     }
 
@@ -386,7 +421,7 @@ public class PedidoService {
      * {@code editable} se deriva de la máquina de estados: solo un pedido {@code PENDIENTE}
      * admite cambios.
      */
-    private static PedidoResponse aResponse(Pedido pedido) {
+    private static PedidoResponse aResponse(Pedido pedido, List<DetallePedidoResponse> detalle) {
         return new PedidoResponse(
                 pedido.getIdPedido(),
                 new PedidoClienteRefResponse(pedido.getIdCliente(), pedido.getNombreCliente()),
@@ -394,7 +429,197 @@ public class PedidoService {
                 pedido.getFechaEntrega(),
                 pedido.getEstado().name(),
                 pedido.getTotalPedido(),
+                pedido.getTotalBruto(),
+                pedido.getDevoluciones(),
+                pedido.getTotalNeto(),
                 pedido.getCantidadItems(),
-                pedido.getEstado() == EstadoPedido.PENDIENTE);
+                pedido.getEstado() == EstadoPedido.PENDIENTE,
+                detalle);
+    }
+
+    /**
+     * Agrupa las filas planas del listado con detalle por pedido, preservando el orden de la
+     * página (HU-25 R-06).
+     *
+     * <p>El {@code LinkedHashMap} conserva el orden de la primera aparición de cada pedido, que
+     * es el de la consulta; las líneas de cada uno quedan en el orden del {@code ORDER BY}. Una
+     * fila sin línea crea el pedido con la lista vacía, no la omite.
+     */
+    private static List<PedidoResponse> agruparConDetalle(List<PedidoDetalleFila> filas) {
+        var pedidos = new LinkedHashMap<Integer, Pedido>();
+        var detalles = new LinkedHashMap<Integer, List<DetallePedidoResponse>>();
+        for (var fila : filas) {
+            var id = fila.pedido().getIdPedido();
+            pedidos.putIfAbsent(id, fila.pedido());
+            var lineas = detalles.computeIfAbsent(id, k -> new ArrayList<>());
+            if (fila.conDetalle()) {
+                lineas.add(aLinea(fila.linea()));
+            }
+        }
+
+        var respuestas = new ArrayList<PedidoResponse>(pedidos.size());
+        for (var pedido : pedidos.values()) {
+            respuestas.add(aResponse(pedido, detalles.get(pedido.getIdPedido())));
+        }
+        return respuestas;
+    }
+
+    /**
+     * Convierte una línea del listado en la misma forma que expone
+     * {@code GET /pedidos/{id}/detalles}, salvo lotes y total (van en {@code null}).
+     *
+     * <p>El subtotal es {@code cantidad * precioUnitario} a escala 2 con {@code HALF_UP}, igual
+     * que en {@code DetallePedidoService}: la cifra oficial nunca la entrega el cliente.
+     */
+    private static DetallePedidoResponse aLinea(DetallePedido linea) {
+        return new DetallePedidoResponse(
+                linea.idDetallePedido(),
+                new ProductoRefResponse(linea.idProducto(), linea.nombreProducto(), linea.unidad()),
+                linea.cantidad().setScale(2, RoundingMode.HALF_UP),
+                linea.precioUnitario().setScale(2, RoundingMode.HALF_UP),
+                linea.cantidad().multiply(linea.precioUnitario())
+                        .setScale(2, RoundingMode.HALF_UP),
+                null,
+                null);
+    }
+
+    /**
+     * Resume los pedidos de un período por situación de venta (HU-25 R-03, R-04).
+     *
+     * <p>El rango se valida antes de tocar la base. Los estados {@code PENDIENTE} y
+     * {@code EN_PREPARACION} se reúnen en {@code enCurso}; un estado sin pedidos responde
+     * {@code 0} y {@code 0.00}.
+     *
+     * <p>Decisión sobre las cifras: la venta bruta es solo el total de los {@code ENTREGADO}
+     * (venta consumada), sin sumar lo {@code enCurso} (venta comprometida) —mismo patrón que
+     * {@code gastoEjecutado}/{@code gastoComprometido} de HU-15—, porque sumarlos daría una cifra
+     * que no corresponde ni a lo facturado ni a lo prometido. Las devoluciones son las
+     * {@code APROBADA} de los pedidos entregados, y la venta neta es bruta menos devoluciones, de
+     * modo que con el ejemplo de la especificación (1.840.000 entregados, 62.000 devueltos) la
+     * neta es 1.778.000. El ticket promedio es la bruta entre los entregados, a escala 2 con
+     * HALF_UP, y {@code null} si no hubo entregados.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return el resumen del período; {@code periodo} es {@code null} si no se envió ninguna fecha
+     * @throws ParametroInvalidoException si el rango de fechas está invertido
+     */
+    @Transactional(readOnly = true)
+    public ResumenPedidosResponse resumen(LocalDate fechaInicio, LocalDate fechaFin) {
+        validarRango(fechaInicio, fechaFin);
+
+        var porEstado = pedidoRepository.resumenPorPeriodo(fechaInicio, fechaFin).stream()
+                .collect(Collectors.toMap(ResumenPedidoEstadoFila::estado, fila -> fila));
+
+        var entregados = totalesDe(porEstado.get(EstadoPedido.ENTREGADO));
+        var enCurso = sumar(totalesDe(porEstado.get(EstadoPedido.PENDIENTE)),
+                totalesDe(porEstado.get(EstadoPedido.EN_PREPARACION)));
+        var cancelados = totalesDe(porEstado.get(EstadoPedido.CANCELADO));
+
+        // R-03: la venta es lo entregado; R-04: solo descuentan las devoluciones de esos pedidos.
+        var ventaBruta = entregados.total();
+        var entregadosFila = porEstado.get(EstadoPedido.ENTREGADO);
+        var devoluciones = entregadosFila == null
+                ? CERO : entregadosFila.devoluciones();
+        var ventaNeta = ventaBruta.subtract(devoluciones);
+        var ticketPromedio = entregados.cantidad() == 0
+                ? null
+                : ventaBruta.divide(BigDecimal.valueOf(entregados.cantidad()), 2,
+                        RoundingMode.HALF_UP);
+
+        var periodo = fechaInicio == null && fechaFin == null
+                ? null : new ResumenPedidosResponse.Periodo(fechaInicio, fechaFin);
+        return new ResumenPedidosResponse(periodo, entregados, enCurso, cancelados,
+                ventaBruta, devoluciones, ventaNeta, ticketPromedio);
+    }
+
+    /**
+     * Ventas de un período agrupadas por cliente (HU-25 R-03).
+     *
+     * <p>El rango se valida antes de tocar la base. El repositorio devuelve solo los pedidos no
+     * cancelados, ordenados por total descendente, y ese orden se preserva. Cada fila recibe su
+     * porcentaje sobre la suma de los totales listados, a escala 2 con redondeo HALF_UP: la suma
+     * es 100.00 con el residuo de redondeo permitido, sin ajustar el último. Con suma cero el
+     * porcentaje de cada fila es {@code 0.00}. Un rango vacío responde la lista vacía.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return ventas por cliente, ordenadas por total descendente
+     * @throws ParametroInvalidoException si el rango de fechas está invertido
+     */
+    @Transactional(readOnly = true)
+    public List<VentasClienteResponse> ventasPorCliente(LocalDate fechaInicio,
+                                                        LocalDate fechaFin) {
+        validarRango(fechaInicio, fechaFin);
+
+        var filas = pedidoRepository.ventasPorCliente(fechaInicio, fechaFin);
+        var sumaGlobal = filas.stream()
+                .map(VentaClienteFila::total)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return filas.stream()
+                .map(fila -> new VentasClienteResponse(
+                        new PedidoClienteRefResponse(fila.idCliente(), fila.cliente()),
+                        fila.cantidadPedidos(),
+                        fila.total(),
+                        porcentajeDe(fila.total(), sumaGlobal)))
+                .toList();
+    }
+
+    /**
+     * Ranking de productos más vendidos de un período (HU-25 R-07).
+     *
+     * <p>El rango se valida antes de tocar la base. El orden es el del repositorio: unidades
+     * vendidas descendente, no importe. Solo cuentan los pedidos {@code ENTREGADO}.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return productos de más a menos unidades vendidas
+     * @throws ParametroInvalidoException si el rango de fechas está invertido
+     */
+    @Transactional(readOnly = true)
+    public List<ProductoVendidoResponse> productosMasVendidos(LocalDate fechaInicio,
+                                                              LocalDate fechaFin) {
+        validarRango(fechaInicio, fechaFin);
+
+        return pedidoRepository.productosMasVendidos(fechaInicio, fechaFin).stream()
+                .map(fila -> new ProductoVendidoResponse(fila.producto(),
+                        fila.unidadesVendidas(), fila.importe(), fila.pedidos()))
+                .toList();
+    }
+
+    /**
+     * Rechaza un rango de fechas invertido, con el código del contrato transversal
+     * (04-CONTRATO-API.md §4) y no el genérico {@code PARAMETRO_INVALIDO}: el frontend distingue
+     * el rango invertido de un query mal formado. Un rango de un solo día o con un límite nulo es
+     * válido.
+     */
+    private static void validarRango(LocalDate fechaInicio, LocalDate fechaFin) {
+        if (fechaInicio != null && fechaFin != null && fechaInicio.isAfter(fechaFin)) {
+            throw new ParametroInvalidoException("RANGO_FECHAS_INVALIDO",
+                    "La fecha de inicio no puede ser posterior a la fecha de fin.");
+        }
+    }
+
+    /** Peso de un total sobre la suma global, a escala 2 con redondeo HALF_UP. */
+    private static BigDecimal porcentajeDe(BigDecimal total, BigDecimal sumaGlobal) {
+        if (sumaGlobal.signum() == 0) {
+            return CERO;
+        }
+        return total.multiply(new BigDecimal(100))
+                .divide(sumaGlobal, 2, RoundingMode.HALF_UP);
+    }
+
+    /** Totales de un estado del resumen; sin pedidos en el rango responde {@code 0}/{@code 0.00}. */
+    private static ResumenPedidosResponse.TotalesEstado totalesDe(ResumenPedidoEstadoFila fila) {
+        return fila == null
+                ? new ResumenPedidosResponse.TotalesEstado(0L, CERO)
+                : new ResumenPedidosResponse.TotalesEstado(fila.cantidad(), fila.total());
+    }
+
+    private static ResumenPedidosResponse.TotalesEstado sumar(
+            ResumenPedidosResponse.TotalesEstado a, ResumenPedidosResponse.TotalesEstado b) {
+        return new ResumenPedidosResponse.TotalesEstado(a.cantidad() + b.cantidad(),
+                a.total().add(b.total()));
     }
 }

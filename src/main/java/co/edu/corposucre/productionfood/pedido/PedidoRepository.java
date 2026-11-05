@@ -37,18 +37,67 @@ public class PedidoRepository {
      * subconsultas correlacionadas sobre {@code detalle_pedido}: {@code COALESCE} devuelve
      * {@code 0} mientras el pedido no tenga líneas, que es el estado válido de un pedido recién
      * registrado (el detalle llega después).
+     *
+     * <p>HU-25 añade tres importes: {@code total_bruto} (igual a {@code total_pedido}, que se
+     * conserva por compatibilidad con HU-16), {@code devoluciones} y {@code total_neto}. Todos
+     * parten de {@code detalle_pedido.precio_unitario}, el precio congelado al vender, y nunca de
+     * {@code productos.precio} (R-02). Solo descuentan las devoluciones {@code APROBADA}; las
+     * pendientes y las rechazadas no (R-04).
      */
-    private static final String SELECT = """
-            SELECT p.id_pedido, p.id_cliente, p.fecha_pedido, p.fecha_entrega, p.estado,
+    private static final String COLUMNAS_CABECERA = """
+            p.id_pedido, p.id_cliente, p.fecha_pedido, p.fecha_entrega, p.estado,
                    c.nombre AS nombre_cliente,
                    COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
                              FROM detalle_pedido dp
                              WHERE dp.id_pedido = p.id_pedido), 0) AS total_pedido,
+                   COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
+                             FROM detalle_pedido dp
+                             WHERE dp.id_pedido = p.id_pedido), 0) AS total_bruto,
+                   COALESCE((SELECT SUM(d.cantidad_devuelta * dp.precio_unitario)
+                             FROM detalle_pedido dp
+                             JOIN devoluciones d ON d.id_detalle_pedido = dp.id_detalle_pedido
+                             WHERE dp.id_pedido = p.id_pedido
+                               AND d.estado = 'APROBADA'), 0) AS devoluciones,
+                   COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
+                             FROM detalle_pedido dp
+                             WHERE dp.id_pedido = p.id_pedido), 0)
+                   - COALESCE((SELECT SUM(d.cantidad_devuelta * dp.precio_unitario)
+                               FROM detalle_pedido dp
+                               JOIN devoluciones d ON d.id_detalle_pedido = dp.id_detalle_pedido
+                               WHERE dp.id_pedido = p.id_pedido
+                                 AND d.estado = 'APROBADA'), 0) AS total_neto,
                    COALESCE((SELECT COUNT(*)
                              FROM detalle_pedido dp
                              WHERE dp.id_pedido = p.id_pedido), 0) AS cantidad_items
+            """;
+
+    private static final String SELECT = "SELECT " + COLUMNAS_CABECERA + """
             FROM pedidos p
             JOIN clientes c ON c.id_cliente = p.id_cliente
+            """;
+
+    /**
+     * Origen del listado con el detalle unido (HU-25 R-06), para {@link #buscarConDetalle}.
+     *
+     * <p>Trae las mismas columnas de cabecera que {@link #SELECT} —las subconsultas
+     * correlacionadas devuelven el mismo valor en cada fila de su pedido— junto a las de cada
+     * línea, con {@code LEFT JOIN} porque un pedido sin líneas debe aparecer con el detalle vacío
+     * y no desaparecer. El precio sale de {@code detalle_pedido.precio_unitario}, el congelado al
+     * vender, y nunca de {@code productos.precio} (R-02); el producto y su unidad se unen solo
+     * para rotular la línea, igual que {@code GET /pedidos/{id}/detalles}.
+     *
+     * <p>El {@code %s} es la página de cabeceras, que se pagina <strong>antes</strong> de unir el
+     * detalle: un {@code LIMIT} sobre el {@code JOIN} cortaría por filas y una página de 20
+     * devolvería menos de 20 pedidos.
+     */
+    private static final String SELECT_CON_DETALLE = "SELECT " + COLUMNAS_CABECERA + """
+                   , dp.id_detalle_pedido, dp.id_producto, dp.cantidad, dp.precio_unitario,
+                   pr.nombre AS nombre_producto, u.abreviatura AS unidad
+            FROM (%s) p
+            JOIN clientes c ON c.id_cliente = p.id_cliente
+            LEFT JOIN detalle_pedido dp ON dp.id_pedido = p.id_pedido
+            LEFT JOIN productos pr ON pr.id_producto = dp.id_producto
+            LEFT JOIN unidades_medida u ON u.id_unidad = pr.id_unidad
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -71,7 +120,8 @@ public class PedidoRepository {
      *                        sin límite inferior
      * @param fechaFin        último día incluido del rango de {@code fecha_pedido}, o {@code null}
      *                        sin límite superior
-     * @param propiedadOrden  columna ya validada por el servicio, con su prefijo {@code p.}
+     * @param propiedadOrden  columna o alias ya validado por el servicio: una columna con su
+     *                        prefijo {@code p.} o el alias calculado {@code total_pedido}
      * @param ascendente      {@code true} para orden ascendente, {@code false} para descendente
      * @param size            tamaño de la página
      * @param offset          desplazamiento de la página, en {@code long} porque
@@ -91,6 +141,50 @@ public class PedidoRepository {
                 + " LIMIT :tamano OFFSET :desplazamiento";
 
         return jdbc.query(sql, params, new PedidoRowMapper());
+    }
+
+    /**
+     * Devuelve una página de pedidos con su detalle en una única consulta (HU-25 R-06).
+     *
+     * <p>Aplica los mismos filtros y el mismo orden que {@link #buscar}, pero la página de
+     * <strong>pedidos</strong> se corta en una subconsulta y solo después se unen las líneas con
+     * {@code LEFT JOIN}: el {@code size} cuenta pedidos, no filas. Es una sola sentencia para
+     * toda la página, nunca una consulta por pedido. La subpágina proyecta también
+     * {@code total_pedido} porque el orden puede pedirlo ({@code sort=total}) y el alias solo
+     * existiría en la proyección exterior.
+     *
+     * @param idCliente       filtro por cliente, o {@code null} sin filtro
+     * @param estado          filtro por estado, o {@code null} sin filtro
+     * @param fechaInicio     primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin        último día incluido del rango, o {@code null} sin límite superior
+     * @param propiedadOrden  columna o alias ya validado por la lista blanca del servicio
+     * @param ascendente      {@code true} para orden ascendente, {@code false} para descendente
+     * @param size            número de <strong>pedidos</strong> de la página
+     * @param offset          desplazamiento de la página, en {@code long} porque
+     *                        {@code page * size} puede desbordar un int
+     * @return una fila por cada línea de cada pedido de la página, y una fila sin línea por cada
+     *         pedido sin detalle, en el orden de la página
+     */
+    public List<PedidoDetalleFila> buscarConDetalle(Integer idCliente, EstadoPedido estado,
+                                                    LocalDate fechaInicio, LocalDate fechaFin,
+                                                    String propiedadOrden, boolean ascendente,
+                                                    int size, long offset) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(idCliente, estado, fechaInicio, fechaFin, params);
+        params.addValue("tamano", size).addValue("desplazamiento", offset);
+
+        var orden = " ORDER BY " + propiedadOrden + (ascendente ? " ASC" : " DESC")
+                + ", p.id_pedido DESC";
+        var pagina = "SELECT p.id_pedido, p.id_cliente, p.fecha_pedido, p.fecha_entrega,"
+                + " p.estado,"
+                + " COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)"
+                + "          FROM detalle_pedido dp WHERE dp.id_pedido = p.id_pedido), 0)"
+                + "   AS total_pedido"
+                + " FROM pedidos p" + where
+                + orden + " LIMIT :tamano OFFSET :desplazamiento";
+
+        return jdbc.query(SELECT_CON_DETALLE.formatted(pagina) + orden
+                + ", dp.id_detalle_pedido", params, new PedidoDetalleFilaRowMapper());
     }
 
     /**
@@ -252,6 +346,119 @@ public class PedidoRepository {
                 ORDER BY MAX(m.id_movimiento) DESC
                 """, params, (rs, fila) -> new LineaDevolucion(
                         rs.getInt("id_lote"), rs.getBigDecimal("cantidad")));
+    }
+
+    /**
+     * Resume los pedidos de un período agrupados por estado (HU-25 R-03, R-04).
+     *
+     * <p>Una sola consulta devuelve, por estado, la cantidad de pedidos, su total y las
+     * devoluciones {@code APROBADA}. El cálculo por pedido va en una tabla derivada con
+     * subconsultas correlacionadas, igual que la cabecera del listado, y solo después se agrupa:
+     * unir directamente {@code detalle_pedido} con {@code devoluciones} multiplicaría las líneas
+     * por el número de devoluciones y duplicaría el bruto. Los importes parten de
+     * {@code detalle_pedido.precio_unitario}, nunca de {@code productos.precio} (R-02); las
+     * devoluciones pendientes y rechazadas no cuentan (R-04).
+     *
+     * <p>Las fechas filtran con rango inclusivo sobre {@code fecha_pedido}, reutilizando el
+     * {@code WHERE} de {@link #armarFiltros} y viajan como parámetros con nombre. Los estados sin
+     * pedidos en el rango no devuelven fila: el servicio los rellena con {@code 0}/{@code 0.00}.
+     * Cada estado trae sus propias devoluciones; el servicio solo descuenta las de los entregados.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return una fila por estado presente en el rango; vacía si el rango no tiene pedidos
+     */
+    public List<ResumenPedidoEstadoFila> resumenPorPeriodo(LocalDate fechaInicio,
+                                                           LocalDate fechaFin) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(null, null, fechaInicio, fechaFin, params);
+
+        return jdbc.query("""
+                SELECT x.estado, COUNT(*) AS cantidad,
+                       COALESCE(SUM(x.total), 0) AS total,
+                       COALESCE(SUM(x.devuelto), 0) AS devoluciones
+                FROM (SELECT p.estado,
+                             COALESCE((SELECT SUM(dp.cantidad * dp.precio_unitario)
+                                       FROM detalle_pedido dp
+                                       WHERE dp.id_pedido = p.id_pedido), 0) AS total,
+                             COALESCE((SELECT SUM(d.cantidad_devuelta * dp.precio_unitario)
+                                       FROM detalle_pedido dp
+                                       JOIN devoluciones d
+                                         ON d.id_detalle_pedido = dp.id_detalle_pedido
+                                       WHERE dp.id_pedido = p.id_pedido
+                                         AND d.estado = 'APROBADA'), 0) AS devuelto
+                      FROM pedidos p
+                """ + where + """
+                     ) x
+                GROUP BY x.estado
+                """, params, new ResumenPedidoEstadoFilaRowMapper());
+    }
+
+    /**
+     * Resume las ventas de un período agrupadas por cliente (HU-25 R-03).
+     *
+     * <p>Excluye los pedidos {@code CANCELADO}: no se vendió nada. El total es la suma de
+     * {@code cantidad * precio_unitario} al precio histórico de la línea (R-02), y el
+     * {@code LEFT JOIN} con {@code detalle_pedido} conserva a un pedido todavía sin líneas, que
+     * cuenta con total {@code 0}. Las fechas filtran con rango inclusivo sobre
+     * {@code fecha_pedido} como parámetros con nombre.
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return una fila por cliente con pedidos no cancelados, ordenada por total descendente y,
+     *         a igual total, por nombre; vacía si el rango no tiene ventas
+     */
+    public List<VentaClienteFila> ventasPorCliente(LocalDate fechaInicio, LocalDate fechaFin) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(null, null, fechaInicio, fechaFin, params)
+                + " AND p.estado <> 'CANCELADO'";
+
+        return jdbc.query("""
+                SELECT c.id_cliente, c.nombre AS cliente,
+                       COUNT(DISTINCT p.id_pedido) AS cantidad_pedidos,
+                       COALESCE(SUM(dp.cantidad * dp.precio_unitario), 0) AS total
+                FROM pedidos p
+                JOIN clientes c ON c.id_cliente = p.id_cliente
+                LEFT JOIN detalle_pedido dp ON dp.id_pedido = p.id_pedido
+                """ + where + """
+                GROUP BY c.id_cliente, c.nombre
+                ORDER BY total DESC, c.nombre
+                """, params, new VentaClienteFilaRowMapper());
+    }
+
+    /**
+     * Ranking de productos vendidos en un período, por unidades (HU-25 R-07).
+     *
+     * <p>Se ordena por unidades vendidas y no por importe: un producto caro vendido tres veces no
+     * supera a uno barato vendido doscientas. El importe y la cantidad de pedidos distintos van
+     * como columnas adicionales; a igualdad de unidades desempata el importe descendente y luego
+     * el nombre, para que el orden sea determinista. Solo cuenta los pedidos {@code ENTREGADO}
+     * (unidades despachadas, R-07): los pendientes, en preparación y cancelados no suman. Valora
+     * al {@code precio_unitario} de la línea (R-02).
+     *
+     * @param fechaInicio primer día incluido del rango, o {@code null} sin límite inferior
+     * @param fechaFin    último día incluido del rango, o {@code null} sin límite superior
+     * @return una fila por producto con ventas entregadas, de más a menos unidades; vacía si
+     *         el rango no tiene pedidos entregados
+     */
+    public List<ProductoVendidoFila> productosMasVendidos(LocalDate fechaInicio,
+                                                          LocalDate fechaFin) {
+        var params = new MapSqlParameterSource();
+        var where = armarFiltros(null, null, fechaInicio, fechaFin, params)
+                + " AND p.estado = 'ENTREGADO'";
+
+        return jdbc.query("""
+                SELECT pr.nombre AS producto,
+                       SUM(dp.cantidad) AS unidades_vendidas,
+                       SUM(dp.cantidad * dp.precio_unitario) AS importe,
+                       COUNT(DISTINCT p.id_pedido) AS pedidos
+                FROM detalle_pedido dp
+                JOIN pedidos p ON p.id_pedido = dp.id_pedido
+                JOIN productos pr ON pr.id_producto = dp.id_producto
+                """ + where + """
+                GROUP BY pr.id_producto, pr.nombre
+                ORDER BY unidades_vendidas DESC, importe DESC, pr.nombre
+                """, params, new ProductoVendidoFilaRowMapper());
     }
 
     /**

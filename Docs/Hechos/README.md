@@ -78,6 +78,7 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-20 | Planes de producción | 2026-11-05 · [`HU-20-planes-produccion.md`](HU-20-planes-produccion.md) |
 | HU-21 | Productos del plan de producción | 2026-11-05 · [`HU-21-detalle-plan-produccion.md`](HU-21-detalle-plan-produccion.md) |
 | HU-22 | Consumo de materia prima | 2026-11-05 · [`HU-22-consumo-materia-prima.md`](HU-22-consumo-materia-prima.md) |
+| HU-25 | Consulta de pedidos | 2026-11-05 · [`HU-25-consulta-pedidos.md`](HU-25-consulta-pedidos.md) |
 
 > HU-20, HU-21 y HU-22 quedaron verificadas con QA ciego el 2026-11-05. HU-20 y HU-21 pasaron
 > CP-01…CP-23, SEC-01…05 en sus endpoints y la matriz de roles. HU-22 pasó CP-01…CP-24,

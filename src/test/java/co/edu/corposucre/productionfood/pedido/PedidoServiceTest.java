@@ -3,6 +3,9 @@ package co.edu.corposucre.productionfood.pedido;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -30,6 +33,8 @@ import co.edu.corposucre.productionfood.inventario.TipoMovimientoPt;
 import co.edu.corposucre.productionfood.pedido.dto.ActualizarPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CambiarEstadoPedidoRequest;
 import co.edu.corposucre.productionfood.pedido.dto.CrearPedidoRequest;
+import co.edu.corposucre.productionfood.pedido.dto.PedidoResponse;
+import co.edu.corposucre.productionfood.pedido.dto.ProductoVendidoResponse;
 
 class PedidoServiceTest {
 
@@ -67,6 +72,9 @@ class PedidoServiceTest {
         pedido.setFechaEntrega(fechaEntrega);
         pedido.setEstado(estado);
         pedido.setTotalPedido(total);
+        pedido.setTotalBruto(total);
+        pedido.setDevoluciones(BigDecimal.ZERO.setScale(2));
+        pedido.setTotalNeto(total);
         pedido.setCantidadItems(items);
         return pedido;
     }
@@ -195,6 +203,7 @@ class PedidoServiceTest {
     void listarDelegaEnBuscarYContar() {
         var inicio = LocalDate.now().minusDays(10);
         var fin = LocalDate.now().minusDays(1);
+        when(clienteRepository.existsById(ID_CLIENTE)).thenReturn(true);
         when(pedidoRepository.buscar(eq(ID_CLIENTE), eq(EstadoPedido.PENDIENTE), eq(inicio),
                 eq(fin), eq("p.fecha_pedido"), eq(false), eq(10), eq(20L)))
                 .thenReturn(List.of(fila(7, EstadoPedido.PENDIENTE, null,
@@ -202,7 +211,8 @@ class PedidoServiceTest {
         when(pedidoRepository.contar(ID_CLIENTE, EstadoPedido.PENDIENTE, inicio, fin))
                 .thenReturn(21L);
 
-        var r = service.listar(ID_CLIENTE, EstadoPedido.PENDIENTE, inicio, fin, 2, 10, null);
+        var r = service.listar(ID_CLIENTE, EstadoPedido.PENDIENTE, inicio, fin, 2, 10, null,
+                false);
 
         assertThat(r.content()).hasSize(1);
         assertThat(r.content().get(0).idPedido()).isEqualTo(7);
@@ -217,11 +227,98 @@ class PedidoServiceTest {
     }
 
     @Test
+    @DisplayName("HU-25: listar mapea totalBruto, devoluciones y totalNeto sin tocar totalPedido")
+    void listarMapeaLosImportesNuevos() {
+        var f = fila(7, EstadoPedido.ENTREGADO, null, new BigDecimal("500.00"), 2);
+        f.setTotalBruto(new BigDecimal("500.00"));
+        f.setDevoluciones(new BigDecimal("120.00"));
+        f.setTotalNeto(new BigDecimal("380.00"));
+        when(pedidoRepository.buscar(any(), any(), any(), any(), any(), eq(false), eq(20), eq(0L)))
+                .thenReturn(List.of(f));
+        when(pedidoRepository.contar(null, null, null, null)).thenReturn(1L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null, false)
+                .content().get(0);
+
+        assertThat(r.totalPedido()).isEqualByComparingTo("500.00");
+        assertThat(r.totalBruto()).isEqualByComparingTo("500.00");
+        assertThat(r.devoluciones()).isEqualByComparingTo("120.00");
+        assertThat(r.totalNeto()).isEqualByComparingTo("380.00");
+    }
+
+    @Test
+    @DisplayName("HU-25: obtener mapea también los importes nuevos")
+    void obtenerMapeaLosImportesNuevos() {
+        var f = fila(7, EstadoPedido.PENDIENTE, null, new BigDecimal("150.00"), 1);
+        f.setDevoluciones(new BigDecimal("50.00"));
+        f.setTotalNeto(new BigDecimal("100.00"));
+        when(pedidoRepository.buscarPorId(7)).thenReturn(Optional.of(f));
+
+        var r = service.obtener(7);
+
+        assertThat(r.totalPedido()).isEqualByComparingTo("150.00");
+        assertThat(r.devoluciones()).isEqualByComparingTo("50.00");
+        assertThat(r.totalNeto()).isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    @DisplayName("HU-25: sort=total ordena por la columna calculada total_pedido")
+    void listarOrdenaPorTotal() {
+        when(pedidoRepository.buscar(null, null, null, null, "total_pedido", true, 20, 0L))
+                .thenReturn(List.of());
+        when(pedidoRepository.contar(null, null, null, null)).thenReturn(0L);
+
+        service.listar(null, null, null, null, 0, 20, "total,asc", false);
+
+        verify(pedidoRepository).buscar(null, null, null, null, "total_pedido", true, 20, 0L);
+    }
+
+    @Test
+    @DisplayName("HU-25: listar con un idCliente inexistente responde 404 CLIENTE_INEXISTENTE "
+            + "sin consultar pedidos")
+    void listarConClienteInexistenteResponde404() {
+        when(clienteRepository.existsById(9999)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.listar(9999, null, null, null, 0, 10, null, false))
+                .isInstanceOf(ClienteInexistenteFiltroException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CLIENTE_INEXISTENTE")
+                .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.NOT_FOUND);
+
+        verifyNoInteractions(pedidoRepository);
+    }
+
+    @Test
+    @DisplayName("HU-25: un cliente inactivo pero existente no es 404 en el listado")
+    void listarConClienteInactivoNoEs404() {
+        when(clienteRepository.existsById(ID_CLIENTE)).thenReturn(true);
+        when(pedidoRepository.buscar(eq(ID_CLIENTE), any(), any(), any(), any(), eq(false),
+                eq(20), eq(0L))).thenReturn(List.of());
+        when(pedidoRepository.contar(ID_CLIENTE, null, null, null)).thenReturn(0L);
+
+        var r = service.listar(ID_CLIENTE, null, null, null, 0, 20, null, false);
+
+        assertThat(r.totalElements()).isZero();
+        verify(clienteRepository, never()).existeActivo(any());
+    }
+
+    @Test
+    @DisplayName("HU-25: el rango invertido sigue ganando sobre el cliente inexistente")
+    void listarRangoInvertidoSeValidaAntesQueElCliente() {
+        var hoy = LocalDate.now();
+
+        assertThatThrownBy(() -> service.listar(9999, null, hoy, hoy.minusDays(1),
+                0, 10, null, false))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+    }
+
+    @Test
     @DisplayName("listar con el rango de fechas invertido responde 400 RANGO_FECHAS_INVALIDO")
     void listarConRangoInvertidoResponde400() {
         var hoy = LocalDate.now();
 
-        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null))
+        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1),
+                0, 10, null, false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
 
@@ -231,11 +328,120 @@ class PedidoServiceTest {
     @Test
     @DisplayName("listar con un campo de orden fuera de la lista blanca responde 400")
     void listarConCampoDeOrdenNoListadoResponde400() {
-        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "cliente"))
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "cliente", false))
                 .isInstanceOf(ParametroInvalidoException.class)
                 .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
 
         verifyNoInteractions(pedidoRepository);
+    }
+
+    private static PedidoDetalleFila filaConLinea(int idPedido, Integer idLinea, String cantidad,
+                                                  String precio) {
+        var cabecera = fila(idPedido, EstadoPedido.PENDIENTE, null, new BigDecimal("150.00"), 1);
+        var linea = idLinea == null ? null
+                : new DetallePedido(idLinea, idPedido, 5, "Pan integral", "u",
+                        new BigDecimal(cantidad), new BigDecimal(precio));
+        return new PedidoDetalleFila(cabecera, linea);
+    }
+
+    @Test
+    @DisplayName("HU-25 CA-04: listar sin incluirDetalle nunca consulta el detalle y deja "
+            + "detalle en null")
+    void listarSinIncluirDetalleNoTocaElDetalle() {
+        when(pedidoRepository.buscar(eq(null), eq(null), eq(null), eq(null),
+                eq("p.fecha_pedido"), eq(false), eq(20), eq(0L)))
+                .thenReturn(List.of(fila(7, EstadoPedido.PENDIENTE, null,
+                        new BigDecimal("150.00"), 2)));
+
+        var r = service.listar(null, null, null, null, 0, 20, null, false);
+
+        assertThat(r.content().get(0).detalle()).isNull();
+        verify(pedidoRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                eq(true), anyInt(), anyLong());
+        verify(pedidoRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                eq(false), anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("HU-25 R-06: con incluirDetalle agrupa las líneas por pedido en el orden de la "
+            + "página, con subtotal y precio histórico")
+    void listarConIncluirDetalleAgrupaLasLineasPorPedido() {
+        when(pedidoRepository.buscarConDetalle(eq(null), eq(null), eq(null), eq(null),
+                eq("p.fecha_pedido"), eq(false), eq(20), eq(0L))).thenReturn(List.of(
+                filaConLinea(9, 101, "3.00", "10.50"),
+                filaConLinea(9, 102, "2.00", "4.00"),
+                filaConLinea(4, null, null, null),
+                filaConLinea(8, 103, "1.50", "2.00")));
+        when(pedidoRepository.contar(null, null, null, null)).thenReturn(3L);
+
+        var r = service.listar(null, null, null, null, 0, 20, null, true);
+
+        assertThat(r.content()).extracting(PedidoResponse::idPedido).containsExactly(9, 4, 8);
+        var primero = r.content().get(0).detalle();
+        assertThat(primero).hasSize(2);
+        assertThat(primero.get(0).idDetallePedido()).isEqualTo(101);
+        assertThat(primero.get(0).producto().nombre()).isEqualTo("Pan integral");
+        assertThat(primero.get(0).producto().unidad()).isEqualTo("u");
+        assertThat(primero.get(0).cantidad()).isEqualByComparingTo("3.00");
+        assertThat(primero.get(0).precioUnitario()).isEqualByComparingTo("10.50");
+        assertThat(primero.get(0).subtotal()).isEqualByComparingTo("31.50");
+        assertThat(primero.get(0).subtotal().scale()).isEqualTo(2);
+        assertThat(primero.get(0).lotesConsumidos()).isNull();
+        assertThat(primero.get(0).totalPedido()).isNull();
+        assertThat(primero.get(1).idDetallePedido()).isEqualTo(102);
+        // Un pedido sin líneas conserva la lista vacía, no null.
+        assertThat(r.content().get(1).detalle()).isEmpty();
+        assertThat(r.content().get(2).detalle()).hasSize(1);
+        assertThat(r.totalElements()).isEqualTo(3L);
+        verify(pedidoRepository, never()).buscar(any(), any(), any(), any(), any(),
+                anyBoolean(), anyInt(), anyLong());
+    }
+
+    @Test
+    @DisplayName("HU-25 CP-10: con incluirDetalle un size mayor que 20 se recorta a 20 sin error "
+            + "y la respuesta refleja el tamaño recortado")
+    void listarConIncluirDetalleRecortaElSizeA20() {
+        when(pedidoRepository.buscarConDetalle(any(), any(), any(), any(), any(), anyBoolean(),
+                anyInt(), anyLong())).thenReturn(List.of());
+
+        var r = service.listar(null, null, null, null, 1, 100, null, true);
+
+        assertThat(r.size()).isEqualTo(20);
+        assertThat(r.page()).isEqualTo(1);
+        // El offset se calcula con el size recortado: página 1 de 20 es offset 20, no 100.
+        verify(pedidoRepository).buscarConDetalle(null, null, null, null, "p.fecha_pedido",
+                false, 20, 20L);
+    }
+
+    @Test
+    @DisplayName("HU-25: sin incluirDetalle un size de 100 se respeta, el recorte es solo del "
+            + "detalle")
+    void listarSinDetalleNoRecortaElSize() {
+        var r = service.listar(null, null, null, null, 0, 100, null, false);
+
+        assertThat(r.size()).isEqualTo(100);
+        verify(pedidoRepository).buscar(null, null, null, null, "p.fecha_pedido", false, 100,
+                0L);
+    }
+
+    @Test
+    @DisplayName("HU-25: con incluirDetalle siguen aplicando las validaciones de rango, cliente "
+            + "y orden")
+    void listarConIncluirDetalleConservaLasValidaciones() {
+        var hoy = LocalDate.now();
+        assertThatThrownBy(() -> service.listar(null, null, hoy, hoy.minusDays(1), 0, 10, null,
+                true))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+        when(clienteRepository.existsById(9999)).thenReturn(false);
+        assertThatThrownBy(() -> service.listar(9999, null, null, null, 0, 10, null, true))
+                .isInstanceOf(ClienteInexistenteFiltroException.class);
+        assertThatThrownBy(() -> service.listar(null, null, null, null, 0, 10, "cliente", true))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "CAMPO_ORDEN_INVALIDO");
+
+        verify(pedidoRepository, never()).buscarConDetalle(any(), any(), any(), any(), any(),
+                anyBoolean(), anyInt(), anyLong());
     }
 
     @Test
@@ -530,5 +736,211 @@ class PedidoServiceTest {
                 Optional.of(fila(id, despues, null, BigDecimal.ZERO, 0)));
         // El UPDATE condicional por estado afecta una fila cuando la transición gana la carrera.
         when(pedidoRepository.cambiarEstado(id, antes, despues)).thenReturn(1);
+    }
+
+    // ---- HU-25 PR3: agregaciones ----
+
+    private static ResumenPedidoEstadoFila filaResumen(EstadoPedido estado, long cantidad,
+                                                       String total, String devoluciones) {
+        return new ResumenPedidoEstadoFila(estado, cantidad, new BigDecimal(total),
+                new BigDecimal(devoluciones));
+    }
+
+    @Test
+    @DisplayName("HU-25: listar acepta un rango de un solo día (el chequeo extraído no cambió)")
+    void listarAceptaUnRangoDeUnSoloDia() {
+        var hoy = LocalDate.now();
+        when(pedidoRepository.buscar(any(), any(), any(), any(), any(), anyBoolean(), anyInt(),
+                anyLong())).thenReturn(List.of());
+
+        var r = service.listar(null, null, hoy, hoy, 0, 10, null, false);
+
+        assertThat(r.content()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("RANGO_FECHAS_INVALIDO: las tres agregaciones lo validan sin tocar la base")
+    void agregacionesConRangoInvertidoResponden400SinConsultar() {
+        var hoy = LocalDate.now();
+        var ayer = hoy.minusDays(1);
+
+        assertThatThrownBy(() -> service.resumen(hoy, ayer))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+        assertThatThrownBy(() -> service.ventasPorCliente(hoy, ayer))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+        assertThatThrownBy(() -> service.productosMasVendidos(hoy, ayer))
+                .isInstanceOf(ParametroInvalidoException.class)
+                .hasFieldOrPropertyWithValue("codigo", "RANGO_FECHAS_INVALIDO");
+
+        verifyNoInteractions(pedidoRepository);
+    }
+
+    @Test
+    @DisplayName("CP-17/18/19: entregados y enCurso van aparte, cancelados no es venta, ticket "
+            + "76666.67")
+    void resumenSeparaEntregadosEnCursoYCancelados() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        var fin = LocalDate.of(2026, 9, 30);
+        when(pedidoRepository.resumenPorPeriodo(inicio, fin)).thenReturn(List.of(
+                filaResumen(EstadoPedido.ENTREGADO, 24, "1840000.0000", "62000.0000"),
+                filaResumen(EstadoPedido.PENDIENTE, 4, "200000.00", "0"),
+                filaResumen(EstadoPedido.EN_PREPARACION, 2, "120000.00", "0"),
+                filaResumen(EstadoPedido.CANCELADO, 2, "45000.00", "0")));
+
+        var r = service.resumen(inicio, fin);
+
+        assertThat(r.periodo().desde()).isEqualTo(inicio);
+        assertThat(r.periodo().hasta()).isEqualTo(fin);
+        assertThat(r.entregados().cantidad()).isEqualTo(24);
+        assertThat(r.entregados().total()).isEqualByComparingTo("1840000.00");
+        assertThat(r.enCurso().cantidad()).isEqualTo(6);
+        assertThat(r.enCurso().total()).isEqualByComparingTo("320000.00");
+        assertThat(r.cancelados().cantidad()).isEqualTo(2);
+        assertThat(r.cancelados().total()).isEqualByComparingTo("45000.00");
+        assertThat(r.ventaBruta()).isEqualByComparingTo("1840000.00");
+        assertThat(r.devoluciones()).isEqualByComparingTo("62000.00");
+        assertThat(r.ventaNeta()).isEqualByComparingTo("1778000.00");
+        assertThat(r.ticketPromedio()).isEqualByComparingTo("76666.67");
+        assertThat(r.ticketPromedio().scale()).isEqualTo(2);
+        assertThat(r.ventaBruta().scale()).isEqualTo(2);
+        assertThat(r.ventaNeta().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("R-04: las devoluciones de pedidos que no son entregados no restan a la venta")
+    void resumenSoloDescuentaLasDevolucionesDeLosEntregados() {
+        var hoy = LocalDate.now();
+        when(pedidoRepository.resumenPorPeriodo(hoy, hoy)).thenReturn(List.of(
+                filaResumen(EstadoPedido.ENTREGADO, 1, "100.00", "10.00"),
+                filaResumen(EstadoPedido.CANCELADO, 1, "500.00", "99.00")));
+
+        var r = service.resumen(hoy, hoy);
+
+        assertThat(r.devoluciones()).isEqualByComparingTo("10.00");
+        assertThat(r.ventaNeta()).isEqualByComparingTo("90.00");
+    }
+
+    @Test
+    @DisplayName("ticketPromedio es null sin entregados y la venta neta queda en 0.00")
+    void resumenSinEntregadosTieneTicketNulo() {
+        var hoy = LocalDate.now();
+        when(pedidoRepository.resumenPorPeriodo(hoy, hoy)).thenReturn(List.of(
+                filaResumen(EstadoPedido.PENDIENTE, 3, "300.00", "0")));
+
+        var r = service.resumen(hoy, hoy);
+
+        assertThat(r.ticketPromedio()).isNull();
+        assertThat(r.entregados().cantidad()).isZero();
+        assertThat(r.entregados().total()).isEqualByComparingTo("0.00");
+        assertThat(r.entregados().total().scale()).isEqualTo(2);
+        assertThat(r.enCurso().total()).isEqualByComparingTo("300.00");
+        assertThat(r.ventaBruta()).isEqualByComparingTo("0.00");
+        assertThat(r.devoluciones()).isEqualByComparingTo("0.00");
+        assertThat(r.ventaNeta()).isEqualByComparingTo("0.00");
+        assertThat(r.ventaNeta().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("ticketPromedio redondea HALF_UP a escala 2")
+    void ticketPromedioRedondeaHalfUp() {
+        var hoy = LocalDate.now();
+        // 10.04 / 8 = 1.255 exacto: HALF_UP sube a 1.26; un redondeo hacia abajo daría 1.25.
+        when(pedidoRepository.resumenPorPeriodo(hoy, hoy)).thenReturn(List.of(
+                filaResumen(EstadoPedido.ENTREGADO, 8, "10.04", "0")));
+
+        assertThat(service.resumen(hoy, hoy).ticketPromedio()).isEqualByComparingTo("1.26");
+    }
+
+    @Test
+    @DisplayName("CP-22: un período sin pedidos responde ceros, sin error, y periodo nulo sin "
+            + "fechas")
+    void resumenSinPedidosNiFechas() {
+        when(pedidoRepository.resumenPorPeriodo(null, null)).thenReturn(List.of());
+
+        var r = service.resumen(null, null);
+
+        verify(pedidoRepository).resumenPorPeriodo(null, null);
+        assertThat(r.periodo()).isNull();
+        assertThat(r.entregados().cantidad()).isZero();
+        assertThat(r.enCurso().cantidad()).isZero();
+        assertThat(r.cancelados().cantidad()).isZero();
+        assertThat(r.cancelados().total()).isEqualByComparingTo("0.00");
+        assertThat(r.ventaBruta()).isEqualByComparingTo("0.00");
+        assertThat(r.ticketPromedio()).isNull();
+    }
+
+    @Test
+    @DisplayName("resumen con una sola fecha conserva el periodo con el otro límite nulo")
+    void resumenConUnaSolaFechaConservaElPeriodoParcial() {
+        var inicio = LocalDate.of(2026, 9, 1);
+        when(pedidoRepository.resumenPorPeriodo(inicio, null)).thenReturn(List.of());
+
+        var r = service.resumen(inicio, null);
+
+        assertThat(r.periodo().desde()).isEqualTo(inicio);
+        assertThat(r.periodo().hasta()).isNull();
+    }
+
+    @Test
+    @DisplayName("CP-21: ventas por cliente conserva el orden y calcula el porcentaje HALF_UP")
+    void ventasPorClienteCalculaElPorcentaje() {
+        when(pedidoRepository.ventasPorCliente(null, null)).thenReturn(List.of(
+                new VentaClienteFila(1, "Tienda La Esquina", 2, new BigDecimal("200.0000")),
+                new VentaClienteFila(2, "Panadería Sol", 1, new BigDecimal("100.00")),
+                new VentaClienteFila(3, "Café Luna", 1, new BigDecimal("50.00"))));
+
+        var r = service.ventasPorCliente(null, null);
+
+        assertThat(r).extracting(v -> v.cliente().nombre())
+                .containsExactly("Tienda La Esquina", "Panadería Sol", "Café Luna");
+        assertThat(r.get(0).cliente().idCliente()).isEqualTo(1);
+        assertThat(r.get(0).cantidadPedidos()).isEqualTo(2);
+        assertThat(r.get(0).total()).isEqualByComparingTo("200.00");
+        // 200/350 = 57.142857 -> 57.14; 100/350 = 28.571428 -> 28.57; 50/350 = 14.2857 -> 14.29
+        assertThat(r.get(0).porcentaje()).isEqualByComparingTo("57.14");
+        assertThat(r.get(1).porcentaje()).isEqualByComparingTo("28.57");
+        assertThat(r.get(2).porcentaje()).isEqualByComparingTo("14.29");
+        assertThat(r.get(0).porcentaje().scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("ventas por cliente con suma en cero responde porcentaje 0.00 y sin filas, lista "
+            + "vacía")
+    void ventasPorClienteConSumaCeroYVacio() {
+        var hoy = LocalDate.now();
+        when(pedidoRepository.ventasPorCliente(hoy, hoy)).thenReturn(List.of(
+                new VentaClienteFila(1, "Cliente sin líneas", 1, BigDecimal.ZERO)));
+
+        var r = service.ventasPorCliente(hoy, hoy);
+
+        assertThat(r).hasSize(1);
+        assertThat(r.get(0).porcentaje()).isEqualByComparingTo("0.00");
+        assertThat(r.get(0).porcentaje().scale()).isEqualTo(2);
+
+        when(pedidoRepository.ventasPorCliente(hoy.minusDays(1), hoy)).thenReturn(List.of());
+        assertThat(service.ventasPorCliente(hoy.minusDays(1), hoy)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("R-07: productos más vendidos conserva el orden del repositorio y las dos "
+            + "columnas")
+    void productosMasVendidosMapeaLasFilas() {
+        var hoy = LocalDate.now();
+        when(pedidoRepository.productosMasVendidos(hoy, hoy)).thenReturn(List.of(
+                new ProductoVendidoFila("Pan francés", new BigDecimal("1240.0000"),
+                        new BigDecimal("1488000"), 18),
+                new ProductoVendidoFila("Croissant", new BigDecimal("320"),
+                        new BigDecimal("800000.00"), 12)));
+
+        var r = service.productosMasVendidos(hoy, hoy);
+
+        assertThat(r).extracting(ProductoVendidoResponse::producto)
+                .containsExactly("Pan francés", "Croissant");
+        assertThat(r.get(0).unidadesVendidas()).isEqualByComparingTo("1240.00");
+        assertThat(r.get(0).unidadesVendidas().scale()).isEqualTo(2);
+        assertThat(r.get(0).importe()).isEqualByComparingTo("1488000.00");
+        assertThat(r.get(0).pedidos()).isEqualTo(18);
     }
 }
