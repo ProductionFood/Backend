@@ -13,11 +13,14 @@ import co.edu.corposucre.productionfood.common.audit.Auditable;
 import co.edu.corposucre.productionfood.common.error.ConflictoNegocioException;
 import co.edu.corposucre.productionfood.common.error.ParametroInvalidoException;
 import co.edu.corposucre.productionfood.common.error.RecursoNoEncontradoException;
+import co.edu.corposucre.productionfood.common.pagination.PageRequest;
+import co.edu.corposucre.productionfood.common.pagination.PageResponse;
 import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.inventario.SaldosInventario;
 import co.edu.corposucre.productionfood.inventario.TipoMovimiento;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaConDetalle;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaRepository;
+import co.edu.corposucre.productionfood.produccion.dto.ActualizarConsumoRequest;
 import co.edu.corposucre.productionfood.produccion.dto.ConsumoResponse;
 import co.edu.corposucre.productionfood.produccion.dto.ConsumoTeoricoLineaResponse;
 import co.edu.corposucre.productionfood.produccion.dto.IngredienteTeoricoResponse;
@@ -32,9 +35,11 @@ import co.edu.corposucre.productionfood.receta.RecetaRepository;
 /**
  * Consumo de materia prima de una línea de un plan de producción (HU-22).
  *
- * <p>Reúne las dos operaciones de la historia: la <strong>consulta</strong> del consumo teórico
- * —solo lectura— y el <strong>registro</strong> del consumo real, que persiste el consumo y
- * descuenta inventario en la misma transacción (R-05, R-09).
+ * <p>Reúne las operaciones de la historia: la <strong>consulta</strong> del consumo teórico y el
+ * <strong>listado</strong> paginado de los consumos de un plan —ambas de solo lectura—, el
+ * <strong>registro</strong> del consumo real, que persiste el consumo y descuenta inventario en la
+ * misma transacción (R-05, R-09), y la <strong>corrección</strong> de la cantidad real, que ajusta
+ * inventario por diferencia (R-07).
  *
  * <p>El teórico se calcula contra la <strong>cantidad planificada</strong> de la línea (R-02), no
  * contra lo producido: el objetivo es saber cuánto se necesita antes de producir. La fórmula de
@@ -273,22 +278,139 @@ public class ConsumoService {
                 .orElseThrow(() -> new IllegalStateException(
                         "No se encontró el consumo " + idConsumo + " recién insertado."));
 
-        var inventario = saldos == null ? null
-                : new InventarioConsumoResponse(saldos.anterior(), saldos.posterior());
+        return aResponse(guardado, cantidadTeorica, cantidadReal, saldos);
+    }
 
-        return new ConsumoResponse(
-                idConsumo,
-                idDetallePlan,
-                guardado.getNombreProducto(),
-                new MateriaPrimaRefResponse(guardado.getIdMateriaPrima(),
-                        guardado.getNombreMateriaPrima(), guardado.getUnidad()),
-                cantidadTeorica,
-                cantidadReal,
-                calculadoraEficienciaService.eficiencia(cantidadTeorica, cantidadReal),
-                calculadoraEficienciaService.desviacion(cantidadTeorica, cantidadReal),
-                cantidadTeorica.signum() == 0,
-                guardado.getFechaRegistro(),
-                inventario);
+    /**
+     * Corrige la cantidad real de un consumo registrado y ajusta inventario por diferencia
+     * (HU-22 R-07).
+     *
+     * <p>Orden de las validaciones:
+     *
+     * <ol>
+     *   <li>El consumo existe; si no, 404 {@code RECURSO_NO_ENCONTRADO}.</li>
+     *   <li>El plan del consumo está {@code EN_PROCESO}; si no, 409
+     *       {@code PLAN_NO_EN_PROCESO}. Un plan terminado ya cerró su ciclo y uno sin iniciar
+     *       todavía no consume.</li>
+     *   <li>La cantidad real no es nula ni negativa; si lo es, 400 {@code CANTIDAD_INVALIDA}. El
+     *       cero es válido (CP-09) y se normaliza a escala 3.</li>
+     * </ol>
+     *
+     * <p>El inventario se ajusta por la <strong>diferencia</strong> entre la cantidad nueva y la
+     * anterior, nunca revirtiendo todo y volviendo a descontar: el kardex debe reflejar hechos, no
+     * operaciones contables intermedias. Una diferencia positiva descuenta el excedente con
+     * {@link TipoMovimiento#SALIDA_PRODUCCION}; una negativa devuelve la diferencia con
+     * {@link TipoMovimiento#AJUSTE_POSITIVO}. La diferencia se redondea a 2 decimales con
+     * {@code HALF_UP} (R-09) y, si redondea a {@code 0.00}, no hay movimiento.
+     *
+     * <p>El consumo se bloquea con {@code SELECT ... FOR UPDATE} dentro de la transacción para que
+     * dos correcciones simultáneas no lean la misma cantidad anterior y el ajuste se aplique dos
+     * veces. La cantidad teórica no se recalcula: se conserva la que quedó guardada al registrar.
+     *
+     * @param idConsumo identificador del consumo a corregir
+     * @param req       nueva cantidad real, mayor o igual que cero
+     * @return el consumo corregido con su eficiencia, su desviación y el efecto del ajuste
+     * @throws RecursoNoEncontradoException si el consumo no existe (404)
+     * @throws ConflictoNegocioException    si el plan no está {@code EN_PROCESO} o el ajuste al alza
+     *                                      agota el stock (409)
+     * @throws ParametroInvalidoException   si la cantidad real es nula o negativa (400)
+     */
+    @Transactional
+    @Auditable(accion = "CORREGIR_CONSUMO", tabla = "consumo_materia_prima",
+            detalle = "'Consumo ' + #idConsumo + ' corregido en la línea ' + #resultado.idDetallePlan")
+    public ConsumoResponse actualizar(Integer idConsumo, ActualizarConsumoRequest req) {
+        var consumo = consumoRepository.buscarPorIdParaActualizar(idConsumo)
+                .orElseThrow(() -> new RecursoNoEncontradoException("el consumo de materia prima",
+                        idConsumo));
+
+        if (consumo.getEstadoPlan() != EstadoPlan.EN_PROCESO) {
+            throw new ConflictoNegocioException("PLAN_NO_EN_PROCESO",
+                    "El plan de producción del consumo " + idConsumo + " no está en proceso.");
+        }
+
+        var cantidadNueva = validarCantidadReal(req.cantidadReal());
+        var diferencia = cantidadNueva.subtract(consumo.getCantidadReal());
+
+        SaldosInventario saldos = null;
+        if (diferencia.signum() > 0) {
+            var cantidadAjuste = diferencia.setScale(2, RoundingMode.HALF_UP);
+            if (cantidadAjuste.signum() > 0) {
+                try {
+                    saldos = inventarioService.registrarSalida(consumo.getIdMateriaPrima(),
+                            cantidadAjuste, TipoMovimiento.SALIDA_PRODUCCION,
+                            "consumo_materia_prima", idConsumo,
+                            "Corrección al alza del consumo " + idConsumo);
+                } catch (RecursoNoEncontradoException ex) {
+                    throw stockInsuficiente(consumo.getIdMateriaPrima());
+                }
+            }
+        } else if (diferencia.signum() < 0) {
+            var cantidadAjuste = diferencia.abs().setScale(2, RoundingMode.HALF_UP);
+            if (cantidadAjuste.signum() > 0) {
+                try {
+                    saldos = inventarioService.registrarEntrada(consumo.getIdMateriaPrima(),
+                            cantidadAjuste, TipoMovimiento.AJUSTE_POSITIVO,
+                            "consumo_materia_prima", idConsumo,
+                            "Corrección a la baja del consumo " + idConsumo);
+                } catch (RecursoNoEncontradoException ex) {
+                    throw stockInsuficiente(consumo.getIdMateriaPrima());
+                }
+            }
+        }
+
+        if (consumoRepository.actualizarReal(idConsumo, cantidadNueva) == 0) {
+            throw new IllegalStateException(
+                    "No se pudo actualizar el consumo " + idConsumo + ".");
+        }
+
+        var guardado = consumoRepository.buscarPorId(idConsumo)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No se encontró el consumo " + idConsumo + " actualizado."));
+
+        return aResponse(guardado, guardado.getCantidadTeorica(), cantidadNueva, saldos);
+    }
+
+    /**
+     * Lista de forma paginada los consumos de un plan de producción (HU-22 §2).
+     *
+     * <p>El plan se comprueba primero: si no existe, 404 {@code PLAN_INEXISTENTE}, incluso antes
+     * de validar la paginación. El orden se resuelve con la lista blanca
+     * {@link ConsumoRepository#ORDEN} y cae a {@code "producto,asc"} cuando no se informa; los
+     * campos válidos son {@code producto}, {@code materiaPrima}, {@code cantidadTeorica},
+     * {@code cantidadReal} y {@code fechaRegistro}. {@link PageRequest#of} es quien rechaza una
+     * página o un campo inválidos con 400 {@code PARAMETRO_INVALIDO} o
+     * {@code CAMPO_ORDEN_INVALIDO}.
+     *
+     * <p>Cada fila se devuelve con su eficiencia y su desviación calculadas sobre la cantidad
+     * guardada, y {@code fueraDeReceta} derivado de que el teórico sea cero (R-08). El inventario
+     * viaja {@code null} porque el listado no muestra movimientos: el efecto de cada consumo se ve
+     * al registrarlo o al corregirlo.
+     *
+     * @param idPlan identificador del plan cuyos consumos se listan
+     * @param page   página solicitada, desde 0
+     * @param size   tamaño de página, entre 1 y 100
+     * @param sort   orden "campo,direccion"; por defecto {@code "producto,asc"}
+     * @return página de consumos del plan con sus indicadores de comparación
+     * @throws PlanInexistenteException   si el plan no existe (404)
+     * @throws ParametroInvalidoException si la paginación o el campo de orden son inválidos
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<ConsumoResponse> listar(Integer idPlan, int page, int size, String sort) {
+        if (planProduccionRepository.buscarPorId(idPlan).isEmpty()) {
+            throw new PlanInexistenteException(idPlan);
+        }
+
+        var orden = PageRequest.of(page, size, sort, ConsumoRepository.ORDEN,
+                ConsumoRepository.ORDEN_POR_DEFECTO);
+        var filas = consumoRepository.listarPorPlan(idPlan, orden);
+        var total = consumoRepository.contarPorPlan(idPlan);
+
+        var contenido = filas.stream()
+                .map(fila -> aResponse(fila, fila.getCantidadTeorica(), fila.getCantidadReal(),
+                        null))
+                .toList();
+
+        return PageResponse.of(contenido, orden.page(), orden.size(), total);
     }
 
     /**
@@ -304,6 +426,57 @@ public class ConsumoService {
                     "La cantidad real no puede ser negativa.");
         }
         return cantidadReal.setScale(3, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Arma el 409 de stock insuficiente cuando el inventario de la materia prima no existe.
+     *
+     * <p>{@link InventarioService} responde 404 {@code RECURSO_NO_ENCONTRADO} cuando la materia
+     * prima no tiene fila de inventario; para el consumo eso es un stock insuficiente, igual que
+     * cuando el saldo no alcanza.
+     *
+     * @param idMateriaPrima materia prima sin inventario disponible
+     * @return la excepción lista para lanzar
+     */
+    private static ConflictoNegocioException stockInsuficiente(Integer idMateriaPrima) {
+        return new ConflictoNegocioException("STOCK_INSUFICIENTE",
+                "No hay inventario disponible de la materia prima " + idMateriaPrima
+                        + " para corregir el consumo.");
+    }
+
+    /**
+     * Convierte un consumo persistido en la respuesta del contrato.
+     *
+     * <p>Es el punto único de construcción de {@link ConsumoResponse} para el registro, la
+     * corrección y el listado, de modo que las métricas, la materia prima, el producto,
+     * {@code fueraDeReceta} y la fecha se calculen siempre igual. Las cantidades que se muestran
+     * son las que recibe el método: el registro usa las que acaba de calcular y las lecturas, las
+     * que vienen de la base.
+     *
+     * @param consumo         fila leída o recién reinsertada
+     * @param cantidadTeorica cantidad teórica que se muestra
+     * @param cantidadReal    cantidad real que se muestra
+     * @param saldos          saldos del movimiento de inventario, o {@code null} si no hubo
+     * @return la respuesta con eficiencia, desviación, fuera de receta e inventario
+     */
+    private ConsumoResponse aResponse(ConsumoMateriaPrima consumo, BigDecimal cantidadTeorica,
+                                      BigDecimal cantidadReal, SaldosInventario saldos) {
+        var inventario = saldos == null ? null
+                : new InventarioConsumoResponse(saldos.anterior(), saldos.posterior());
+
+        return new ConsumoResponse(
+                consumo.getIdConsumo(),
+                consumo.getIdDetallePlan(),
+                consumo.getNombreProducto(),
+                new MateriaPrimaRefResponse(consumo.getIdMateriaPrima(),
+                        consumo.getNombreMateriaPrima(), consumo.getUnidad()),
+                cantidadTeorica,
+                cantidadReal,
+                calculadoraEficienciaService.eficiencia(cantidadTeorica, cantidadReal),
+                calculadoraEficienciaService.desviacion(cantidadTeorica, cantidadReal),
+                cantidadTeorica.signum() == 0,
+                consumo.getFechaRegistro(),
+                inventario);
     }
 
     /**
