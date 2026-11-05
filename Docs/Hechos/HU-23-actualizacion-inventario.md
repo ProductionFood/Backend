@@ -7,7 +7,7 @@
 | Endpoints | **Ninguno propio (R-01).** Comportamiento transaccional de `POST /api/v1/detalles-plan/{id}/consumos` y `PUT /api/v1/consumos/{id}` (HU-22) más `GET /api/v1/inventario/alertas` (HU-27, reutilizado) |
 | Fecha de implementación | 2026-11-05 |
 | Colección Postman | `Docs/Postman/ProductionFood-HU23.postman_collection.json` (`Preparación`, `Casos (CP-01…CP-23)`, `Roles (matriz)`, `Seguridad (SEC-01…SEC-05)`) |
-| Pull requests | #173 `alertas[]` en POST y PUT · #174 pruebas de integración CA-01…CA-04 · #175 corrección de auditoría y pool (D-01) · PR docs · PR final: pendiente |
+| Pull requests | #173 `alertas[]` en POST y PUT · #174 pruebas de integración CA-01…CA-04 · #175 corrección de auditoría y pool (D-01) · PR docs · PR final #177 |
 | Estado QA | **QA ciego verificado · CP-01…CP-23 y SEC-01…SEC-05 sobre POST consumos, PUT consumos y GET alertas · CP-03, CP-11, CP-12 y CP-20 parciales o no aplicables al contrato (ver QA) · frontend pendiente** |
 
 > Esta ficha documenta las garantías de consistencia del inventario al registrar o corregir un
@@ -180,4 +180,4 @@ La ventana inversa es commit correcto con fallo de la auditoría, que se registr
 - **`detalle` estructurado del `409`** si el frontend lo necesita.
 - **CP-23 (rendimiento)** solo se midió en secuencial y concurrente tras el fix de D-01.
 - **Zona horaria (H-3):** observación no reproducida; vigilar.
-- **PR final a `main`:** pendiente.
+- **PR final a `main`:** #177 (sin mergear).
