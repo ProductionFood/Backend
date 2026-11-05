@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import co.edu.corposucre.productionfood.inventario.InventarioService;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaConDetalle;
 import co.edu.corposucre.productionfood.materiaprima.MateriaPrimaRepository;
 import co.edu.corposucre.productionfood.receta.DetalleReceta;
@@ -43,6 +44,9 @@ class ConsumoServiceTest {
     private RecetaRepository recetaRepository;
     private DetalleRecetaRepository detalleRecetaRepository;
     private MateriaPrimaRepository materiaPrimaRepository;
+    private ConsumoRepository consumoRepository;
+    private PlanProduccionRepository planProduccionRepository;
+    private InventarioService inventarioService;
     private ConsumoService service;
 
     @BeforeEach
@@ -51,8 +55,13 @@ class ConsumoServiceTest {
         recetaRepository = mock(RecetaRepository.class);
         detalleRecetaRepository = mock(DetalleRecetaRepository.class);
         materiaPrimaRepository = mock(MateriaPrimaRepository.class);
+        consumoRepository = mock(ConsumoRepository.class);
+        planProduccionRepository = mock(PlanProduccionRepository.class);
+        inventarioService = mock(InventarioService.class);
         service = new ConsumoService(detallePlanRepository, recetaRepository,
-                detalleRecetaRepository, new CalculadoraConsumoService(), materiaPrimaRepository);
+                detalleRecetaRepository, new CalculadoraConsumoService(), materiaPrimaRepository,
+                consumoRepository, planProduccionRepository, inventarioService,
+                new CalculadoraEficienciaService());
     }
 
     @Test
