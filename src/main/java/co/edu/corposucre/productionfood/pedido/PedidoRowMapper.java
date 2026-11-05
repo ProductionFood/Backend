@@ -32,6 +32,9 @@ public class PedidoRowMapper implements RowMapper<Pedido> {
         pedido.setEstado(EstadoPedido.valueOf(rs.getString("estado")));
         pedido.setNombreCliente(rs.getString("nombre_cliente"));
         pedido.setTotalPedido(aEscala(rs.getBigDecimal("total_pedido")));
+        pedido.setTotalBruto(aEscala(rs.getBigDecimal("total_bruto")));
+        pedido.setDevoluciones(aEscala(rs.getBigDecimal("devoluciones")));
+        pedido.setTotalNeto(aEscala(rs.getBigDecimal("total_neto")));
         pedido.setCantidadItems(rs.getInt("cantidad_items"));
         return pedido;
     }

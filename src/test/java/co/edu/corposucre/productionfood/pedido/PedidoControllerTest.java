@@ -93,6 +93,7 @@ class PedidoControllerTest {
     private static PedidoResponse pedido(int id) {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), "PENDIENTE",
+                new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"),
                 new BigDecimal("0.00"), 0, true);
     }
 
@@ -103,6 +104,7 @@ class PedidoControllerTest {
     private static PedidoResponse pedidoEn(int id, String estado) {
         return new PedidoResponse(id, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
                 LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2), estado,
+                new BigDecimal("120.00"), new BigDecimal("120.00"), new BigDecimal("0.00"),
                 new BigDecimal("120.00"), 3, "PENDIENTE".equals(estado));
     }
 
@@ -218,6 +220,52 @@ class PedidoControllerTest {
                 .andExpect(jsonPath("$.content[0].idPedido").value(41));
 
         verify(pedidoService).listar(null, null, null, null, 0, 20, "fechaEntrega,asc");
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("HU-25: el listado expone totalBruto, devoluciones y totalNeto junto a totalPedido")
+    void listadoExponeLosImportesNuevos() throws Exception {
+        var conImportes = new PedidoResponse(41, new PedidoClienteRefResponse(1, "Panadería La Espiga"),
+                LocalDate.of(2026, 10, 30), null, "ENTREGADO",
+                new BigDecimal("500.00"), new BigDecimal("500.00"), new BigDecimal("120.00"),
+                new BigDecimal("380.00"), 2, false);
+        when(pedidoService.listar(null, null, null, null, 0, 20, null))
+                .thenReturn(PageResponse.of(List.of(conImportes), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/pedidos"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].totalPedido").value(500.00))
+                .andExpect(jsonPath("$.content[0].totalBruto").value(500.00))
+                .andExpect(jsonPath("$.content[0].devoluciones").value(120.00))
+                .andExpect(jsonPath("$.content[0].totalNeto").value(380.00))
+                .andExpect(jsonPath("$.content[0].cantidadItems").value(2));
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("HU-25: sort=total se pasa al servicio")
+    void listadoConSortTotalLoPasaAlServicio() throws Exception {
+        when(pedidoService.listar(null, null, null, null, 0, 20, "total,desc"))
+                .thenReturn(PageResponse.of(List.of(pedido(41)), 0, 20, 1));
+
+        mockMvc.perform(get("/api/v1/pedidos").param("sort", "total,desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].idPedido").value(41));
+
+        verify(pedidoService).listar(null, null, null, null, 0, 20, "total,desc");
+    }
+
+    @Test
+    @WithMockUser(roles = "CONSULTA")
+    @DisplayName("HU-25: un idCliente inexistente en el listado responde 404 CLIENTE_INEXISTENTE")
+    void listadoConClienteInexistenteResponde404() throws Exception {
+        when(pedidoService.listar(9999, null, null, null, 0, 20, null))
+                .thenThrow(new ClienteInexistenteFiltroException(9999));
+
+        mockMvc.perform(get("/api/v1/pedidos").param("idCliente", "9999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CLIENTE_INEXISTENTE"));
     }
 
     @Test
