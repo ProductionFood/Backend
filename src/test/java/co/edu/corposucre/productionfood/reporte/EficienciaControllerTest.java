@@ -77,7 +77,7 @@ class EficienciaControllerTest {
     private static EficienciaResponse reporte() {
         return new EficienciaResponse(
                 new PeriodoResponse(LocalDate.of(2026, 9, 1), null),
-                new ResumenEficienciaResponse(1, 0, new BigDecimal("95.00"),
+                new ResumenEficienciaResponse(1, 0, 2, new BigDecimal("95.00"),
                         new BigDecimal("96.00"), null, 1, null),
                 List.of(plan()),
                 List.of(new SinRecetaResponse("Pan integral", 2,
@@ -96,6 +96,7 @@ class EficienciaControllerTest {
                 .andExpect(jsonPath("$.periodo.hasta").value(nullValue()))
                 .andExpect(jsonPath("$.resumen.planesAnalizados").value(1))
                 .andExpect(jsonPath("$.resumen.planesCancelados").value(0))
+                .andExpect(jsonPath("$.resumen.planesEnProceso").value(2))
                 .andExpect(jsonPath("$.resumen.cumplimientoPromedio").value(95.00))
                 .andExpect(jsonPath("$.resumen.rendimientoPromedio").value(96.00))
                 .andExpect(jsonPath("$.resumen.rendimientoAjustadoPromedio").value(nullValue()))
@@ -125,7 +126,7 @@ class EficienciaControllerTest {
     void periodoSinFechas() throws Exception {
         when(eficienciaService.reporte(null, null)).thenReturn(new EficienciaResponse(
                 new PeriodoResponse(null, null),
-                new ResumenEficienciaResponse(0, 0, null, null, null, 0, null), List.of(),
+                new ResumenEficienciaResponse(0, 0, 0, null, null, null, 0, null), List.of(),
                 List.of()));
 
         mockMvc.perform(get(RUTA))

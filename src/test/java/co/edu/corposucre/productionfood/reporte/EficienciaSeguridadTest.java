@@ -137,7 +137,7 @@ class EficienciaSeguridadTest {
     void matrizDeRoles(String ruta, String rol, boolean permitido) throws Exception {
         when(eficienciaService.reporte(null, null)).thenReturn(new EficienciaResponse(
                 new PeriodoResponse(null, null),
-                new ResumenEficienciaResponse(0, 0, null, null, null, 0, null), List.of(),
+                new ResumenEficienciaResponse(0, 0, 0, null, null, null, 0, null), List.of(),
                 List.of()));
         when(eficienciaService.detallePlan(12)).thenReturn(new EficienciaPlanResponse(12,
                 LocalDate.of(2026, 9, 10), "COMPLETADO", "Ana Gómez", null, null, null,

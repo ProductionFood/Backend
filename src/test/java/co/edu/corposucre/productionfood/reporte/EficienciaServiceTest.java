@@ -37,7 +37,16 @@ class EficienciaServiceTest {
     @BeforeEach
     void preparar() {
         repository = mock(EficienciaRepository.class);
-        service = new EficienciaService(repository, new CalculadoraEficienciaService());
+        service = servicioConUmbral("5.00");
+    }
+
+    private EficienciaService servicioConUmbral(String umbral) {
+        return new EficienciaService(repository, new CalculadoraEficienciaService(), bd(umbral));
+    }
+
+    private static ConsumoEficienciaFila fueraDeReceta(int idPlan, String real) {
+        return new ConsumoEficienciaFila(idPlan, "Aditivo", "kg", null, bd(real), bd("90.00"),
+                bd("90.00"));
     }
 
     private static BigDecimal bd(String valor) {
@@ -155,14 +164,52 @@ class EficienciaServiceTest {
     }
 
     @Test
-    @DisplayName("CP-07 teórica 0: desviación null")
+    @DisplayName("CP-07 teórica 0: desviación, eficiencia y ajustado null")
     void teoricaCero() {
         var p = unicoPlan(List.of(producto(9, "90.00", "90.00")),
                 List.of(consumo(9, "0.000", "2.000")));
 
         var c = p.consumos().get(0);
         assertThat(c.desviacion()).isNull();
-        assertThat(c.eficiencia()).isEqualTo(bd("0.00"));
+        assertThat(c.eficiencia()).isNull();
+        assertThat(c.rendimientoAjustado()).isNull();
+        assertThat(p.rendimiento()).isNull();
+        assertThat(p.rendimientoAjustado()).isNull();
+    }
+
+    @Test
+    @DisplayName("Fuera de receta (teórica nula o 0) no baja el promedio ni el del plan")
+    void fueraDeRecetaNoBajaElPromedio() {
+        siembra(List.of(plan(9, "COMPLETADO")), List.of(producto(9, "90.00", "90.00")),
+                List.of(consumo(9, "10.000", "10.000"), fueraDeReceta(9, "2.000"),
+                        consumo(9, "0.000", "3.000")));
+
+        var respuesta = service.reporte(DESDE, HASTA);
+        var resumen = respuesta.resumen();
+
+        assertThat(resumen.rendimientoPromedio()).isEqualTo(bd("100.00"));
+        assertThat(resumen.rendimientoAjustadoPromedio()).isEqualTo(bd("100.00"));
+        assertThat(respuesta.planes().get(0).rendimiento()).isEqualTo(bd("100.00"));
+        assertThat(respuesta.planes().get(0).rendimientoAjustado()).isEqualTo(bd("100.00"));
+        var nulo = respuesta.planes().get(0).consumos().get(1);
+        assertThat(nulo.teorica()).isNull();
+        assertThat(nulo.desviacion()).isNull();
+        assertThat(nulo.eficiencia()).isNull();
+        assertThat(nulo.rendimientoAjustado()).isNull();
+    }
+
+    @Test
+    @DisplayName("Fuera de receta cuenta como registro sin rendimiento, junto con real 0")
+    void fueraDeRecetaCuentaSinRendimiento() {
+        siembra(List.of(plan(9, "COMPLETADO")), List.of(producto(9, "90.00", "90.00")),
+                List.of(consumo(9, "10.000", "10.000"), fueraDeReceta(9, "2.000"),
+                        consumo(9, "15.000", "0.000"), fueraDeReceta(9, "0.000")));
+
+        var resumen = service.reporte(DESDE, HASTA).resumen();
+
+        // el último es fuera de receta con real 0: cuenta una sola vez
+        assertThat(resumen.registrosSinRendimiento()).isEqualTo(3);
+        assertThat(resumen.rendimientoPromedio()).isEqualTo(bd("100.00"));
     }
 
     @Test
@@ -266,6 +313,7 @@ class EficienciaServiceTest {
 
         assertThat(resumen.planesAnalizados()).isEqualTo(1);
         assertThat(resumen.planesCancelados()).isEqualTo(2);
+        assertThat(resumen.planesEnProceso()).isZero();
         assertThat(resumen.cumplimientoPromedio()).isEqualTo(bd("100.00"));
         assertThat(resumen.rendimientoPromedio()).isEqualTo(bd("100.00"));
         assertThat(resumen.registrosSinRendimiento()).isZero();
@@ -275,9 +323,79 @@ class EficienciaServiceTest {
     }
 
     @Test
+    @DisplayName("Los planes EN_PROCESO se listan y cuentan aparte, fuera de todos los promedios")
+    void enProcesoFueraDeLosPromedios() {
+        siembra(List.of(plan(1, "COMPLETADO"), plan(2, "EN_PROCESO"), plan(3, "CANCELADO")),
+                List.of(producto(1, "30.00", "30.00"), producto(2, "30.00", "0.00"),
+                        producto(3, "30.00", "0.00")),
+                List.of(consumo(1, "10.000", "10.000"), consumo(2, "10.000", "20.000"),
+                        consumo(2, "10.000", "0.000"), consumo(3, "10.000", "20.000")));
+
+        var respuesta = service.reporte(DESDE, HASTA);
+        var resumen = respuesta.resumen();
+
+        assertThat(resumen.planesAnalizados()).isEqualTo(1);
+        assertThat(resumen.planesEnProceso()).isEqualTo(1);
+        assertThat(resumen.planesCancelados()).isEqualTo(1);
+        assertThat(resumen.cumplimientoPromedio()).isEqualTo(bd("100.00"));
+        assertThat(resumen.rendimientoPromedio()).isEqualTo(bd("100.00"));
+        assertThat(resumen.rendimientoAjustadoPromedio()).isEqualTo(bd("100.00"));
+        assertThat(resumen.registrosSinRendimiento()).isZero();
+        assertThat(respuesta.planes()).hasSize(3);
+        assertThat(respuesta.planes().get(1).estado()).isEqualTo("EN_PROCESO");
+        assertThat(respuesta.planes().get(1).cumplimiento()).isEqualTo(bd("0.00"));
+        assertThat(respuesta.planes().get(1).consumos()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("Solo planes EN_PROCESO: analizados 0 y promedios null")
+    void soloEnProceso() {
+        siembra(List.of(plan(2, "EN_PROCESO")), List.of(producto(2, "30.00", "10.00")),
+                List.of(consumo(2, "10.000", "10.000")));
+
+        var resumen = service.reporte(DESDE, HASTA).resumen();
+
+        assertThat(resumen.planesAnalizados()).isZero();
+        assertThat(resumen.planesEnProceso()).isEqualTo(1);
+        assertThat(resumen.cumplimientoPromedio()).isNull();
+        assertThat(resumen.rendimientoPromedio()).isNull();
+        assertThat(resumen.rendimientoAjustadoPromedio()).isNull();
+    }
+
+    @Test
+    @DisplayName("Umbral configurable: con 10, un 7% es NORMAL; los bordes +-10.00 son inclusivos")
+    void umbralConfigurable() {
+        var servicio = servicioConUmbral("10");
+        when(repository.materiasPrimasAcumuladas(DESDE, HASTA)).thenReturn(List.of(
+                acumulada("A", "100.000", "107.000"), acumulada("B", "100.000", "110.000"),
+                acumulada("C", "100.000", "110.010"), acumulada("D", "100.000", "90.000"),
+                acumulada("E", "100.000", "89.990")));
+
+        var lista = servicio.materiasPrimas(DESDE, HASTA);
+
+        assertThat(lista).extracting("materiaPrima", "tendencia").containsExactlyInAnyOrder(
+                org.assertj.core.groups.Tuple.tuple("A", "NORMAL"),
+                org.assertj.core.groups.Tuple.tuple("B", "NORMAL"),
+                org.assertj.core.groups.Tuple.tuple("C", "CONSUMO_EXCESIVO"),
+                org.assertj.core.groups.Tuple.tuple("D", "NORMAL"),
+                org.assertj.core.groups.Tuple.tuple("E", "CONSUMO_REDUCIDO"));
+    }
+
+    @Test
+    @DisplayName("Con el umbral por defecto (5.00) el mismo 7% es CONSUMO_EXCESIVO")
+    void umbralPorDefecto() {
+        assertThat(EficienciaService.UMBRAL_TENDENCIA).isEqualByComparingTo("5.00");
+        when(repository.materiasPrimasAcumuladas(DESDE, HASTA))
+                .thenReturn(List.of(acumulada("A", "100.000", "107.000")));
+
+        assertThat(service.materiasPrimas(DESDE, HASTA).get(0).tendencia())
+                .isEqualTo("CONSUMO_EXCESIVO");
+    }
+
+    @Test
     @DisplayName("El resumen promedia el cumplimiento de los planes, no el de los productos")
     void cumplimientoPromedioPorPlan() {
-        siembra(List.of(plan(1, "COMPLETADO"), plan(2, "EN_PROCESO")),
+        siembra(List.of(plan(1, "COMPLETADO"), plan(2, "COMPLETADO")),
                 List.of(producto(1, "30.00", "30.00"), producto(2, "90.00", "60.00"),
                         producto(2, "10.00", "10.00")),
                 List.of());
