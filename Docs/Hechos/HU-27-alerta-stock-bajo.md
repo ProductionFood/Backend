@@ -7,7 +7,7 @@
 | Endpoints | `GET /api/v1/inventario/alertas`, `GET /api/v1/inventario/alertas/resumen`, `GET /api/v1/inventario/alertas/sugerencia-compra` |
 | Colección Postman | `Docs/Postman/ProductionFood-HU27.postman_collection.json` (`Preparación`, `Alertas (CP-01…CP-26)`, `Roles (matriz)`, `Seguridad (SEC-01…SEC-05)`) |
 | Pull requests | #156 repositorio y servicio · #157 sugerencia de compra · #158 controlador · #159 corrección D-02 |
-| Estado QA | **QA ciego verificado · CP-01…CP-26 y SEC-01…SEC-05 pasan, salvo CP-21 y CP-22 (dependen de HU-24 y de HU-22/23, aún no en main) · frontend pendiente** |
+| Estado QA | **QA ciego verificado · CP-01…CP-26 y SEC-01…SEC-05 pasan, salvo CP-21 (depende del dashboard de HU-24, aún inexistente) · frontend pendiente** |
 
 > Esta ficha documenta las alertas de stock bajo: qué materias primas están en o bajo su mínimo,
 > cuánto falta, cuánto costaría reponerlo y una sugerencia de compra agrupada por proveedor. El
@@ -20,7 +20,7 @@
 
 | Método | Ruta | Roles | Códigos | Descripción |
 |---|---|---|---|---|
-| GET | `/api/v1/inventario/alertas?incluirInactivas=false` | ADMIN, PRODUCCION, COMPRAS, CONSULTA | 200/400/401/403 | Materias primas con `cantidadDisponible <= stockMinimo`, con faltante, nivel y costo de reposición; `generadoEn`, `resumen` y `costoReposicionTotal` |
+| GET | `/api/v1/inventario/alertas?incluirInactivas=false` | ADMIN, PRODUCCION, COMPRAS, CONSULTA | 200/400/401/403 | Materias primas con `cantidadDisponible < stockMinimo` o agotadas, con faltante, nivel y costo de reposición; `generadoEn`, `resumen` y `costoReposicionTotal` |
 | GET | `/api/v1/inventario/alertas/resumen` | Cualquier rol autenticado | 200/401 | Contadores `{total, agotadas, bajas}` para el indicador global; solo materias primas activas |
 | GET | `/api/v1/inventario/alertas/sugerencia-compra` | ADMIN, COMPRAS | 200/401/403 | Arreglo de grupos por proveedor con cantidad sugerida y costo estimado |
 
@@ -46,7 +46,7 @@ primas y compras. Esta historia solo escribe código sobre el esquema vigente.
 
 ## Reglas de negocio implementadas
 
-- **R-01 · una materia prima está en alerta cuando `cantidadDisponible <= stockMinimo`.** Si no
+- **R-01 · una materia prima está en alerta cuando `cantidadDisponible < stockMinimo` (estricto, R-02 de la spec) o está en cero.** Si no
   tiene fila de inventario, se trata como cantidad cero. Con mínimo cero solo entra la que está
   en cero.
 - **R-02 · nivel `AGOTADO` cuando la cantidad es cero y `BAJO` cuando es mayor que cero pero no
@@ -176,10 +176,15 @@ de roles y seguridad.
 - **CP-20 (sin alertas):** ejecutado en un esquema MySQL aislado y vacío (`pf_hu27_qa`, ya
   eliminado) con la API en `:8086`: `/alertas` responde `200` con `items: []`, `total: 0` y
   `costoReposicionTotal: 0.00`; `/resumen` `{0,0,0}` y `/sugerencia-compra` `[]`. **Pasa.**
-- **CP-21 y CP-22:** no ejecutables hoy. CP-21 exige el dashboard de HU-24 y CP-22 el consumo de
-  HU-22/23, que no están en `main`. Lo verificado: la API coincide con la vista de la base y una
-  baja de inventario por SQL aparece de inmediato (sin caché). Quedan pendientes de reejecutar
-  cuando esas historias estén mergeadas.
+- **CP-22 (coherencia tras un consumo):** ejecutado de punta a punta con HU-22 sobre un esquema
+  MySQL aislado (ya eliminado): un consumo que deja la materia prima bajo el mínimo la hace
+  aparecer de inmediato como `BAJO` con el faltante correcto y sube `/resumen`; un segundo consumo
+  la pasa a `AGOTADO` y primera de la lista; corregir el consumo a la baja la saca de alertas, y
+  con disponible igual al mínimo no hay alerta. **Pasa**, sin caché ni retraso.
+- **CP-21 (coherencia con el dashboard):** no ejecutable: HU-24 no existe aún. Lo verificado: la
+  API coincide con la vista de la base. Reejecutar cuando HU-24 esté mergeada.
+- **Observación:** `generadoEn` sale en hora local y `ultimaActualizacion` en la hora de la base
+  (5 h de diferencia); no se corrige aquí por ser transversal.
 - **SEC-03 y SEC-05:** el QA los reportó parcial y fallido, pero se reprodujeron a mano contra
   la API y **pasan**: un token vencido responde `401 NO_AUTENTICADO` y un usuario desactivado con
   token vigente responde `403 USUARIO_INACTIVO` en los tres endpoints. El hallazgo D-01 del QA
