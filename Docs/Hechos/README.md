@@ -78,13 +78,20 @@ Defectos menores aceptados al cerrar, o "ninguno".
 | HU-20 | Planes de producción | 2026-11-05 · [`HU-20-planes-produccion.md`](HU-20-planes-produccion.md) |
 | HU-21 | Productos del plan de producción | 2026-11-05 · [`HU-21-detalle-plan-produccion.md`](HU-21-detalle-plan-produccion.md) |
 | HU-22 | Consumo de materia prima | 2026-11-05 · [`HU-22-consumo-materia-prima.md`](HU-22-consumo-materia-prima.md) |
+| HU-23 | Actualización automática de inventario | 2026-11-05 · [`HU-23-actualizacion-inventario.md`](HU-23-actualizacion-inventario.md) |
 | HU-24 | Dashboard resumen | 2026-11-05 · [`HU-24-dashboard-resumen.md`](HU-24-dashboard-resumen.md) |
 | HU-25 | Consulta de pedidos | 2026-11-05 · [`HU-25-consulta-pedidos.md`](HU-25-consulta-pedidos.md) |
+| HU-27 | Alerta de stock bajo | 2026-11-05 · [`HU-27-alerta-stock-bajo.md`](HU-27-alerta-stock-bajo.md) |
 
 > HU-20, HU-21 y HU-22 quedaron verificadas con QA ciego el 2026-11-05. HU-20 y HU-21 pasaron
 > CP-01…CP-23, SEC-01…05 en sus endpoints y la matriz de roles. HU-22 pasó CP-01…CP-24,
 > SEC-01…05 en los cuatro endpoints, la matriz de roles 20/20 y las verificaciones SQL. El
 > consumo desde el frontend sigue pendiente.
+>
+> HU-23 (sin endpoints propios) y HU-27 también quedaron verificadas con QA ciego el 2026-11-05.
+> HU-23 pasó CP-01…CP-23 y SEC-01…05 sobre `POST` y `PUT` de consumos y `GET /inventario/alertas`,
+> con CP-03, CP-11, CP-12 y CP-20 parciales o no aplicables al contrato, y su QA destapó D-01
+> (auditoría y pool de conexiones), corregido. HU-27 pasó CP-01…CP-26 y SEC-01…05.
 >
 > HU-09 quedó verificada en caliente contra MySQL el 2026-10-23 (CP-01…CP-20 y SEC-01…05).
 > El consumo desde el frontend sigue pendiente, igual que en las HUs anteriores.

@@ -62,5 +62,7 @@ Docs/
 | HU-20 Planes de producción | Entregada 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC; frontend pendiente) |
 | HU-21 Productos del plan de producción | Entregada 2026-11-05 (QA ciego 23/23 CP y 25/25 SEC; frontend pendiente) |
 | HU-22 Consumo de materia prima | Entregada 2026-11-05 (QA ciego 24/24 CP, 20/20 SEC y roles 20/20; frontend pendiente) |
+| HU-23 Actualización automática de inventario | Entregada 2026-11-05 (sin endpoints propios; QA ciego CP-01…CP-23 y SEC-01…05 en los 3 endpoints, con 4 casos parciales y corrección de pool/auditoría D-01; frontend pendiente) |
 | HU-24 Dashboard resumen | Entregada 2026-11-05 (QA ciego CP-01…CP-21 y SEC-01…05 en los 3 endpoints, con corrección de zona horaria D-01; frontend pendiente) |
 | HU-25 Consulta de pedidos | Entregada 2026-11-05 (QA ciego 25/25 CP y SEC-01…05 con 2 reservas; frontend pendiente) |
+| HU-27 Alerta de stock bajo | Entregada 2026-11-05 (QA ciego CP-01…CP-26 y SEC-01…05; frontend pendiente) |
