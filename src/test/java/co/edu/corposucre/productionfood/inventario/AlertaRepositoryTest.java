@@ -43,6 +43,8 @@ class AlertaRepositoryTest {
     private String sufijo;
     private Integer idUnidad;
     private final List<Integer> idsMateriaPrima = new ArrayList<>();
+    private final List<Integer> idsProveedor = new ArrayList<>();
+    private final List<Integer> idsCompra = new ArrayList<>();
 
     private static String entorno(String nombre, String defecto) {
         String valor = System.getenv(nombre);
@@ -81,6 +83,16 @@ class AlertaRepositoryTest {
 
     @AfterEach
     void tearDown() {
+        if (!idsCompra.isEmpty()) {
+            jdbc.update("DELETE FROM detalle_compra WHERE id_compra IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsCompra));
+            jdbc.update("DELETE FROM compras WHERE id_compra IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsCompra));
+        }
+        if (!idsProveedor.isEmpty()) {
+            jdbc.update("DELETE FROM proveedores WHERE id_proveedor IN (:ids)",
+                    new MapSqlParameterSource().addValue("ids", idsProveedor));
+        }
         if (!idsMateriaPrima.isEmpty()) {
             jdbc.update("DELETE FROM inventario WHERE id_materia_prima IN (:ids)",
                     new MapSqlParameterSource().addValue("ids", idsMateriaPrima));
@@ -202,6 +214,117 @@ class AlertaRepositoryTest {
         assertThat(despues.agotadas()).isEqualTo(antes.agotadas() + 1);
         assertThat(despues.bajas()).isEqualTo(antes.bajas() + 2);
         assertThat(despues.total()).isEqualTo(antes.total() + 3);
+    }
+
+    @Test
+    @DisplayName("R-06: el proveedor es el de la última compra RECIBIDA por fecha")
+    void proveedorDeLaUltimaCompraRecibida() {
+        var mp = sembrar("harina", "50.00", "46.30", true);
+        var viejo = sembrarProveedor("viejo");
+        var reciente = sembrarProveedor("reciente");
+        sembrarCompra(viejo, "RECIBIDA", "2026-01-10", mp);
+        sembrarCompra(reciente, "RECIBIDA", "2026-03-05", mp);
+
+        assertThat(sugerencias()).singleElement().satisfies(s -> {
+            assertThat(s.idProveedor()).isEqualTo(reciente);
+            assertThat(s.nombreProveedor()).isEqualTo("Proveedor reciente " + sufijo);
+            assertThat(s.alerta().idMateriaPrima()).isEqualTo(mp);
+        });
+    }
+
+    @Test
+    @DisplayName("R-06: con la misma fecha desempata la compra de mayor id")
+    void empateDeFechaLoDesempataElMayorId() {
+        var mp = sembrar("harina", "50.00", "46.30", true);
+        var primero = sembrarProveedor("primero");
+        var segundo = sembrarProveedor("segundo");
+        sembrarCompra(primero, "RECIBIDA", "2026-03-05", mp);
+        sembrarCompra(segundo, "RECIBIDA", "2026-03-05", mp);
+
+        assertThat(sugerencias()).singleElement()
+                .extracting(SugerenciaFila::idProveedor).isEqualTo(segundo);
+    }
+
+    @Test
+    @DisplayName("R-06: las compras PENDIENTE o CANCELADA no cuentan aunque sean más recientes")
+    void comprasEnOtroEstadoSeIgnoran() {
+        var mp = sembrar("harina", "50.00", "46.30", true);
+        var recibida = sembrarProveedor("recibida");
+        var pendiente = sembrarProveedor("pendiente");
+        var cancelada = sembrarProveedor("cancelada");
+        sembrarCompra(recibida, "RECIBIDA", "2026-01-10", mp);
+        sembrarCompra(pendiente, "PENDIENTE", "2026-05-01", mp);
+        sembrarCompra(cancelada, "CANCELADA", "2026-06-01", mp);
+
+        assertThat(sugerencias()).singleElement()
+                .extracting(SugerenciaFila::idProveedor).isEqualTo(recibida);
+    }
+
+    @Test
+    @DisplayName("R-06: solo cuentan las compras que contienen esa materia prima")
+    void soloComprasConLaMateriaPrima() {
+        var mp = sembrar("harina", "50.00", "46.30", true);
+        var otra = sembrar("azucar", "50.00", "50.00", true);
+        var conHarina = sembrarProveedor("con-harina");
+        var conAzucar = sembrarProveedor("con-azucar");
+        sembrarCompra(conHarina, "RECIBIDA", "2026-01-10", mp);
+        sembrarCompra(conAzucar, "RECIBIDA", "2026-06-01", otra);
+
+        assertThat(sugerencias()).singleElement()
+                .extracting(SugerenciaFila::idProveedor).isEqualTo(conHarina);
+    }
+
+    @Test
+    @DisplayName("Sin compras recibidas la materia prima sale sin proveedor")
+    void sinComprasNoTieneProveedor() {
+        var mp = sembrar("nueva", "50.00", "10.00", true);
+        var pendiente = sembrarProveedor("pendiente");
+        sembrarCompra(pendiente, "PENDIENTE", "2026-05-01", mp);
+
+        assertThat(sugerencias()).singleElement().satisfies(s -> {
+            assertThat(s.alerta().idMateriaPrima()).isEqualTo(mp);
+            assertThat(s.idProveedor()).isNull();
+            assertThat(s.nombreProveedor()).isNull();
+        });
+    }
+
+    @Test
+    @DisplayName("La sugerencia excluye inactivas y mantiene el orden de urgencia de las alertas")
+    void excluyeInactivasYOrdenaPorUrgencia() {
+        var bajo = sembrar("bajo", "100.00", "40.00", true);
+        var agotado = sembrar("agotado", "2.00", "0.00", true);
+        sembrar("inactiva", "500.00", "0.00", false);
+
+        assertThat(sugerencias()).extracting(s -> s.alerta().idMateriaPrima())
+                .containsExactly(agotado, bajo);
+    }
+
+    private List<SugerenciaFila> sugerencias() {
+        return repository.sugerenciaCompra().stream()
+                .filter(s -> s.alerta().nombre().endsWith(sufijo))
+                .toList();
+    }
+
+    private Integer sembrarProveedor(String etiqueta) {
+        var id = insertarConId("INSERT INTO proveedores (nombre) VALUES (:nombre)",
+                new MapSqlParameterSource().addValue("nombre", "Proveedor " + etiqueta + " " + sufijo));
+        idsProveedor.add(id);
+        return id;
+    }
+
+    private void sembrarCompra(Integer idProveedor, String estado, String fecha, Integer idMateriaPrima) {
+        var idCompra = insertarConId("""
+                INSERT INTO compras (id_proveedor, fecha, estado)
+                VALUES (:proveedor, :fecha, :estado)
+                """, new MapSqlParameterSource().addValue("proveedor", idProveedor)
+                        .addValue("fecha", java.sql.Date.valueOf(fecha))
+                        .addValue("estado", estado));
+        idsCompra.add(idCompra);
+        jdbc.update("""
+                INSERT INTO detalle_compra (id_compra, id_materia_prima, cantidad, precio_unitario)
+                VALUES (:compra, :mp, 10.00, 100.00)
+                """, new MapSqlParameterSource().addValue("compra", idCompra)
+                        .addValue("mp", idMateriaPrima));
     }
 
     private List<AlertaStockFila> propias(boolean incluirInactivas) {

@@ -59,4 +59,33 @@ public class AlertaRepository {
                 (rs, fila) -> new ResumenAlertasResponse(
                         rs.getLong("total"), rs.getLong("agotadas"), rs.getLong("bajas")));
     }
+
+    /**
+     * Para cada materia prima activa en alerta, el proveedor de su última compra {@code RECIBIDA}
+     * que la incluya (R-06): la de fecha más reciente y, a igual fecha, la de mayor id. Si nunca
+     * se recibió, {@code idProveedor} y {@code nombreProveedor} salen nulos. Conserva el orden de
+     * urgencia de {@link #listarAlertas(boolean)}.
+     */
+    public List<SugerenciaFila> sugerenciaCompra() {
+        return jdbc.query("""
+                SELECT v.id_materia_prima, v.nombre, v.unidad, v.cantidad_disponible,
+                       v.stock_minimo, v.faltante, v.estado_stock, v.costo_unitario,
+                       v.fecha_actualizacion, p.id_proveedor, p.nombre AS nombre_proveedor
+                FROM v_inventario_materia_prima v
+                LEFT JOIN proveedores p ON p.id_proveedor = (
+                    SELECT c.id_proveedor
+                    FROM compras c
+                    JOIN detalle_compra d ON d.id_compra = c.id_compra
+                    WHERE c.estado = 'RECIBIDA' AND d.id_materia_prima = v.id_materia_prima
+                    ORDER BY c.fecha DESC, c.id_compra DESC
+                    LIMIT 1)
+                WHERE v.estado_stock IN ('BAJO', 'AGOTADO') AND v.estado = 1
+                ORDER BY FIELD(v.estado_stock, 'AGOTADO', 'BAJO'), v.faltante DESC
+                """,
+                new MapSqlParameterSource(),
+                (rs, fila) -> new SugerenciaFila(
+                        new AlertaStockRowMapper().mapRow(rs, fila),
+                        rs.getObject("id_proveedor", Integer.class),
+                        rs.getString("nombre_proveedor")));
+    }
 }
