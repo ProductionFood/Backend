@@ -25,6 +25,11 @@ sudo rm -rf "$FUENTE"; sudo mkdir -p "$FUENTE"; sudo chown "$USER" "$FUENTE"
 git clone --depth 1 -b "$RAMA_FRONT" "$REPO_FRONT" "$FUENTE"
 cd "$FUENTE/productionfood-frontend"
 
+# El angular.json del frontend no tiene fileReplacements: la compilacion "production" usa
+# environment.ts (apiUrl de desarrollo, con localhost). Aqui se fuerza la URL relativa solo en la
+# copia desplegada, sin tocar el repositorio del frontend.
+sed -i "s#apiUrl:.*#apiUrl: '/api/v1'#" src/environments/environment.ts
+
 echo "==> Compilando (unos minutos; la instancia tiene 1 GB de RAM y usa swap)"
 npm ci --no-audit --no-fund
 NODE_OPTIONS=--max-old-space-size=1536 npx ng build --configuration production
