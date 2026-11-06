@@ -26,7 +26,7 @@ if ! swapon --show | grep -q swapfile; then
 fi
 
 echo "==> Comprobando la base"
-MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_HOST" -u "$USUARIO_DB" --ssl-mode=REQUIRED -e "SELECT VERSION(), @@time_zone;" "$BASE"
+MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_HOST" -u "$USUARIO_DB" --ssl -e "SELECT VERSION(), @@time_zone;" "$BASE"
 
 echo "==> Codigo (${RAMA})"
 sudo rm -rf "$DESTINO"; sudo mkdir -p "$DESTINO"; sudo chown "$USER" "$DESTINO"
@@ -73,9 +73,9 @@ curl -s -o /dev/null -w "health: %{http_code}\n" http://localhost:8080/v3/api-do
 
 if [ -f scripts/seed/seed_datos.sql ] && [ "${CARGAR_SEED:-1}" = "1" ]; then
   echo "==> Seed de datos"
-  clientes="$(MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_HOST" -u "$USUARIO_DB" --ssl-mode=REQUIRED -N -e "SELECT COUNT(*) FROM clientes" "$BASE")"
+  clientes="$(MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_HOST" -u "$USUARIO_DB" --ssl -N -e "SELECT COUNT(*) FROM clientes" "$BASE")"
   if [ "$clientes" = "0" ]; then
-    MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_HOST" -u "$USUARIO_DB" --ssl-mode=REQUIRED --default-character-set=utf8mb4 "$BASE" < scripts/seed/seed_datos.sql
+    MYSQL_PWD="$DB_PASSWORD" mysql -h "$DB_HOST" -u "$USUARIO_DB" --ssl --default-character-set=utf8mb4 "$BASE" < scripts/seed/seed_datos.sql
     echo "Seed cargado."
   else
     echo "La base ya tiene ${clientes} clientes; no se carga la seed."
