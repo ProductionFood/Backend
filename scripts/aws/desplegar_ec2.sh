@@ -19,7 +19,7 @@ read -r -s -p "Contrasena de la base (${USUARIO_DB}): " DB_PASSWORD; echo
 
 echo "==> Paquetes"
 sudo dnf install -y git maven java-25-amazon-corretto-devel mariadb105 >/dev/null
-sudo alternatives --set java /usr/lib/jvm/java-25-amazon-corretto/bin/java; export JAVA_HOME=/usr/lib/jvm/java-25-amazon-corretto
+sudo alternatives --set java /usr/lib/jvm/java-25-amazon-corretto.x86_64/bin/java; export JAVA_HOME=/usr/lib/jvm/java-25-amazon-corretto.x86_64
 
 if ! swapon --show | grep -q swapfile; then
   echo "==> Swap de 2 GB (la instancia gratuita tiene 1 GB de RAM)"
